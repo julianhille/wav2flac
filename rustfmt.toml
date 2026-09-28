@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: 0BSD
+# Stable rustfmt silently leaves lines it cannot wrap (long strings, comments,
+# macros) over the limit; scripts/check-line-width.sh catches those in CI.
+edition = "2021"
+max_width = 100

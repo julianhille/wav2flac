@@ -8,6 +8,10 @@ on:
   workflow_dispatch:
   # The release workflow runs the whole suite on the tag before publishing.
   workflow_call:
+  # Nightly: the full test tier (larger matrices, more property runs, random
+  # fast-check seeds) on main.
+  schedule:
+    - cron: '23 3 * * *'
 
 permissions: {}
 
@@ -17,13 +21,84 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  WAV2FLAC_TEST_TIER: ${{ startsWith(github.ref, 'refs/tags/v') && 'full' || 'quick' }}
+  WAV2FLAC_TEST_TIER: >-
+    ${{ (github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')) && 'full' || 'quick' }}
   WAV2FLAC_REQUIRE_TOOLS: '1'
 
 jobs:
+  fmt:
+    name: Rust formatting and lints
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo fmt --all -- --check
+      # Stable rustfmt skips lines it cannot wrap without reporting them.
+      - name: Line width (max_width from rustfmt.toml)
+        run: scripts/check-line-width.sh
+      - name: Clippy (native, all targets)
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Clippy (wasm32)
+        run: cargo clippy --lib --target wasm32-unknown-unknown --locked -- -D warnings
+
+  deny:
+    name: Dependency licenses and advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+
+  msrv:
+    name: Rust ${{ matrix.target }} on the MSRV (Cargo.toml rust-version)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [native, wasm32]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain (rust-version from Cargo.toml)
+        id: msrv
+        run: |
+          v=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          rustup toolchain install "$v" --profile minimal --target wasm32-unknown-unknown
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: msrv-${{ matrix.target }}
+      # `+version` overrides rust-toolchain.toml.
+      - name: Test (native)
+        if: matrix.target == 'native'
+        run: cargo +${{ steps.msrv.outputs.version }} test --locked --lib --tests
+        env:
+          WAV2FLAC_REQUIRE_TOOLS: '0'
+      - name: Build (wasm32)
+        if: matrix.target == 'wasm32'
+        run: cargo +${{ steps.msrv.outputs.version }} build --locked --lib --target wasm32-unknown-unknown
+
   rust:
     name: Rust tests
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ (github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')) && 180 || 30 }}
     permissions:
       contents: read
     steps:
@@ -40,6 +115,7 @@ jobs:
   js:
     name: JS tests (Node ${{ matrix.node }})
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ (github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')) && 180 || 30 }}
     permissions:
       contents: read
     strategy:
@@ -68,6 +144,10 @@ jobs:
         run: cargo build --release --locked --example encode
       - name: Unit tests with coverage
         run: npm run coverage
+      - name: Package tests (built ESM/CJS, worker, consumer types)
+        run: npm run test:pkg
+      - name: Package lint (publint, attw)
+        run: npm run lint:pkg
       - name: Upload coverage
         if: matrix.node == 22
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -75,6 +155,39 @@ jobs:
           name: coverage-js
           path: coverage/js
           retention-days: 14
+
+  node-min:
+    name: Package on the minimum Node (package.json engines)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The build scripts are TypeScript run by Node ≥ 22.18; the package itself
+      # promises `engines.node`, so build on a current Node and test on the minimum.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: wasm-bindgen + binaryen
+        run: scripts/ci-tools.sh
+      - run: npm ci
+      - run: npm run build
+      - name: Minimum Node from package.json engines
+        id: engines
+        run: echo "version=$(node -p "require('./package.json').engines.node.replace(/^>=\s*/, '')")" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.engines.outputs.version }}
+      - run: node --version
+      - name: Package tests (built ESM/CJS, worker, consumer types)
+        run: npm run test:pkg
 
   reproducible:
     name: Reproducible package build
