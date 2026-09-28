@@ -4,7 +4,7 @@
  * CI scripts: input presets, configuration, result shapes and statistics.
  * @module
  */
-import type { Options } from '../ts/index.js';
+import type { Options, PcmFormat, PcmSampleFormat } from '../ts/index.js';
 import { makeWav } from '../tests/helpers/wav.ts';
 
 /** A generated benchmark input. */
@@ -37,6 +37,23 @@ export const PRESETS: readonly Preset[] = [
 /** Optional transcoding applied during the benchmark. */
 export type Transcode = 'none' | 'resample-48k' | 'to-16bit';
 
+/**
+ * What is handed to the encoder.
+ * - `wav`: the WAV file (`Uint8Array`).
+ * - `pcm-int`: its samples as raw integer PCM: `Int16Array` / `Int32Array`,
+ *   or bytes with `pcm.format` for 8- and 24-bit.
+ * - `pcm-f32`: its samples as a `Float32Array` (what Web Audio delivers),
+ *   converted back to the source bit depth.
+ */
+export type InputKind = 'wav' | 'pcm-int' | 'pcm-f32';
+
+/** Human-readable input kinds. */
+export const INPUT_LABEL: Readonly<Record<InputKind, string>> = {
+  'wav': 'WAV file',
+  'pcm-int': 'raw PCM, integer',
+  'pcm-f32': 'raw PCM, Float32Array',
+};
+
 /** How the encoder runs. */
 export type Mode =
   /** `encode()` on the calling thread; yields between chunks. */
@@ -64,6 +81,8 @@ export interface BenchConfig {
   preset: string;
   /** Compression level 0–8. */
   level: number;
+  /** WAV file or raw PCM samples. */
+  input: InputKind;
   /** `buffer` = `encode()`, `stream` = `encodeStream()` (not for `sync`). */
   output: 'buffer' | 'stream';
   /** Optional transcoding. */
@@ -79,6 +98,7 @@ export const DEFAULT_CONFIG: BenchConfig = {
   runs: 5,
   preset: 'song',
   level: 5,
+  input: 'wav',
   output: 'buffer',
   transcode: 'none',
   modes: ['main', 'sync', 'worker'],
@@ -158,13 +178,110 @@ export function presetWav(p: Preset): Uint8Array<ArrayBuffer> {
   return makeWav({ frames: p.seconds * p.rate, rate: p.rate, channels: p.channels, bits: p.bits, signal: 'music', seed: 7 });
 }
 
+/** The encoder input derived from a WAV for an {@link InputKind}. */
+export interface EncoderInput {
+  /** What is passed to `encode()`. */
+  data: Uint8Array<ArrayBuffer> | Int16Array<ArrayBuffer> | Int32Array<ArrayBuffer> | Float32Array<ArrayBuffer>;
+  /** The `pcm` option, for raw PCM. */
+  pcm?: Required<PcmFormat>;
+  /** Target bit depth the input needs (float or 32-bit input), unless transcoding sets one. */
+  bits?: number;
+}
+
+/**
+ * Finds a RIFF chunk of a WAV.
+ * @param wav WAV bytes.
+ * @param id Chunk id.
+ * @returns Offset and length of the chunk body.
+ * @throws {Error} If it is missing.
+ */
+function chunk(wav: Uint8Array, id: string): { offset: number; length: number } {
+  const v = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  for (let o = 12; o + 8 <= wav.length;) {
+    const name = String.fromCharCode(...wav.subarray(o, o + 4));
+    const length = v.getUint32(o + 4, true);
+    if (name === id) return { offset: o + 8, length: Math.min(length, wav.length - o - 8) };
+    o += 8 + length + (length & 1);
+  }
+  throw new Error(`WAV has no ${id} chunk`);
+}
+
+/**
+ * Reads the `fmt ` chunk of a WAV.
+ * @param wav WAV bytes.
+ * @returns Format tag (the subformat for WAVE_FORMAT_EXTENSIBLE), channels, rate and bits.
+ * @throws {Error} If there is no `fmt ` chunk.
+ */
+function wavFormat(wav: Uint8Array): { tag: number; channels: number; sampleRate: number; bits: number } {
+  const fmt = chunk(wav, 'fmt ');
+  const f = new DataView(wav.buffer, wav.byteOffset + fmt.offset, fmt.length);
+  let tag = f.getUint16(0, true);
+  if (tag === 0xfffe && fmt.length >= 26) tag = f.getUint16(24, true);
+  return { tag, channels: f.getUint16(2, true), sampleRate: f.getUint32(4, true), bits: f.getUint16(14, true) };
+}
+
+/**
+ * Turns a WAV into the encoder input for an {@link InputKind}. Done before
+ * timing: it stands for samples the caller already has in memory.
+ * @param wav WAV bytes (plain PCM or float, not WAVE_FORMAT_EXTENSIBLE-only layouts).
+ * @param kind Input kind.
+ * @returns The input.
+ * @throws {Error} For WAVs that can't be expressed as raw PCM of that kind.
+ */
+export function encoderInput(wav: Uint8Array<ArrayBuffer>, kind: InputKind): EncoderInput {
+  if (kind === 'wav') {
+    // Float and 32-bit integer WAVs need an explicit target depth, like raw PCM.
+    let deep = false;
+    try {
+      const { tag, bits } = wavFormat(wav);
+      deep = tag === 3 || bits > 24;
+    } catch {
+      // Not parseable here; let the encoder report it.
+    }
+    return deep ? { data: wav, bits: 24 } : { data: wav };
+  }
+  const { tag, channels, sampleRate, bits } = wavFormat(wav);
+  const float = tag === 3;
+  if ((tag !== 1 && !float) || (float && bits !== 32) || ![8, 16, 24, 32].includes(bits)) {
+    throw new Error(`raw PCM input needs 8/16/24/32-bit integer or 32-bit float WAV, not format ${tag}/${bits}-bit`);
+  }
+  const d = chunk(wav, 'data');
+  const bytes = wav.slice(d.offset, d.offset + d.length - (d.length % ((bits / 8) * channels)));
+  const format: PcmSampleFormat = float ? 'f32' : bits === 8 ? 'u8' : bits === 16 ? 's16' : bits === 24 ? 's24' : 's32';
+  const n = bytes.length / (bits / 8);
+  if (kind === 'pcm-int') {
+    if (float) throw new Error('pcm-int needs an integer WAV');
+    const data = format === 's16' ? new Int16Array(bytes.buffer, 0, n) : format === 's32' ? new Int32Array(bytes.buffer, 0, n) : bytes;
+    return { data, pcm: { sampleRate, channels, format } };
+  }
+  let out: Float32Array<ArrayBuffer>;
+  if (float) {
+    out = new Float32Array(bytes.buffer, 0, n);
+  } else {
+    out = new Float32Array(n);
+    const b = new DataView(bytes.buffer);
+    const scale = 1 / 2 ** (bits - 1);
+    for (let i = 0; i < n; i++) {
+      const x = bits === 8 ? bytes[i]! - 128
+        : bits === 16 ? b.getInt16(i * 2, true)
+          : bits === 24 ? (b.getInt8(i * 3 + 2) << 16) | b.getUint16(i * 3, true)
+            : b.getInt32(i * 4, true);
+      out[i] = x * scale;
+    }
+  }
+  return { data: out, pcm: { sampleRate, channels, format: 'f32' }, bits: float ? 24 : Math.min(bits, 24) };
+}
+
 /**
  * Encoder options for a configuration.
  * @param c The configuration.
+ * @param input The encoder input (adds `pcm` and a target depth for float PCM).
  * @returns The options.
  */
-export function encoderOptions(c: BenchConfig): Options {
+export function encoderOptions(c: BenchConfig, input: EncoderInput = { data: new Uint8Array() }): Options {
   const o: Options = { compressionLevel: c.level };
+  if (input.pcm !== undefined) o.pcm = input.pcm;
+  if (input.bits !== undefined) o.bitsPerSample = input.bits;
   if (c.transcode === 'resample-48k') o.sampleRate = 48000;
   if (c.transcode === 'to-16bit') o.bitsPerSample = 16;
   return o;
@@ -173,27 +290,47 @@ export function encoderOptions(c: BenchConfig): Options {
 /**
  * CLI arguments of the native example for a configuration.
  * @param c The configuration.
+ * @param input The encoder input (its bytes are what the native run reads).
  * @returns Extra arguments.
  */
-export function nativeArgs(c: BenchConfig): string[] {
+export function nativeArgs(c: BenchConfig, input: EncoderInput = { data: new Uint8Array() }): string[] {
   const a = ['--level', String(c.level), '--time'];
+  const o = encoderOptions(c, input);
   if (c.output === 'stream') a.push('--stream');
-  if (c.transcode === 'resample-48k') a.push('--rate', '48000');
-  if (c.transcode === 'to-16bit') a.push('--bits', '16');
+  if (o.pcm !== undefined) a.push('--pcm', `${o.pcm.format}:${o.pcm.sampleRate}:${o.pcm.channels}`);
+  if (o.sampleRate !== undefined) a.push('--rate', String(o.sampleRate));
+  if (o.bitsPerSample !== undefined) a.push('--bits', String(o.bitsPerSample));
   return a;
 }
 
 /**
+ * The bytes of an encoder input (what the native baseline reads from disk).
+ * @param input The input.
+ * @returns A view of its bytes.
+ */
+export function inputBytes(input: EncoderInput): Uint8Array<ArrayBuffer> {
+  const d = input.data;
+  return new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
+}
+
+/**
  * Validates and completes a partial configuration (e.g. from JSON or a query string).
- * @param raw Partial configuration.
+ * @param raw Partial configuration; any value, since it may come from a request body.
  * @returns The configuration.
  * @throws {Error} For invalid values.
  */
-export function parseConfig(raw: Partial<BenchConfig>): BenchConfig {
-  const c: BenchConfig = { ...DEFAULT_CONFIG, ...raw, modes: [...(raw.modes ?? DEFAULT_CONFIG.modes)] };
-  if (!Number.isInteger(c.runs) || c.runs < 1 || c.runs > 100) throw new Error('runs must be 1–100');
-  if (!Number.isInteger(c.level) || c.level < 0 || c.level > 8) throw new Error('level must be 0–8');
+export function parseConfig(raw: unknown): BenchConfig {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new Error('config must be an object');
+  const r = raw as Record<string, unknown>;
+  const modes = r['modes'] ?? DEFAULT_CONFIG.modes;
+  if (!Array.isArray(modes)) throw new Error('modes must be an array');
+  const c = { ...DEFAULT_CONFIG, ...r, modes: [...modes] as unknown[] };
+  if (!Number.isInteger(c.runs) || (c.runs as number) < 1 || (c.runs as number) > 100) throw new Error('runs must be 1–100');
+  if (!Number.isInteger(c.level) || (c.level as number) < 0 || (c.level as number) > 8) throw new Error('level must be 0–8');
   if (c.output !== 'buffer' && c.output !== 'stream') throw new Error('output must be buffer or stream');
+  if (typeof c.input !== 'string' || !Object.hasOwn(INPUT_LABEL, c.input)) {
+    throw new Error(`input must be of ${Object.keys(INPUT_LABEL).join(', ')}`);
+  }
   if (typeof c.transcode !== 'string' || !['none', 'resample-48k', 'to-16bit'].includes(c.transcode)) {
     throw new Error('transcode must be none, resample-48k or to-16bit');
   }
@@ -204,12 +341,12 @@ export function parseConfig(raw: Partial<BenchConfig>): BenchConfig {
   if (c.transcode === 'resample-48k' && p.rate === 48000) {
     throw new Error(`transcode resample-48k does nothing for preset ${p.id} (already 48 kHz)`);
   }
-  if (c.transcode === 'to-16bit' && p.bits === 16) {
-    throw new Error(`transcode to-16bit does nothing for preset ${p.id} (already 16-bit)`);
+  if (c.transcode === 'to-16bit' && p.bits === 16 && c.input !== 'pcm-f32') {
+    throw new Error(`transcode to-16bit does nothing for preset ${p.id} with ${c.input} input (already 16-bit)`);
   }
   const valid: readonly unknown[] = Object.keys(MODE_LABEL);
   if (c.modes.length === 0 || !c.modes.every((m) => valid.includes(m))) throw new Error(`modes must be of ${valid.join(', ')}`);
-  return c;
+  return c as BenchConfig;
 }
 
 /** Summary statistics of a list of numbers. */
@@ -270,7 +407,7 @@ export interface SummaryRow {
   mean: string;
   /** Min–max ms. */
   range: string;
-  /** Throughput on the WAV input, MB/s (median). */
+  /** Throughput on the encoder input, MB/s (median). */
   mbps: string;
   /** Audio seconds per wall second (median). */
   realtime: string;
@@ -354,7 +491,8 @@ export function columns(rows: readonly SummaryRow[]): (keyof SummaryRow)[] {
  * @returns The text.
  */
 export function describe(r: BenchReport): string {
-  return `${r.version} · input: ${r.inputLabel} (${fmtBytes(r.inputBytes)}) · level ${r.config.level} · ` +
+  const kind = INPUT_LABEL[r.config.input ?? 'wav'];
+  return `${r.version} · input: ${r.inputLabel} as ${kind} (${fmtBytes(r.inputBytes)}) · level ${r.config.level} · ` +
     `${r.config.output} output · transcode: ${r.config.transcode} · ${r.config.runs} run(s)` +
     `${r.config.warmup ? ' + warm-up' : ''}`;
 }

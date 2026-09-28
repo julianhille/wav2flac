@@ -44,6 +44,35 @@ describe('encode / encodeSync / encodeStream', () => {
     expect(await encode(wav, { compressionLevel: 8 })).toEqual(native);
   });
 
+  it('matches the native build for every CLI option, streamed or buffered', async () => {
+    const args = ['--level', '3', '--block-size', '1000', '--bits', '12', '--rate', '32000', '--quality', 'fast',
+      '--dither', 'tpdf', '--seed', '7', '--no-tags', '--seek-interval', '0.5', '--padding', '10'];
+    const opts = {
+      compressionLevel: 3, blockSize: 1000, bitsPerSample: 12, sampleRate: 32000, resampleQuality: 'fast',
+      dither: 'tpdf', ditherSeed: 7, tags: false, seekPointInterval: 0.5, padding: 10,
+    } as const;
+    const native = nativeEncode(wav, args);
+    if (native === null) return;
+    expect(await encode(wav, opts)).toEqual(native);
+    expect(nativeEncode(wav, [...args, '--stream'])).toEqual(await collect(encodeStream(wav, opts)));
+  });
+
+  it('resamples exactly like the native build, every quality, up and down', async () => {
+    // The sinc tables use f64 sin/cos: wasm and native libm must agree bit for bit.
+    const src = makeWav({ frames: 20_000, channels: 2, bits: 24, seed: 5 });
+    const f32 = makeWav({ frames: 20_000, channels: 1, bits: 32, float: true, seed: 6 });
+    for (const quality of ['fast', 'balanced', 'best'] as const) {
+      for (const rate of [8000, 22050, 48000, 96000]) {
+        for (const [input, bits] of [[src, 24], [f32, 16]] as const) {
+          const native = nativeEncode(input, ['--rate', `${rate}`, '--quality', quality, '--bits', `${bits}`]);
+          if (native === null) return;
+          const opts = { sampleRate: rate, resampleQuality: quality, bitsPerSample: bits };
+          expect(encodeSync(input, opts), `${quality} ${rate} Hz ${bits}-bit`).toEqual(native);
+        }
+      }
+    }
+  });
+
   it('agrees across paths on input larger than one wasm slice', async () => {
     // 24-bit stereo, so the 1 MiB slice boundary falls inside a sample frame.
     const big = makeWav({ frames: 200_000, channels: 2, bits: 24, seed: 4 });

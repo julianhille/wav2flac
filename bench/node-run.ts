@@ -2,8 +2,9 @@
 /**
  * One benchmark run in a fresh Node process (spawned by `node-bench.ts`), so
  * that the process's peak RSS belongs to exactly this run. Reads the WAV from
- * a file (no garbage from generating it), optionally warms up, then times one
- * encode of the built package (`pkg/esm`) and prints a JSON {@link ChildResult}.
+ * a file (no garbage from generating it), turns it into raw PCM if the
+ * configuration asks for it, optionally warms up, then times one encode of the
+ * built package (`pkg/esm`) and prints a JSON {@link ChildResult}.
  *
  * Usage: `node --expose-gc bench/node-run.ts <wav> <mode> <configJson>`
  * @module
@@ -11,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { RunSample, BenchConfig } from './shared.ts';
-import { encoderOptions } from './shared.ts';
+import { encoderInput, encoderOptions } from './shared.ts';
 
 type Lib = typeof import('../ts/index.js');
 
@@ -53,29 +54,28 @@ async function main(): Promise<ChildResult> {
   const config = JSON.parse(json) as BenchConfig;
   const lib = (await import(new URL('../pkg/esm/index.js', import.meta.url).href)) as Lib;
   await lib.init();
-  const wav = new Uint8Array(readFileSync(wavPath));
-  const opts = encoderOptions(config);
+  const input = encoderInput(new Uint8Array(readFileSync(wavPath)), config.input);
+  const wav = input.data;
+  const opts = encoderOptions(config, input);
 
   let startupMs: number | null = null;
   let run: () => Promise<number>;
   let wasmBytes: () => Promise<number>;
   let close = (): void => undefined;
+  let prepare = (): void => undefined;
   if (mode === 'worker') {
     const t = performance.now();
     const w = lib.createWorkerEncoder();
     await w.wasmMemoryBytes(); // resolves once the worker has loaded wasm
     startupMs = performance.now() - t;
-    // Each run transfers a fresh copy, made outside the timed region.
-    let input = wav.slice();
+    // Each run transfers a fresh copy, made by prepare() outside the timed region.
+    let input = wav;
+    prepare = () => {
+      input = wav.slice();
+    };
     run = config.output === 'stream'
       ? () => drain(w.encodeStream(input, opts))
       : async () => (await w.encode(input, opts)).length;
-    const next = run;
-    run = async () => {
-      const n = await next();
-      input = wav.slice();
-      return n;
-    };
     wasmBytes = () => w.wasmMemoryBytes();
     close = () => w.terminate();
   } else if (mode === 'sync') {
@@ -90,7 +90,11 @@ async function main(): Promise<ChildResult> {
     throw new Error(`unknown mode ${mode}`);
   }
 
-  if (config.warmup) await run();
+  if (config.warmup) {
+    prepare();
+    await run();
+  }
+  prepare();
   gc();
   const baseRssKb = Math.round(process.memoryUsage.rss() / 1024);
   let heap = process.memoryUsage().heapUsed;

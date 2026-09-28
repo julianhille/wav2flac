@@ -34,6 +34,11 @@ on:
         type: choice
         options: [standard, voice, cd, short, song, hires, surround, long]
         default: standard
+      part:
+        description: WAV → FLAC, raw PCM → FLAC, or both
+        type: choice
+        options: [all, wav, pcm]
+        default: all
       level:
         description: Compression level
         type: choice
@@ -44,7 +49,8 @@ permissions: {}
 
 concurrency:
   group: bench-${{ github.ref }}
-  # Every push to main keeps its numbers; only superseded PR runs are dropped.
+  # PR runs are cancelled when superseded. On main a running benchmark is never
+  # cancelled, but of several queued pushes only the newest one runs.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -52,6 +58,7 @@ env:
   RUNS: ${{ inputs.runs || '5' }}
   PRESET: ${{ inputs.preset || 'standard' }}
   LEVEL: ${{ inputs.level || '5' }}
+  PART: ${{ inputs.part || 'all' }}
 
 jobs:
   bench:
@@ -85,7 +92,8 @@ jobs:
           presets="$PRESET"
           [ "$presets" = standard ] && presets="voice cd song"
           for p in $presets; do
-            echo "## Benchmark: ${p}, level ${LEVEL}, ${RUNS} runs" >> "$GITHUB_STEP_SUMMARY"
+            [ "$PART" = pcm ] && continue
+            echo "## WAV → FLAC: ${p}, level ${LEVEL}, ${RUNS} runs" >> "$GITHUB_STEP_SUMMARY"
             echo "::group::Node, ${p}"
             npm run bench -- --runs "$RUNS" --preset "$p" --level "$LEVEL" \
               --modes main,sync,worker,native --json "bench-node-${p}.json" --markdown "$GITHUB_STEP_SUMMARY"
@@ -97,6 +105,24 @@ jobs:
             echo "::group::Chromium, ${p}"
             npm run bench:browser -- --runs "$RUNS" --preset "$p" --level "$LEVEL" \
               --modes main,sync,worker --json "bench-browser-${p}.json" --markdown "$GITHUB_STEP_SUMMARY"
+            echo "::endgroup::"
+          done
+      - name: Benchmark raw PCM
+        if: env.PART != 'wav'
+        run: |
+          presets="$PRESET"
+          [ "$presets" = standard ] && presets="voice cd song"
+          for p in $presets; do
+            echo "## Raw PCM → FLAC: ${p}, level ${LEVEL}, ${RUNS} runs" >> "$GITHUB_STEP_SUMMARY"
+            for input in pcm-int pcm-f32; do
+              echo "::group::Node ${input}, ${p}"
+              npm run bench -- --runs "$RUNS" --preset "$p" --level "$LEVEL" --input "$input" \
+                --modes main,sync,worker,native --json "bench-node-${input}-${p}.json" --markdown "$GITHUB_STEP_SUMMARY"
+              echo "::endgroup::"
+            done
+            echo "::group::Chromium pcm-f32, ${p}"
+            npm run bench:browser -- --runs "$RUNS" --preset "$p" --level "$LEVEL" --input pcm-f32 \
+              --modes main,sync,worker --json "bench-browser-pcm-f32-${p}.json" --markdown "$GITHUB_STEP_SUMMARY"
             echo "::endgroup::"
           done
       - name: Upload results

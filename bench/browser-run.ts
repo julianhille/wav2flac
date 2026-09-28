@@ -10,8 +10,8 @@
  * @module
  */
 import {
-  type BenchConfig, type BenchReport, type Mode, type ModeResult, type RunSample,
-  encoderOptions,
+  type BenchConfig, type BenchReport, type EncoderInput, type Mode, type ModeResult, type RunSample,
+  encoderInput, encoderOptions,
 } from './shared.ts';
 
 /** The package's public API. */
@@ -129,8 +129,11 @@ export function uaMemoryAvailable(): boolean {
  */
 export function environment(): string {
   const ua = navigator.userAgent;
-  const m = /(Firefox|Edg|Chrome|Version)\/(\d+)/.exec(ua);
-  const name = m === null ? 'Browser' : m[1] === 'Version' ? 'Safari' : m[1] === 'Edg' ? 'Edge' : m[1]!;
+  // Chromium-based UAs also say "Chrome/" and "Safari/"; check the most
+  // specific token first rather than taking the leftmost match.
+  const m = [/(Edg)\/(\d+)/, /(Firefox)\/(\d+)/, /(Chrome)\/(\d+)/, /(Version)\/(\d+).*Safari/]
+    .map((re) => re.exec(ua)).find((x) => x !== null);
+  const name = m === undefined ? 'Browser' : m[1] === 'Version' ? 'Safari' : m[1] === 'Edg' ? 'Edge' : m[1]!;
   const platform = /\(([^;)]+)/.exec(ua)?.[1] ?? navigator.platform;
   return `${name} ${m?.[2] ?? ''} (${platform}, ${navigator.hardwareConcurrency} threads)`.replace('  ', ' ');
 }
@@ -177,18 +180,19 @@ async function measure(run: () => Promise<number>, wasmBytes: () => Promise<numb
  * Benchmarks one mode.
  * @param l The API.
  * @param mode Mode.
- * @param input The WAV.
+ * @param input The encoder input (WAV or raw PCM).
  * @param config Configuration.
  * @param extra Browser-only switches.
  * @param onRun Progress callback.
  * @returns The result.
  */
-async function runMode(l: Lib, mode: Mode, input: BenchInput, config: BenchConfig, extra: BrowserOptions, onRun: OnRun): Promise<ModeResult> {
+async function runMode(l: Lib, mode: Mode, input: EncoderInput, config: BenchConfig, extra: BrowserOptions, onRun: OnRun): Promise<ModeResult> {
   const res: ModeResult = { mode, samples: [], startupMs: null, uaMemoryBytes: null, error: null };
   const rss = (globalThis as { __wav2flacRss?: RssProbe }).__wav2flacRss;
-  const opts = encoderOptions(config);
-  const wav = input.bytes;
+  const opts = encoderOptions(config, input);
+  const wav = input.data;
   let close = (): void => undefined;
+  let prepare = (): void => undefined;
   try {
     let run: () => Promise<number>;
     let wasmBytes: () => Promise<number>;
@@ -198,14 +202,14 @@ async function runMode(l: Lib, mode: Mode, input: BenchInput, config: BenchConfi
       close = () => w.terminate();
       await w.wasmMemoryBytes(); // resolves once the worker has loaded wasm
       res.startupMs = performance.now() - t;
-      let copy = wav.slice(); // transferred to the worker; a fresh copy per run, made outside the timing
-      run = async () => {
-        const n = config.output === 'stream'
-          ? await drain(w.encodeStream(copy, opts))
-          : (await w.encode(copy, opts)).length;
+      // Transferred to the worker: prepare() makes a fresh copy per run, outside the timing.
+      let copy = wav;
+      prepare = () => {
         copy = wav.slice();
-        return n;
       };
+      run = config.output === 'stream'
+        ? () => drain(w.encodeStream(copy, opts))
+        : async () => (await w.encode(copy, opts)).length;
       wasmBytes = () => w.wasmMemoryBytes();
     } else if (mode === 'sync') {
       run = async () => l.encodeSync(wav, opts).length;
@@ -218,8 +222,12 @@ async function runMode(l: Lib, mode: Mode, input: BenchInput, config: BenchConfi
     } else {
       throw new Error('only available in Node');
     }
-    if (config.warmup) await run();
+    if (config.warmup) {
+      prepare();
+      await run();
+    }
     for (let i = 0; i < config.runs; i++) {
+      prepare();
       res.samples.push(await measure(run, wasmBytes, rss));
       onRun(mode, i + 1, config.runs);
       await sleep(20); // let the page repaint between runs
@@ -236,21 +244,22 @@ async function runMode(l: Lib, mode: Mode, input: BenchInput, config: BenchConfi
 /**
  * Runs the benchmark in this page.
  * @param config Configuration.
- * @param input The WAV.
+ * @param input The WAV (turned into raw PCM first if `config.input` asks for it).
  * @param extra Browser-only switches.
  * @param onRun Progress callback.
  * @returns The report.
  */
 export async function runBrowserBench(config: BenchConfig, input: BenchInput, extra: BrowserOptions, onRun: OnRun = () => undefined): Promise<BenchReport> {
   const l = await loadLib();
+  const enc = encoderInput(input.bytes, config.input);
   const results: ModeResult[] = [];
-  for (const mode of config.modes) results.push(await runMode(l, mode, input, config, extra, onRun));
+  for (const mode of config.modes) results.push(await runMode(l, mode, enc, config, extra, onRun));
   return {
     environment: environment(),
     version: l.version(),
     config,
     inputLabel: input.label,
-    inputBytes: input.bytes.length,
+    inputBytes: enc.data.byteLength,
     inputSeconds: input.seconds,
     date: new Date().toISOString(),
     results,

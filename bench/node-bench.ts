@@ -6,7 +6,8 @@
  * ```sh
  * node bench/node-bench.ts --runs 5 --preset song --modes main,sync,worker,native
  * ```
- * Options: `--runs N`, `--preset ID`, `--level N`, `--output buffer|stream`,
+ * Options: `--runs N`, `--preset ID`, `--level N`, `--input wav|pcm-int|pcm-f32`,
+ * `--output buffer|stream`,
  * `--transcode none|resample-48k|to-16bit`, `--modes a,b`, `--no-warmup`,
  * `--json FILE`, `--markdown FILE` (appends; use `$GITHUB_STEP_SUMMARY` in CI).
  * @module
@@ -19,7 +20,8 @@ import { fileURLToPath } from 'node:url';
 import type { ChildResult } from './node-run.ts';
 import {
   type BenchConfig, type BenchReport, type Mode, type ModeResult, type RunSample,
-  columns, describe, MODE_LABEL, nativeArgs, parseConfig, preset, presetWav, summarize, SUMMARY_HEADERS, toMarkdown,
+  columns, describe, encoderInput, inputBytes, MODE_LABEL, nativeArgs, parseConfig, preset, presetWav, summarize,
+  SUMMARY_HEADERS, toMarkdown,
 } from './shared.ts';
 
 /** Path of the native reference encoder. */
@@ -51,13 +53,13 @@ function exec(cmd: string, args: string[]): Promise<{ code: number; stdout: stri
 
 /**
  * One native run.
- * @param wav Input file.
+ * @param file Input file (WAV or raw PCM).
  * @param out Output file.
- * @param config Configuration.
+ * @param args Arguments from {@link nativeArgs}.
  * @returns The sample.
  */
-async function nativeRun(wav: string, out: string, config: BenchConfig): Promise<RunSample> {
-  const r = await exec(NATIVE, [wav, out, ...nativeArgs(config)]);
+async function nativeRun(file: string, out: string, args: string[]): Promise<RunSample> {
+  const r = await exec(NATIVE, [file, out, ...args]);
   if (r.code !== 0) throw new Error(r.stderr.trim() || `exit ${r.code}`);
   const line = r.stderr.trim().split('\n').at(-1) ?? '';
   const t = JSON.parse(line) as { ms: number; maxRssKb: number; outBytes: number };
@@ -88,9 +90,16 @@ export async function runNodeBench(config: BenchConfig, onRun: OnRun = () => und
   if (!existsSync(PKG)) throw new Error('pkg/ is missing; run `npm run build` first');
   const p = preset(config.preset);
   const wav = presetWav(p);
+  // The child processes convert the WAV themselves; the native baseline reads
+  // the same encoder input (WAV or raw PCM bytes) from its own file.
+  const input = encoderInput(wav, config.input);
+  const bytes = inputBytes(input);
   const dir = mkdtempSync(join(tmpdir(), 'wav2flac-bench-'));
   const wavPath = join(dir, 'in.wav');
+  const nativePath = join(dir, config.input === 'wav' ? 'in.wav' : 'in.pcm');
   writeFileSync(wavPath, wav);
+  if (config.input !== 'wav') writeFileSync(nativePath, bytes);
+  const native = nativeArgs(config, input);
   let version = '';
   const results: ModeResult[] = [];
   try {
@@ -100,9 +109,9 @@ export async function runNodeBench(config: BenchConfig, onRun: OnRun = () => und
       try {
         if (mode === 'native') {
           if (!existsSync(NATIVE)) throw new Error(`${NATIVE} missing; run cargo build --release --example encode`);
-          if (config.warmup) await nativeRun(wavPath, join(dir, 'out.flac'), config);
+          if (config.warmup) await nativeRun(nativePath, join(dir, 'out.flac'), native);
           for (let i = 0; i < config.runs; i++) {
-            res.samples.push(await nativeRun(wavPath, join(dir, 'out.flac'), config));
+            res.samples.push(await nativeRun(nativePath, join(dir, 'out.flac'), native));
             onRun(mode, i + 1, config.runs);
           }
           continue;
@@ -128,7 +137,7 @@ export async function runNodeBench(config: BenchConfig, onRun: OnRun = () => und
     version,
     config,
     inputLabel: p.label,
-    inputBytes: wav.length,
+    inputBytes: bytes.length,
     inputSeconds: p.seconds,
     date: new Date().toISOString(),
     results,
@@ -166,6 +175,7 @@ export function parseArgs(argv: string[], defaults: Partial<BenchConfig> = {}): 
       case '--runs': raw.runs = Number(v()); break;
       case '--preset': raw.preset = v(); break;
       case '--level': raw.level = Number(v()); break;
+      case '--input': raw.input = v() as BenchConfig['input']; break;
       case '--output': raw.output = v() as BenchConfig['output']; break;
       case '--transcode': raw.transcode = v() as BenchConfig['transcode']; break;
       case '--modes': raw.modes = v().split(',') as Mode[]; break;

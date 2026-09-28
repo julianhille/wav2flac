@@ -3,7 +3,7 @@
  * The benchmark page (`bench/index.html`): form handling, running in this
  * browser or on the bench server's Node, and rendering reports.
  *
- * Query parameters preset the form (`?runs=3&preset=short&modes=main,worker`),
+ * Query parameters preset the form (`?runs=3&preset=short&input=pcm-f32&modes=main,worker`),
  * and `autorun=1` starts immediately. Automation calls
  * `window.runBenchmark(config)`.
  * @module
@@ -93,6 +93,7 @@ function readForm(): BenchConfig {
     runs: Number(f.get('runs')),
     preset: String(f.get('preset')),
     level: Number(f.get('level')),
+    input: String(f.get('input')) as BenchConfig['input'],
     output: f.get('output') === 'stream' ? 'stream' : 'buffer',
     transcode: String(f.get('transcode')) as BenchConfig['transcode'],
     modes: modeBoxes().filter((b) => b.checked && !b.disabled).map((b) => b.value as Mode),
@@ -115,6 +116,7 @@ function writeForm(c: BenchConfig): void {
   set('runs', String(c.runs));
   set('preset', c.preset);
   set('level', String(c.level));
+  set('input', c.input);
   set('output', c.output);
   set('transcode', c.transcode);
   for (const b of modeBoxes()) b.checked = c.modes.includes(b.value as Mode);
@@ -306,6 +308,7 @@ function setup(): void {
   if (q.has('runs')) raw.runs = Number(q.get('runs'));
   if (q.has('preset')) raw.preset = q.get('preset')!;
   if (q.has('level')) raw.level = Number(q.get('level'));
+  if (q.has('input')) raw.input = q.get('input') as BenchConfig['input'];
   if (q.has('output')) raw.output = q.get('output') as BenchConfig['output'];
   if (q.has('transcode')) raw.transcode = q.get('transcode') as BenchConfig['transcode'];
   if (q.has('modes')) raw.modes = q.get('modes')!.split(',') as Mode[];

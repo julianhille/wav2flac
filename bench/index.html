@@ -83,6 +83,14 @@
         <select id="level" name="level"></select>
       </fieldset>
       <fieldset>
+        <label class="field" for="input">Encoder input</label>
+        <select id="input" name="input">
+          <option value="wav">WAV file (Uint8Array)</option>
+          <option value="pcm-int">Raw PCM, integer (Int16Array…)</option>
+          <option value="pcm-f32">Raw PCM, Float32Array (Web Audio)</option>
+        </select>
+      </fieldset>
+      <fieldset>
         <label class="field" for="output">Output</label>
         <select id="output" name="output">
           <option value="buffer">Buffer (encode)</option>
@@ -132,7 +140,12 @@
       <li><b>Worker vs. no worker.</b> "Worker" is a dedicated Web Worker (<code>createWorkerEncoder()</code>). An
         AudioWorklet isn't used: it runs on the real-time audio thread with 128-frame render quanta and is meant for
         playback, not batch encoding.</li>
-      <li><b>Timing</b> covers one encode call with the WAV already in memory. Worker runs include transferring
+      <li><b>Encoder input.</b> "WAV file" encodes the WAV bytes. The raw PCM inputs encode the same samples without
+        a header, via the <code>pcm</code> option: as integer typed arrays (<code>Int16Array</code>, or bytes for
+        24-bit), or as a <code>Float32Array</code> like Web Audio delivers, converted back to the source bit depth.
+        The conversion from the WAV happens before timing. MB/s and the output ratio refer to the input actually
+        passed, so a <code>Float32Array</code> of 16-bit audio is twice the bytes.</li>
+      <li><b>Timing</b> covers one encode call with the input already in memory. Worker runs include transferring
         the input to the worker; the worker is started once per mode, and its start-up time is listed separately.</li>
       <li><b>Longest block</b> is the longest gap between 1 ms timer ticks on the page's main thread. That's how long
         the page couldn't respond. Browsers clamp timers to about 4 ms, so smaller values are noise.</li>

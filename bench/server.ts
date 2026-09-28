@@ -128,7 +128,7 @@ async function nodeBench(req: IncomingMessage, res: ServerResponse): Promise<voi
   }
   let config: BenchConfig;
   try {
-    config = parseConfig((await readJson(req)) as Partial<BenchConfig>);
+    config = parseConfig(await readJson(req));
   } catch (e) {
     send(res, 400, 'text/plain', e instanceof Error ? e.message : String(e));
     return;
