@@ -9,6 +9,7 @@
 # Docs
 /site/
 /docs/reference/api/
+/docs/index.md
 /.venv/
 
 # Test data (generated at test time)

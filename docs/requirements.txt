@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: 0BSD
+# Read the Docs build dependencies (MkDocs is BSD-2-Clause).
+mkdocs==1.6.1

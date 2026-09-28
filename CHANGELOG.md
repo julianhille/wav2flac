@@ -20,8 +20,8 @@ links are collected at the bottom of this file.
 - Input: integer PCM with 8, 16, 24 or 32 bits (8-bit unsigned included),
   or 4–32 valid bits in a WAVE_FORMAT_EXTENSIBLE container (plain 12- or
   20-bit PCM is rejected), 32-bit float, 1–8 channels, sample rates up to
-  1 048 575 Hz. Real-world quirks are tolerated: a missing or non-zero pad
-  byte after an odd-sized chunk, 24/32-bit PCM declared with an 18 or
+  1 048 575 Hz. Real-world quirks are tolerated: a missing or non-zero (even
+  printable) pad byte after an odd-sized chunk, 24/32-bit PCM declared with an 18 or
   40-byte `fmt` chunk, a wrong byte rate, and a channel mask whose speaker
   count does not match the channels (the mask is then ignored). 64-bit float is rejected as `UNSUPPORTED_FORMAT`.
   The header is parsed incrementally, so many small chunks before `data`

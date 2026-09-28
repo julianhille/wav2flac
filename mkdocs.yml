@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: 0BSD
+# Docs site for Read the Docs. Build locally with:
+#   pip install -r docs/requirements.txt && cp README.md docs/index.md && mkdocs serve
+site_name: wav2flac
+site_url: https://wav2flac.readthedocs.io/
+repo_url: https://github.com/julianhille/wav2flac
+edit_uri: blob/main/docs/
+copyright: 0BSD licensed
+theme: readthedocs
+strict: true
+exclude_docs: requirements.txt
+
+nav:
+  - Home: index.md
+  - Raw PCM input: pcm.md
+  - Benchmark: benchmark.md
