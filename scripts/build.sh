@@ -18,6 +18,9 @@ want_opt=$(sed -n 's/^BINARYEN=\([0-9]*\).*/\1/p' scripts/ci-tools.sh)
 have_opt=$(wasm-opt --version | sed -n 's/.*version \([0-9]*\).*/\1/p')
 [[ "$want_opt" == "$have_opt" ]] || { echo "build: wasm-opt $have_opt != binaryen $want_opt" >&2; exit 1; }
 
+# No tool in this build reads SOURCE_DATE_EPOCH today (npm pack uses a fixed
+# mtime); it is set for any that starts to. Reproducibility comes from the
+# pinned tools and the path remapping below.
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || echo 0)}
 # Keep local paths out of the wasm (panic strings, debug info) for reproducible builds.
 # CARGO_ENCODED_RUSTFLAGS (0x1f-separated) keeps paths with spaces intact.

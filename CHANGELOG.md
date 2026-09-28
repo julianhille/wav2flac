@@ -58,6 +58,26 @@ links are collected at the bottom of this file.
 - Vitest suite with V8 coverage for the TypeScript sources, including
   fast-check fuzz tests (random WAV specs, chunkings, transcode options,
   mutated/garbage input, random option objects and abort timing).
+- Benchmark: a page (`npm run bench:serve`) comparing `encode()`,
+  `encodeSync()` and a Web Worker (timing, max RSS, wasm/heap memory,
+  longest main-thread block), plus Node and headless-Chromium CLIs
+  (`npm run bench`, `npm run bench:browser`) with the native Rust build as
+  baseline. Presets include a 5 s 16 kHz mono voice clip and 1 min of
+  CD-quality audio. CI attaches the results to the job summary and an
+  artifact.
+- Benchmark part 2, raw PCM → FLAC: `--input pcm-int|pcm-f32` (and a page
+  selector) encodes the presets' samples as integer typed arrays or as a
+  Web Audio-style `Float32Array`; the native `encode` example takes
+  `--pcm FORMAT:RATE:CHANNELS` for the baseline. CI runs both parts.
+- Raw PCM input: the `pcm` option (`{ sampleRate, channels, format? }`) on
+  `encode`, `encodeStream`, `encodeSync` and the worker. Accepts
+  `Int16Array`/`Int32Array`/`Float32Array` (format inferred), one array per
+  channel, raw bytes (`u8`, `s16`, `s24`, `s32`, `f32`) or a stream of them.
+  The output is byte-identical to encoding the same samples as a WAV file.
+  In Rust: `Encoder::new_pcm` with `PcmSpec`/`PcmFormat`.
+- CI workflow: Rust tests, plus JS build, typecheck and coverage on Node 22/24/26,
+  tests of the built package (ESM/CJS, worker script, consumer type checks),
+  publint/attw and `cargo deny`; the full test tier runs nightly.
 - `THIRD_PARTY_LICENSES.txt` in the package, generated at build time from the
   crates compiled into the wasm. Every JS bundle starts with an unminified
   `/*! @license */` comment that lists those crates and reproduces the

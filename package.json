@@ -1,7 +1,7 @@
 {
   "name": "wav2flac",
   "version": "0.1.0",
-  "description": "Fast, streaming WAV to FLAC encoder (Rust → WebAssembly) with resampling and bit-depth conversion. Browser, Node, workers.",
+  "description": "Fast, streaming WAV to FLAC encoder (Rust \u2192 WebAssembly) with resampling and bit-depth conversion. Browser, Node, workers.",
   "license": "0BSD",
   "author": "Julian Hille",
   "repository": {
@@ -43,7 +43,6 @@
   "files": [
     "pkg/",
     "LICENSE",
-    "THIRD_PARTY_LICENSES.txt",
     "CHANGELOG.md"
   ],
   "sideEffects": [
@@ -51,7 +50,7 @@
     "./pkg/cjs/worker.cjs"
   ],
   "engines": {
-    "node": ">=20.16"
+    "node": ">=22.12"
   },
   "scripts": {
     "build": "scripts/build.sh",
@@ -60,7 +59,11 @@
     "test:unit": "vitest run --project unit",
     "test:pkg": "vitest run --project pkg",
     "coverage": "vitest run --project unit --coverage",
-    "lint:pkg": "publint --strict && attw --pack . --profile node16 --exclude-entrypoints wasm"
+    "test:browser": "node tests/browser/run.ts",
+    "lint:pkg": "publint --strict && attw --pack . --profile node16 --exclude-entrypoints wasm",
+    "bench": "node bench/node-bench.ts",
+    "bench:browser": "node bench/browser-bench.ts",
+    "bench:serve": "node bench/server.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
@@ -68,6 +71,7 @@
     "@vitest/coverage-v8": "5.0.2",
     "esbuild": "0.28.2",
     "fast-check": "4.10.2",
+    "playwright": "1.63.0",
     "publint": "0.3.24",
     "typescript": "7.0.2",
     "vitest": "5.0.2"

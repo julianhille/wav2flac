@@ -62,6 +62,14 @@ Deno and Bun.
   `LIST/INFO` tags, channel-mask preservation for surround files.
 - Progress callbacks, `AbortSignal` cancellation, SIMD build with automatic fallback.
 
+## Benchmark
+
+`npm run bench:serve` opens a benchmark page. It compares `encode()`,
+`encodeSync()` and a Web Worker (timing, memory, main-thread blocking), in
+your browser or in Node against the native Rust build. `npm run bench` and
+`npm run bench:browser` run the same benchmark from the command line, and CI
+runs them on every push. See [docs/benchmark.md](docs/benchmark.md).
+
 ## License
 
 **0BSD** — do whatever you want, no conditions, no warranty.

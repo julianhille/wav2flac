@@ -1,0 +1,149 @@
+# SPDX-License-Identifier: 0BSD
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # The release workflow runs the whole suite on the tag before publishing.
+  workflow_call:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  WAV2FLAC_TEST_TIER: ${{ startsWith(github.ref, 'refs/tags/v') && 'full' || 'quick' }}
+  WAV2FLAC_REQUIRE_TOOLS: '1'
+
+jobs:
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Test tools
+        run: sudo apt-get update -q && sudo apt-get install -yq flac ffmpeg
+      - run: cargo test --locked
+
+  js:
+    name: JS tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: wasm-bindgen + binaryen
+        run: scripts/ci-tools.sh
+      - name: Test tools
+        run: sudo apt-get update -q && sudo apt-get install -yq flac
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - name: Native encode example (determinism reference)
+        run: cargo build --release --locked --example encode
+      - name: Unit tests with coverage
+        run: npm run coverage
+      - name: Upload coverage
+        if: matrix.node == 22
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-js
+          path: coverage/js
+          retention-days: 14
+
+  reproducible:
+    name: Reproducible package build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: a
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: elsewhere/b
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Toolchain (rust-toolchain.toml)
+        working-directory: a
+        run: rustup toolchain install
+      - name: wasm-bindgen + binaryen
+        run: a/scripts/ci-tools.sh
+      # Two checkouts at different paths with separate target dirs and cargo
+      # homes: nothing from the build location may leak into the package.
+      - name: Build twice
+        run: |
+          for d in a elsewhere/b; do
+            n=${d##*/}
+            if [ "$n" = b ]; then export CARGO_HOME="$RUNNER_TEMP/cargo-b"; mkdir -p "$CARGO_HOME"; fi
+            mkdir -p "$RUNNER_TEMP/tgz-$n" # npm pack does not create its destination
+            (cd "$d" && npm ci --ignore-scripts && CARGO_TARGET_DIR="$RUNNER_TEMP/t-$n" npm run build \
+              && npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/tgz-$n")
+          done
+      - name: Compare
+        run: |
+          (cd a/pkg && find . -type f | sort | xargs sha256sum) > sums
+          (cd elsewhere/b/pkg && sha256sum -c ../../../sums)
+          diff <(cd a/pkg && find . -type f | sort) <(cd elsewhere/b/pkg && find . -type f | sort)
+          cmp "$RUNNER_TEMP"/tgz-a/*.tgz "$RUNNER_TEMP"/tgz-b/*.tgz
+
+  browser:
+    name: Browser + bundlers (${{ matrix.browser }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: wasm-bindgen + binaryen
+        run: scripts/ci-tools.sh
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      # Packed package, unbundled / Vite / webpack; every path must match Node.
+      - run: npm run test:browser
+        env:
+          WAV2FLAC_BROWSERS: ${{ matrix.browser }}
