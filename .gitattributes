@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.wasm binary
+*.wav binary
+*.flac binary
+CHANGELOG.md merge=union

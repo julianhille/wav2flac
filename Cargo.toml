@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: 0BSD
+[package]
+name = "wav2flac"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+license = "0BSD"
+description = "Streaming WAV to FLAC encoder with resampling and bit-depth conversion, built for WebAssembly"
+repository = "https://github.com/julianhille/wav2flac"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hound = "=3.5.1"
+libflac-rs = "=0.143.1"
+md-5 = "0.10"
+rubato = { version = "5.0.0", default-features = false }
+
+[dev-dependencies]
+claxon = "0.4.3"
+proptest = "1"
+sha2 = "0.10"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.test]
+opt-level = 1
+
+[profile.test.package."*"]
+opt-level = 3

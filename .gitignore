@@ -1,0 +1,22 @@
+# Rust
+/target/
+
+# JS / build output
+/node_modules/
+/pkg/
+*.tgz
+
+# Docs
+/site/
+/docs/reference/api/
+/.venv/
+
+# Test data (generated at test time)
+*.wav
+*.flac
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
