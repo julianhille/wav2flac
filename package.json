@@ -1,0 +1,75 @@
+{
+  "name": "wav2flac",
+  "version": "0.1.0",
+  "description": "Fast, streaming WAV to FLAC encoder (Rust → WebAssembly) with resampling and bit-depth conversion. Browser, Node, workers.",
+  "license": "0BSD",
+  "author": "Julian Hille",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/julianhille/wav2flac.git"
+  },
+  "homepage": "https://wav2flac.readthedocs.io/",
+  "bugs": "https://github.com/julianhille/wav2flac/issues",
+  "keywords": [
+    "flac",
+    "wav",
+    "wave",
+    "audio",
+    "encoder",
+    "wasm",
+    "webassembly",
+    "resample",
+    "stream",
+    "worker"
+  ],
+  "type": "module",
+  "main": "./pkg/cjs/index.cjs",
+  "module": "./pkg/esm/index.js",
+  "types": "./pkg/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./pkg/esm/index.d.ts",
+        "default": "./pkg/esm/index.js"
+      },
+      "require": {
+        "types": "./pkg/cjs/index.d.cts",
+        "default": "./pkg/cjs/index.cjs"
+      }
+    },
+    "./wasm": "./pkg/wav2flac.wasm",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "pkg/",
+    "LICENSE",
+    "THIRD_PARTY_LICENSES.txt",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": [
+    "./pkg/esm/worker.js",
+    "./pkg/cjs/worker.cjs"
+  ],
+  "engines": {
+    "node": ">=20.16"
+  },
+  "scripts": {
+    "build": "scripts/build.sh",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:pkg": "vitest run --project pkg",
+    "coverage": "vitest run --project unit --coverage",
+    "lint:pkg": "publint --strict && attw --pack . --profile node16 --exclude-entrypoints wasm"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@types/node": "22.20.4",
+    "@vitest/coverage-v8": "5.0.2",
+    "esbuild": "0.28.2",
+    "fast-check": "4.10.2",
+    "publint": "0.3.24",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2"
+  }
+}

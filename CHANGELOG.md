@@ -42,7 +42,40 @@ links are collected at the bottom of this file.
   chunking, streaming, state, metadata, transcode quality, property-based,
   golden hashes, and differential tests against ffmpeg and `flac`.
 - Project scaffolding: 0BSD license, third-party license handling, CI skeleton.
+- JavaScript API written in TypeScript: `encode`, `encodeStream`, `encodeSync`,
+  `probe`, `init`/`initSync`, `version`, `wasmMemoryBytes` and
+  `createWorkerEncoder` (Web Worker or `worker_threads`, with transferable
+  input, backpressured stream output, progress and `AbortSignal` support;
+  `WorkerEncoderOptions` set the worker script and wasm source). Ships as
+  ESM and CommonJS with `.d.ts`/`.d.cts` types. Needs Node ≥ 22.12.
+  Options are range-checked before the wasm runs (`compressionLevel` 0–8,
+  `blockSize` 16–65535, `bitsPerSample` 4–32, `tags` a plain object) and
+  fail with `INVALID_OPTIONS`. `encodeStream` never throws: every failure,
+  including invalid options and aborts, errors the returned stream. In Node,
+  `init()` accepts Windows drive paths such as `C:\\app\\wav2flac.wasm`.
 - Native `encode` example (used as the determinism reference and benchmark
   baseline).
+- Vitest suite with V8 coverage for the TypeScript sources, including
+  fast-check fuzz tests (random WAV specs, chunkings, transcode options,
+  mutated/garbage input, random option objects and abort timing).
+- `THIRD_PARTY_LICENSES.txt` in the package, generated at build time from the
+  crates compiled into the wasm. Every JS bundle starts with an unminified
+  `/*! @license */` comment that lists those crates and reproduces the
+  BSD-3-Clause notice of libflac-rs (and the libFLAC copyrights it carries)
+  and the MIT notices of the MIT-only crates and the Rust standard library.
+- Browser smoke test of the packed package (`npm run test:browser`):
+  unbundled, built with Vite and built with webpack, in Chromium, Firefox
+  and WebKit; every output must match Node byte for byte. Each page also
+  loads the wasm from a custom route with `init(url)`, and then no other
+  wasm may be fetched, workers included. CI also checks
+  that the package build is reproducible.
+- Release workflow: pushing a `vX.Y.Z` tag checks the tag against every
+  manifest and the changelog, runs the full CI suite, publishes to npm with
+  provenance (prereleases under `next`) and creates a GitHub release with the
+  tarball, the wasm and `SHA256SUMS`. `node scripts/release.ts prepare X.Y.Z`
+  bumps the versions and dates the changelog.
+- CI enforces `cargo fmt` and a 100-column limit on all Rust source lines.
+- Documentation site on Read the Docs (MkDocs): the README plus the raw PCM
+  and benchmark guides, at <https://wav2flac.readthedocs.io/>.
 
 [Unreleased]: https://github.com/julianhille/wav2flac/commits/main

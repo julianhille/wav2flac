@@ -1,0 +1,414 @@
+// SPDX-License-Identifier: 0BSD
+/**
+ * Off-main-thread encoding: a client for a dedicated worker running the same
+ * engine. Works with browser `Worker`s and Node `worker_threads`.
+ * @module
+ */
+import { abortError, reviveError } from './errors.js';
+import { isStream, toBytes, type Input } from './input.js';
+import { normalizeOptions, type Options, type Progress } from './options.js';
+import { builtin, ignore, isNode } from './platform.js';
+import type { WavInfo } from './probe.js';
+import { OUTPUT_WINDOW, transferOf, type FromWorker, type Port, type ToWorker } from './protocol.js';
+import { init, wasmModule, type WasmSource } from './wasm.js';
+
+/** The worker script next to this file, for Node (see `spawn`). */
+const NODE_WORKER = './worker.js';
+
+/** An encoder running in a dedicated worker. */
+export interface WorkerEncoder {
+  /**
+   * Like `encode()`, but in the worker. In-memory input (`ArrayBuffer`, or a
+   * typed array covering its whole buffer) is transferred, i.e. detached, once
+   * the worker is ready, and so are such stream chunks; set `copy: true` to
+   * keep them. Views of a larger buffer are copied. A transferred input is
+   * gone even when the job fails, so keep a copy if you plan to retry.
+   */
+  encode(input: Input, options?: Options): Promise<Uint8Array>;
+  /** Like `encodeStream()`, but in the worker; with backpressure both ways. */
+  encodeStream(input: Input, options?: Omit<Options, 'seekPointInterval'>): ReadableStream<Uint8Array>;
+  /** Like `probe()`, but in the worker. The bytes are copied. */
+  probe(input: Uint8Array | ArrayBuffer): Promise<WavInfo>;
+  /** Size of the worker's wasm linear memory in bytes. */
+  wasmMemoryBytes(): Promise<number>;
+  /** Stops the worker; pending jobs reject with an `AbortError`. */
+  terminate(): void;
+}
+
+/** Options for {@link createWorkerEncoder}. */
+export interface WorkerEncoderOptions {
+  /**
+   * Worker script URL. Default: the package's `worker.js`. In Node a string
+   * is a file path unless it starts with `file:`.
+   */
+  url?: URL | string | undefined;
+  /** Where the main thread loads the wasm from (see `init`). It is compiled once and shared. */
+  wasm?: WasmSource | undefined;
+}
+
+/** Client-side state of one job. */
+interface ClientJob {
+  handle(m: FromWorker): void;
+  fail(e: unknown): void;
+}
+
+/**
+ * Wraps a browser `Worker` as a {@link Port}.
+ * @param w The worker.
+ * @returns The port.
+ */
+function browserPort(w: Worker): Port<FromWorker, ToWorker> {
+  return {
+    post: (msg, transfer) => w.postMessage(msg, transfer),
+    listen(onMessage, onError) {
+      w.onmessage = (e: MessageEvent<FromWorker>) => onMessage(e.data);
+      w.onerror = (e) => {
+        e.preventDefault();
+        onError(new Error(`wav2flac worker failed: ${e.message}`));
+      };
+      w.onmessageerror = () => onError(new Error('wav2flac worker: message could not be deserialized'));
+    },
+    ref: ignore,
+    close: () => w.terminate(),
+  };
+}
+
+type NodeWorker = import('node:worker_threads').Worker;
+
+/**
+ * Wraps a Node `worker_threads.Worker` as a {@link Port}.
+ * @param w The worker.
+ * @returns The port.
+ */
+function nodePort(w: NodeWorker): Port<FromWorker, ToWorker> {
+  let closed = false;
+  return {
+    post: (msg, transfer) => w.postMessage(msg, transfer as never),
+    listen(onMessage, onError) {
+      w.on('message', onMessage);
+      w.on('error', onError);
+      w.on('exit', (code) => {
+        if (!closed) onError(new Error(`wav2flac worker exited with code ${code}`));
+      });
+    },
+    ref: (keep) => (keep ? w.ref() : w.unref()),
+    close: () => {
+      closed = true;
+      void w.terminate();
+    },
+  };
+}
+
+/**
+ * Starts the default worker script.
+ * @param url Override of the worker script URL.
+ * @returns The port to the new worker.
+ */
+function spawn(url: URL | string | undefined): Port<FromWorker, ToWorker> {
+  if (isNode()) {
+    const { Worker } = builtin<typeof import('node:worker_threads')>('worker_threads');
+    // Node treats a string as a file path; accept `file:` URL strings as in browsers.
+    const u = typeof url === 'string' && url.startsWith('file:') ? new URL(url) : url;
+    // Not a literal `new URL('./worker.js', …)`: bundlers would emit a second,
+    // unused copy of the worker for this Node-only branch.
+    return nodePort(new Worker(u ?? new URL(NODE_WORKER, import.meta.url)));
+  }
+  // Kept literal so bundlers (Vite, webpack) detect and emit the worker.
+  const w = url === undefined
+    ? new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
+    : new Worker(url, { type: 'module' });
+  return browserPort(w);
+}
+
+/**
+ * Creates an encoder that runs in a dedicated worker, keeping the calling
+ * thread free. The wasm is compiled once on the calling side and shared. In
+ * Node the worker does not keep the process alive while idle.
+ *
+ * @param options Worker script and wasm location.
+ * @returns The worker encoder. Call `terminate()` when done.
+ * @example
+ * ```ts
+ * const worker = createWorkerEncoder();
+ * const flac = await worker.encode(wavBytes, { compressionLevel: 8 });
+ * worker.terminate();
+ * ```
+ */
+export function createWorkerEncoder(options: WorkerEncoderOptions = {}): WorkerEncoder {
+  return connect(spawn(options.url), options.wasm);
+}
+
+/**
+ * Builds a {@link WorkerEncoder} on any port (exposed for tests).
+ * @param port Port to a worker running `serve()`.
+ * @param wasm Where to load the wasm from.
+ * @returns The worker encoder.
+ * @internal
+ */
+export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): WorkerEncoder {
+  const jobs = new Map<number, ClientJob>();
+  let nextId = 1;
+  let dead: Error | undefined;
+  port.ref(false);
+
+  const ready = init(wasm).then(() => {
+    port.post({ t: 'init', module: wasmModule() }, []);
+  });
+  // Avoid an unhandled rejection before the first call awaits it.
+  ready.catch(ignore);
+
+  const post = (msg: ToWorker, data?: Uint8Array): void => {
+    if (dead === undefined) port.post(msg, data === undefined ? [] : transferOf(data));
+  };
+
+  const add = (id: number, job: ClientJob): void => {
+    if (dead !== undefined) {
+      job.fail(dead);
+      return;
+    }
+    if (jobs.size === 0) port.ref(true);
+    jobs.set(id, job);
+  };
+  const remove = (id: number): void => {
+    if (jobs.delete(id) && jobs.size === 0) port.ref(false);
+  };
+
+  const failAll = (e: Error): void => {
+    dead ??= e;
+    for (const [id, job] of [...jobs]) {
+      remove(id);
+      job.fail(e);
+    }
+  };
+
+  port.listen(
+    (m) => jobs.get(m.id)?.handle(m),
+    (e) => {
+      failAll(e);
+      port.close();
+    },
+  );
+
+  /**
+   * Prepares bytes for sending: transfers when allowed, copies otherwise.
+   * @param bytes The bytes.
+   * @param copy Whether the caller asked to keep the buffer.
+   * @returns Bytes safe to transfer or copy.
+   */
+  const outgoing = (bytes: Uint8Array, copy: boolean): Uint8Array =>
+    copy || transferOf(bytes).length === 0 ? bytes.slice() : bytes;
+
+  /**
+   * Creates a job that feeds `input` to the worker and routes its messages.
+   * @param input The input.
+   * @param opts Options.
+   * @param streaming Output mode.
+   * @param onOut Output chunk handler (stream mode).
+   * @param onDone Completion handler.
+   * @param onFail Failure handler.
+   * @returns A function that cancels the job.
+   */
+  const start = (
+    input: Input,
+    opts: Options | undefined,
+    streaming: boolean,
+    onOut: (data: Uint8Array) => void,
+    onDone: (data: Uint8Array | null) => void,
+    onFail: (e: unknown) => void,
+  ): (() => void) => {
+    const args = normalizeOptions(opts, streaming);
+    const signal = opts?.signal;
+    const onProgress = opts?.onProgress;
+    const copy = opts?.copy ?? false;
+    const id = nextId++;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let finished = false;
+
+    const end = (): void => {
+      if (finished) return;
+      finished = true;
+      remove(id);
+      if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
+      if (reader !== undefined) {
+        void reader.cancel().catch(ignore);
+        reader.releaseLock();
+      }
+    };
+    const fail = (e: unknown): void => {
+      if (finished) return;
+      end();
+      onFail(e);
+    };
+    const cancel = (): void => {
+      if (finished) return;
+      end();
+      post({ t: 'abort', id });
+    };
+    const onAbort = signal === undefined ? undefined : (): void => {
+      cancel();
+      onFail(signal.reason);
+    };
+
+    // Check the signal before locking the input stream.
+    signal?.throwIfAborted();
+    let bytes: Uint8Array | null = null;
+    if (isStream(input)) reader = input.getReader();
+    else bytes = outgoing(toBytes(input), copy);
+    signal?.addEventListener('abort', onAbort!, { once: true });
+
+    const pump = async (): Promise<void> => {
+      try {
+        const r = await reader!.read();
+        if (finished) return;
+        if (r.done) post({ t: 'end', id });
+        else {
+          const data = outgoing(toBytes(r.value, 'stream chunk'), copy);
+          post({ t: 'chunk', id, data }, data);
+        }
+      } catch (e) {
+        cancel();
+        onFail(e);
+      }
+    };
+
+    add(id, {
+      handle(m) {
+        switch (m.t) {
+          case 'progress':
+            try {
+              onProgress?.(m.p);
+            } catch (e) {
+              cancel();
+              onFail(e);
+            }
+            return;
+          case 'need':
+            void pump();
+            return;
+          case 'out':
+            onOut(m.data);
+            return;
+          case 'done':
+            end();
+            onDone(m.data);
+            return;
+          case 'error':
+            fail(reviveError(m.error));
+            return;
+          default:
+            return;
+        }
+      },
+      fail,
+    });
+
+    void ready.then(
+      () => {
+        if (finished) return;
+        if (dead !== undefined) throw dead;
+        // Another job may have transferred the same buffer meanwhile.
+        if (bytes !== null) toBytes(bytes);
+        post({ t: 'job', id, args, input: bytes, progress: onProgress !== undefined, window: OUTPUT_WINDOW }, bytes ?? undefined);
+      },
+    ).catch(fail);
+    return cancel;
+  };
+
+  /**
+   * Sends a request expecting a single reply.
+   * @param msg Builds the request for an id.
+   * @param pick Extracts the result from the reply.
+   * @returns The result.
+   */
+  const request = async <T>(msg: (id: number) => ToWorker, pick: (m: FromWorker) => T | undefined): Promise<T> => {
+    if (dead !== undefined) throw dead;
+    await ready;
+    // The worker may have died while the wasm was loading.
+    if (dead !== undefined) throw dead;
+    const id = nextId++;
+    return new Promise<T>((resolve, reject) => {
+      add(id, {
+        handle(m) {
+          remove(id);
+          if (m.t === 'error') reject(reviveError(m.error));
+          else resolve(pick(m) as T);
+        },
+        fail: reject,
+      });
+      post(msg(id));
+    });
+  };
+
+  return {
+    encode(input, opts) {
+      return new Promise<Uint8Array>((resolve, reject) => {
+        if (dead !== undefined) throw dead;
+        start(input, opts, false, ignore, (d) => resolve(d!), reject);
+      });
+    },
+
+    encodeStream(input, opts) {
+      const queue: Uint8Array[] = [];
+      let wake: (() => void) | undefined;
+      let state: 'open' | 'done' | 'failed' = 'open';
+      let error: unknown;
+      let cancel: (() => void) | undefined;
+      const poke = (): void => {
+        const w = wake;
+        wake = undefined;
+        w?.();
+      };
+      let id = 0;
+      return new ReadableStream<Uint8Array>({
+        start(c) {
+          // Like encodeStream() on the main thread: failures error the stream.
+          try {
+            if (dead !== undefined) throw dead;
+            id = nextId;
+            cancel = start(
+              input,
+              opts,
+              true,
+              (d) => { queue.push(d); poke(); },
+              () => { state = 'done'; poke(); },
+              // Output not yet read is dropped: an abort or error wins.
+              (e) => { state = 'failed'; error = e; queue.length = 0; poke(); },
+            );
+          } catch (e) {
+            c.error(e);
+          }
+        },
+        async pull(c) {
+          while (queue.length === 0 && state === 'open') await new Promise<void>((r) => { wake = r; });
+          const d = queue.shift();
+          if (d !== undefined) {
+            c.enqueue(d);
+            if (state === 'open') post({ t: 'ack', id });
+            return;
+          }
+          if (state === 'failed') throw error;
+          c.close();
+        },
+        cancel() {
+          cancel?.();
+        },
+      }, { highWaterMark: 0 });
+    },
+
+    async probe(input) {
+      const data = toBytes(input).slice();
+      return request((id) => ({ t: 'probe', id, data }), (m) => (m.t === 'probe' ? m.info : undefined));
+    },
+
+    async wasmMemoryBytes() {
+      return request((id) => ({ t: 'stats', id }), (m) => (m.t === 'stats' ? m.wasmBytes : undefined));
+    },
+
+    terminate() {
+      failAll(abortError('The worker was terminated.'));
+      port.close();
+    },
+  };
+}
+
+export type { Progress };
