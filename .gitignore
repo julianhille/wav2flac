@@ -20,3 +20,6 @@
 .idea/
 .vscode/
 *.swp
+
+# wasm-bindgen / wasm-opt intermediates
+/build/

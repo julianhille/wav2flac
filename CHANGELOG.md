@@ -42,5 +42,7 @@ links are collected at the bottom of this file.
   chunking, streaming, state, metadata, transcode quality, property-based,
   golden hashes, and differential tests against ffmpeg and `flac`.
 - Project scaffolding: 0BSD license, third-party license handling, CI skeleton.
+- Native `encode` example (used as the determinism reference and benchmark
+  baseline).
 
 [Unreleased]: https://github.com/julianhille/wav2flac/commits/main

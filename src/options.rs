@@ -81,7 +81,7 @@ impl Default for Tags {
 pub struct Options {
     /// Compression level 0 (fastest) ..= 8 (smallest).
     pub compression_level: u8,
-    /// Block size override (32..=32767). `None` uses the level's block size.
+    /// Block size override (16..=65535). `None` uses the level's block size.
     pub block_size: Option<usize>,
     /// Target sample rate. `None` keeps the input rate.
     pub sample_rate: Option<u32>,
