@@ -55,7 +55,7 @@ function typeTag(x: unknown): string {
  * @param x Candidate.
  * @returns `true` for array buffers.
  */
-function isBuffer(x: unknown): x is ArrayBuffer {
+export function isBuffer(x: unknown): x is ArrayBuffer {
   const t = typeTag(x);
   return t === 'ArrayBuffer' || t === 'SharedArrayBuffer';
 }

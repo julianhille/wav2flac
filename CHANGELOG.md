@@ -28,6 +28,8 @@ links are collected at the bottom of this file.
   `init()` inside `encode()` loaded from the default location instead. It
   keeps a copy of bytes until the wasm is ready, so a buffer you transfer or
   change after the call can't break the retry.
+- `init()` loads from an `ArrayBuffer` of another realm, such as an iframe or
+  a `vm` context. Before, it rejected it as not being wasm bytes.
 - Docs: the worker pool sample replaces a worker that crashed. Before, the
   pool kept handing jobs to it, and each of them failed. It also rejects a
   size below 1, which made every job wait forever, and its batch example

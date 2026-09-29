@@ -56,6 +56,11 @@ describe('init', () => {
       new Uint8Array(sab).set(bytes);
       return sab;
     }],
+    ['ArrayBuffer of another realm', () => {
+      const buffer = runInNewContext(`new ArrayBuffer(${bytes.length})`) as ArrayBuffer;
+      new Uint8Array(buffer).set(bytes);
+      return buffer;
+    }],
     ['view of a SharedArrayBuffer', () => {
       const view = new Uint8Array(new SharedArrayBuffer(bytes.length + 8), 8);
       view.set(bytes);
@@ -215,19 +220,28 @@ describe('init', () => {
     expect(urls).toEqual([url, url]);
   });
 
-  it('retries an abandoned load of bytes from its own copy', async () => {
-    const w = await fresh();
+  it.each([
     // A view that doesn't start at the start of its buffer.
-    const buffer = new ArrayBuffer(bytes.byteLength + 8);
-    const view = new Uint8Array(buffer, 8);
-    view.set(bytes);
+    ['a view', () => {
+      const buffer = new ArrayBuffer(bytes.byteLength + 8);
+      new Uint8Array(buffer, 8).set(bytes);
+      return { buffer, source: new Uint8Array(buffer, 8) };
+    }],
+    ['an ArrayBuffer of another realm', () => {
+      const buffer = runInNewContext(`new ArrayBuffer(${bytes.length})`) as ArrayBuffer;
+      new Uint8Array(buffer).set(bytes);
+      return { buffer, source: buffer };
+    }],
+  ])('retries an abandoned load of %s from its own copy', async (_, make) => {
+    const w = await fresh();
+    const { buffer, source } = make();
     const stop = new AbortController();
-    const first = w.init(view, { signal: stop.signal });
+    const first = w.init(source, { signal: stop.signal });
     stop.abort(new Error('gave up'));
     await expect(first).rejects.toThrow('gave up');
     // The caller hands its buffer on, which detaches it.
     structuredClone(buffer, { transfer: [buffer] });
-    expect(view.byteLength).toBe(0);
+    expect(buffer.byteLength).toBe(0);
     await w.init();
     expect(w.isReady()).toBe(true);
   });
@@ -257,14 +271,14 @@ describe('init', () => {
     const gc = runInNewContext('gc') as () => void;
     const w = await fresh();
     const refs: WeakRef<ArrayBufferLike>[] = [];
-    // Records the copies init() makes; a spy would keep them alive.
+    // Records the copies of the wasm init() makes; a spy would keep them alive.
     const proto = Object.getPrototypeOf(Uint8Array.prototype) as object;
     const slice = Object.getOwnPropertyDescriptor(proto, 'slice')!;
     Object.defineProperty(proto, 'slice', {
       ...slice,
       value(this: Uint8Array, ...args: [number?, number?]) {
         const copy = (slice.value as Uint8Array['slice']).apply(this, args);
-        refs.push(new WeakRef(copy.buffer));
+        if (copy.byteLength === bytes.byteLength) refs.push(new WeakRef(copy.buffer));
         return copy;
       },
     });

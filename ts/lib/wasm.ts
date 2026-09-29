@@ -4,6 +4,7 @@
  * @module
  */
 import initGlue, { initSync as initGlueSync } from '../../build/bindgen/wav2flac.js';
+import { isBuffer } from './input.js';
 import { isSignal } from './options.js';
 import { builtin, ignore, isNode } from './platform.js';
 
@@ -92,7 +93,7 @@ function toUrl(source: string | URL): URL {
  */
 async function compile(source: WasmSource, signal: AbortSignal): Promise<WebAssembly.Module> {
   if (source instanceof WebAssembly.Module) return source;
-  if (ArrayBuffer.isView(source) || source instanceof ArrayBuffer) return WebAssembly.compile(source as BufferSource);
+  if (ArrayBuffer.isView(source) || isBuffer(source)) return WebAssembly.compile(source as BufferSource);
   let res: Response | PromiseLike<Response>;
   if (typeof source === 'string' || source instanceof URL) {
     const url = toUrl(source);
@@ -248,10 +249,7 @@ function retrySource(source: WasmSource): WasmSource | undefined {
   if (typeof source === 'string' || source instanceof URL || source instanceof WebAssembly.Module) return source;
   try {
     if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength).slice();
-    if (source instanceof ArrayBuffer ||
-      (typeof SharedArrayBuffer === 'function' && (source as unknown) instanceof SharedArrayBuffer)) {
-      return new Uint8Array(source as ArrayBufferLike).slice();
-    }
+    if (isBuffer(source)) return new Uint8Array(source).slice();
   } catch {
     // A detached buffer; the load reports it.
     return source;
