@@ -1,8 +1,6 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "typeRoots": ["./node_modules/@types"],
-    "noEmit": true
-  },
-  "include": ["../../ts"]
+    "types": []
+  }
 }

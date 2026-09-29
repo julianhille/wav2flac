@@ -41,6 +41,11 @@ links are collected at the bottom of this file.
   fails when the standard library's license texts are from another release.
 - Third-party page: crates are sorted the same in every locale, and the page
   links the same notice files that `THIRD_PARTY_LICENSES.txt` reproduces.
+- API reference: `Wav2FlacError` no longer lists the static members that
+  Node's type definitions add to `Error` (`captureStackTrace`,
+  `prepareStackTrace`, `stackTraceLimit`). A `@throws` tag with a union type
+  or without text renders cleanly, and the docs build fails when an
+  exported type would be published as `any`.
 - README: shipping `THIRD_PARTY_LICENSES.txt` is optional, and the README
   says where it is. The license section names the licenses of the Rust
   standard library parts (Unicode-3.0, LLVM exception).
