@@ -250,6 +250,29 @@ describe('worker protocol', () => {
     expect(port.post).not.toHaveBeenCalled();
   });
 
+  it('rejects a request whose message cannot be posted', async () => {
+    const ch = new MessageChannel();
+    serve(wrap<ToWorker, FromWorker>(ch.port2));
+    const inner = wrap<FromWorker, ToWorker>(ch.port1);
+    let held = false;
+    const w = connect({
+      ...inner,
+      post: (m, t) => {
+        if (m.t === 'stats') throw new Error('cannot post');
+        inner.post(m, t);
+      },
+      ref: (keep) => {
+        held = keep;
+        inner.ref(keep);
+      },
+    }, wasm);
+    open.push(w);
+    await expect(w.wasmMemoryBytes()).rejects.toThrow('cannot post');
+    // Nothing is pending, so the port no longer keeps the process alive.
+    expect(held).toBe(false);
+    await expect(w.probe(wav)).resolves.toMatchObject({ channels: 2 });
+  });
+
   it('does not lock a stream when the signal is already aborted', async () => {
     const { w } = pair();
     const s = streamOf(wav, 4096);

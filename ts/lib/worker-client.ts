@@ -350,15 +350,14 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
         },
         fail: reject,
       });
-      ready.then(
-        () => {
-          if (jobs.has(id)) post(msg(id));
-        },
-        (e: unknown) => {
-          remove(id);
-          reject(e);
-        },
-      );
+      // A load that failed, or a message that cannot be posted, fails it.
+      ready.then(() => {
+        if (jobs.has(id)) post(msg(id));
+      }).catch((e: unknown) => {
+        if (!jobs.has(id)) return;
+        remove(id);
+        reject(e);
+      });
     });
   };
 

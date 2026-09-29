@@ -19,7 +19,9 @@ links are collected at the bottom of this file.
 
 - Worker encoder: `terminate()` and a crash reject a `probe()` or
   `wasmMemoryBytes()` call made while the wasm still loads. Before, such a
-  call stayed pending forever.
+  call stayed pending forever. Such a call also rejects when its message
+  can't be posted to the worker, instead of staying pending and keeping Node
+  running.
 - Worker encoder: `wasmMemoryBytes()` rejects when the worker's wasm failed
   to start, so it tells whether the worker can still encode. Before, it
   answered 0.
