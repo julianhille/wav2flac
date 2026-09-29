@@ -39,8 +39,8 @@ let memory: WebAssembly.Memory | undefined;
 let pending: Load | undefined;
 /**
  * The last source that started a load and can be read again, for the loads
- * that retry after it failed or was abandoned. Cleared once the module is
- * ready.
+ * that retry after it failed or was abandoned; bytes are a copy. Cleared once
+ * the module is ready.
  */
 let configured: WasmSource | undefined;
 /** Whether init() is inside the glue's async instantiation. */
@@ -93,9 +93,6 @@ function toUrl(source: string | URL): URL {
 async function compile(source: WasmSource, signal: AbortSignal): Promise<WebAssembly.Module> {
   if (source instanceof WebAssembly.Module) return source;
   if (ArrayBuffer.isView(source) || source instanceof ArrayBuffer) return WebAssembly.compile(source as BufferSource);
-  if (typeof SharedArrayBuffer === 'function' && (source as unknown) instanceof SharedArrayBuffer) {
-    return WebAssembly.compile(new Uint8Array(source as unknown as SharedArrayBuffer).slice());
-  }
   let res: Response | PromiseLike<Response>;
   if (typeof source === 'string' || source instanceof URL) {
     const url = toUrl(source);
@@ -199,8 +196,10 @@ function waitFor(load: Load, signal: AbortSignal): Promise<void> {
  *
  * A retry loads from the `source` of that call. Without one, it loads from
  * the last URL, path, bytes or module that a load started with, so the
- * `init()` inside `encode()` retries your custom location. A `Response` can
- * be read only once; after it failed, pass a new one.
+ * `init()` inside `encode()` retries your custom location. `init()` loads
+ * from a copy of bytes, so you can reuse or transfer your buffer right after
+ * the call. A `Response` can be read only once; after it failed, pass a new
+ * one.
  *
  * @param source Where to load the wasm from. Default: `wav2flac.wasm` next to
  *   the package's JS (read with `fs` in Node, `fetch`ed elsewhere).
@@ -226,8 +225,9 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
   if (compiled !== undefined) return Promise.resolve();
   if (signal?.aborted === true) return Promise.reject(signal.reason);
   if (pending === undefined) {
-    if (source !== undefined && isReusable(source)) configured = source;
-    pending = startLoad(source ?? configured ?? defaultWasmUrl());
+    const again = source === undefined ? undefined : retrySource(source);
+    if (again !== undefined) configured = again;
+    pending = startLoad(again ?? source ?? configured ?? defaultWasmUrl());
   }
   const load = pending;
   if (signal === undefined) {
@@ -238,15 +238,25 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
 }
 
 /**
- * Whether a source can be loaded again: a URL, a path, bytes or a module, not
- * a `Response`, which can be read only once.
+ * What a retry of a load from `source` loads from: a URL, a path or a module
+ * as it is, and a copy of bytes, which the caller may change or transfer
+ * meanwhile. A `Response` can be read only once, so it has none.
  * @param source The source.
- * @returns `true` if a retry can use it.
+ * @returns The source for a retry, or `undefined`.
  */
-function isReusable(source: WasmSource): boolean {
-  return typeof source === 'string' || source instanceof URL || source instanceof WebAssembly.Module ||
-    ArrayBuffer.isView(source) || source instanceof ArrayBuffer ||
-    (typeof SharedArrayBuffer === 'function' && (source as unknown) instanceof SharedArrayBuffer);
+function retrySource(source: WasmSource): WasmSource | undefined {
+  if (typeof source === 'string' || source instanceof URL || source instanceof WebAssembly.Module) return source;
+  try {
+    if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength).slice();
+    if (source instanceof ArrayBuffer ||
+      (typeof SharedArrayBuffer === 'function' && (source as unknown) instanceof SharedArrayBuffer)) {
+      return new Uint8Array(source as ArrayBufferLike).slice();
+    }
+  } catch {
+    // A detached buffer; the load reports it.
+    return source;
+  }
+  return undefined;
 }
 
 /**

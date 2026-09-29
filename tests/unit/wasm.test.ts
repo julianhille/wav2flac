@@ -56,6 +56,11 @@ describe('init', () => {
       new Uint8Array(sab).set(bytes);
       return sab;
     }],
+    ['view of a SharedArrayBuffer', () => {
+      const view = new Uint8Array(new SharedArrayBuffer(bytes.length + 8), 8);
+      view.set(bytes);
+      return view;
+    }],
     ['Response', () => new Response(bytes, { headers: { 'content-type': 'application/wasm' } })],
     ['Response promise (no wasm mime)', () => Promise.resolve(new Response(bytes))],
   ])('loads from %s', async (_, src) => {
@@ -210,20 +215,73 @@ describe('init', () => {
     expect(urls).toEqual([url, url]);
   });
 
-  it('lets go of the bytes it loaded from', async () => {
+  it('retries an abandoned load of bytes from its own copy', async () => {
+    const w = await fresh();
+    // A view that doesn't start at the start of its buffer.
+    const buffer = new ArrayBuffer(bytes.byteLength + 8);
+    const view = new Uint8Array(buffer, 8);
+    view.set(bytes);
+    const stop = new AbortController();
+    const first = w.init(view, { signal: stop.signal });
+    stop.abort(new Error('gave up'));
+    await expect(first).rejects.toThrow('gave up');
+    // The caller hands its buffer on, which detaches it.
+    structuredClone(buffer, { transfer: [buffer] });
+    expect(view.byteLength).toBe(0);
+    await w.init();
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('rejects detached bytes, and retries from a new source', async () => {
+    const w = await fresh();
+    const buffer = new Uint8Array(bytes).buffer;
+    const view = new Uint8Array(buffer, 8);
+    structuredClone(buffer, { transfer: [buffer] });
+    await expect(w.init(buffer)).rejects.toThrow();
+    await expect(w.init(view)).rejects.toThrow();
+    await w.init(new Uint8Array(bytes));
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('loads from a copy of bytes, so the caller can transfer them at once', async () => {
+    const w = await fresh();
+    const buffer = new Uint8Array(bytes).buffer;
+    const done = w.init(buffer);
+    structuredClone(buffer, { transfer: [buffer] });
+    await done;
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('lets go of the bytes it loaded from, and of its copy', async () => {
     setFlagsFromString('--expose-gc');
     const gc = runInNewContext('gc') as () => void;
     const w = await fresh();
-    let ref: WeakRef<ArrayBuffer> | undefined;
-    await (async () => {
-      // A copy: slice() of a Node Buffer shares its memory.
-      const copy = new Uint8Array(bytes);
-      ref = new WeakRef(copy.buffer);
-      await w.init(copy);
-    })();
+    const refs: WeakRef<ArrayBufferLike>[] = [];
+    // Records the copies init() makes; a spy would keep them alive.
+    const proto = Object.getPrototypeOf(Uint8Array.prototype) as object;
+    const slice = Object.getOwnPropertyDescriptor(proto, 'slice')!;
+    Object.defineProperty(proto, 'slice', {
+      ...slice,
+      value(this: Uint8Array, ...args: [number?, number?]) {
+        const copy = (slice.value as Uint8Array['slice']).apply(this, args);
+        refs.push(new WeakRef(copy.buffer));
+        return copy;
+      },
+    });
+    try {
+      await (async () => {
+        // A copy: slice() of a Node Buffer shares its memory.
+        const copy = new Uint8Array(bytes);
+        refs.push(new WeakRef(copy.buffer));
+        await w.init(copy);
+      })();
+    } finally {
+      Object.defineProperty(proto, 'slice', slice);
+    }
+    expect(refs).toHaveLength(2);
     await new Promise((r) => setTimeout(r, 0));
     gc();
-    expect(ref!.deref()).toBeUndefined();
+    expect(refs.map((r) => r.deref())).toEqual([undefined, undefined]);
   });
 
   it('keeps a load alive while another caller still waits', async () => {

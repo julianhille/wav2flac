@@ -62,8 +62,10 @@ next call.
 
 A retry loads from the source passed to that call. Without one, as in
 `encode()`, it loads from the last URL, path, bytes or module that a load
-started with, not from the default location. A `Response` can be read only
-once, so after a load from a `Response` failed, pass a new one.
+started with, not from the default location. `init()` loads from its own
+copy of bytes, so you can reuse or transfer your buffer right after the call.
+A `Response` can be read only once, so after a load from a `Response` failed,
+pass a new one.
 
 A caller that waits **without** a signal keeps the load going. Its wait is
 never cut short by another caller's timeout, and it waits as long as the load
