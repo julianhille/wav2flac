@@ -5,7 +5,7 @@
 // Shared by gen-licenses.ts and gen-third-party.ts.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, normalize } from 'node:path';
 
 /** A package as `cargo metadata` describes it. */
 export interface Package {
@@ -54,7 +54,7 @@ export function shippedCrates(): Package[] {
 }
 
 /** The files that hold a crate's license notices, by name. */
-const NOTICE_FILE = /^(licen[cs]e|copying|notice|authors)/i;
+const NOTICE_FILE = /^(licen[cs]e|copying|copyright|notice|authors)/i;
 
 /**
  * The files in a crate's sources that carry its license notices: license
@@ -65,8 +65,12 @@ const NOTICE_FILE = /^(licen[cs]e|copying|notice|authors)/i;
  */
 export function noticeFiles(c: Package): string[] {
   const dir = dirname(c.manifest_path);
-  const files = readdirSync(dir).filter((f) => NOTICE_FILE.test(f)).sort();
-  if (c.license_file !== null && !files.includes(c.license_file)) files.push(c.license_file);
+  const files = readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && NOTICE_FILE.test(e.name))
+    .map((e) => e.name)
+    .sort();
+  const own = c.license_file === null ? undefined : normalize(c.license_file);
+  if (own !== undefined && !files.includes(own)) files.push(own);
   if (files.length === 0) throw new Error(`${c.name} ${c.version}: no license file found in ${dir}`);
   return files;
 }
