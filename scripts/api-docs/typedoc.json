@@ -1,0 +1,23 @@
+{
+  "$schema": "https://typedoc-plugin-markdown.org/schema.json",
+  "entryPoints": ["../../ts/index.ts"],
+  "tsconfig": "./tsconfig.json",
+  "out": "../../docs/reference/api",
+  "plugin": ["typedoc-plugin-markdown", "./throws-types.mjs"],
+  "readme": "none",
+  "entryFileName": "index.md",
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "skipErrorChecking": true,
+  "preservedTypeAnnotationTags": ["@throws"],
+  "treatWarningsAsErrors": true,
+  "disableSources": true,
+  "hidePageHeader": true,
+  "hideBreadcrumbs": true,
+  "useCodeBlocks": true,
+  "useHTMLEncodedBrackets": true,
+  "parametersFormat": "table",
+  "interfacePropertiesFormat": "table",
+  "typeDeclarationFormat": "table",
+  "enumMembersFormat": "table"
+}

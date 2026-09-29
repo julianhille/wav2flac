@@ -27,6 +27,8 @@ links are collected at the bottom of this file.
   thread, parallel across workers), and how-to guides for a worker pool and
   a FIFO queue.
 - Docs: a how-to section, and a Guides list in the README.
+- Docs: an API reference generated from the TSDoc (TypeDoc), on Read the Docs
+  and checked in CI.
 
 ## [1.0.0-rc.2] - 2026-09-29
 

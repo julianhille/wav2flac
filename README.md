@@ -180,6 +180,10 @@ const info = await probe(wav);
 `input` is a `Uint8Array`, an `ArrayBuffer` or a `ReadableStream<Uint8Array>`
 of a WAV file, or raw PCM when `options.pcm` is set.
 
+Every function, option and type is described in the
+[API reference](https://wav2flac.readthedocs.io/en/latest/reference/api/),
+generated from the TSDoc in the source.
+
 ### Options
 
 | Option | Default | |
