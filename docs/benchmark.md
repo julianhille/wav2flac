@@ -9,6 +9,8 @@ The benchmark compares ways of running the encoder on the same input:
 | **Main thread, `encodeSync()`** | The calling thread; blocks it until done |
 | **Worker** | `createWorkerEncoder()`: a Web Worker in browsers, `worker_threads` in Node |
 | **Native Rust** | `examples/encode` (Node runner only): the baseline without wasm |
+| **libav.js** | Another library: FFmpeg's FLAC encoder ([`@libav.js/variant-flac`](https://www.npmjs.com/package/@libav.js/variant-flac)) |
+| **libflac.js** | Another library: the reference libFLAC ([`libflacjs`](https://www.npmjs.com/package/libflacjs)) |
 
 "Worker" means a dedicated Web Worker. An AudioWorklet isn't a fit: it runs on
 the real-time audio rendering thread in 128-frame quanta and is meant for
@@ -31,6 +33,33 @@ The benchmark has two parts, picked with `--input`:
    The runner converts the preset's WAV into that input before timing. The
    native baseline encodes the same bytes (`examples/encode --pcm
    FORMAT:RATE:CHANNELS`).
+
+## Other libraries
+
+The `libav` and `libflac` modes run other FLAC encoders for the web on the
+same input, so you can compare speed, memory, output size and how long the
+page freezes. Both are dev dependencies of the benchmark only.
+
+- **libav.js** (LGPL-2.1): FFmpeg's `flac` encoder. The benchmark muxes the
+  encoded packets into a `.flac` file in libav.js's in-memory filesystem and
+  reads it back. In browsers libav.js runs in its own Web Worker, and every
+  call is a message round trip. In Node it runs on the calling thread.
+- **libflac.js** (MIT): libFLAC through its stream-encoder API, on the
+  calling thread. Without seek callbacks libFLAC can't rewrite the header at
+  the end, so its STREAMINFO has no MD5 and the file has no seek table.
+  wav2flac and libav.js write both.
+
+Neither library reads WAV files. Both get the preset's samples as raw
+interleaved integer PCM, prepared before timing, whatever `--input` says.
+Any conversion a library needs on top of that counts towards its time,
+because every caller has to do it: libflac.js takes an `Int32Array`, and
+libav.js takes 24-bit audio as S32 with the samples in the top bits.
+
+Only 16- and 24-bit integer inputs are supported, at the configured
+compression level. A configuration with transcoding reports an error for
+these modes, and the other modes still run. Compression levels map to each
+library's own presets, which aren't identical, so compare the output sizes
+too. All three encoders produce bit-exact FLAC (checked with `flac -d`).
 
 There are three ways to run it. All of them share `bench/shared.ts` (presets,
 configuration and statistics).
@@ -112,7 +141,7 @@ Both CLIs take the same options:
 | `--input` | `wav` | `wav`, `pcm-int`, `pcm-f32` (see above) |
 | `--output` | `buffer` | `buffer` (`encode()`), `stream` (`encodeStream()`; `encodeSync()` stays buffered) |
 | `--transcode` | `none` | `none`, `resample-48k`, `to-16bit` |
-| `--modes a,b` | `main,sync,worker` | plus `native` (Node only) |
+| `--modes a,b` | `main,sync,worker` | plus `native` (Node only), `libav`, `libflac` |
 | `--no-warmup` | | skip the untimed warm-up run per mode |
 | `--json FILE` | | write the full report (every sample) |
 | `--markdown FILE` | | append a Markdown table (CI uses `$GITHUB_STEP_SUMMARY`) |
