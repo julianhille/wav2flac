@@ -2,48 +2,12 @@
 // The code samples of the how-to guides, run as they are printed. Each sample
 // is read from its Markdown file; its `import` lines are replaced by stubs.
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { encode } from '../../ts/index.js';
+import { asScript, jsBlocks, run } from '../helpers/samples.js';
 import { makeWav } from '../helpers/wav.js';
-
-/**
- * Returns the ```js blocks of a Markdown file.
- * @param path The file.
- * @param count How many blocks the tests expect.
- * @returns The code of each block.
- */
-function jsBlocks(path: string, count: number): string[] {
-  const md = readFileSync(path, 'utf8');
-  const blocks = [...md.matchAll(/^```js\n([\s\S]*?)^```$/gm)].map((m) => m[1] ?? '');
-  if (blocks.length !== count) throw new Error(`${path}: ${blocks.length} js blocks, expected ${count}`);
-  return blocks;
-}
-
-/**
- * Turns a sample module into a script: drops its imports and `export`s.
- * @param code The sample.
- * @returns The code without imports.
- */
-function asScript(code: string): string {
-  return code.replace(/^import .* from 'wav2flac';$/gm, '').replace(/^export /gm, '');
-}
-
-const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
-  ...args: string[]
-) => (...values: unknown[]) => Promise<unknown>;
-
-/**
- * Runs `code` as the body of an async function.
- * @param code The body.
- * @param scope Names and values the body can use.
- * @returns What the body returns.
- */
-function run(code: string, scope: Record<string, unknown>): Promise<unknown> {
-  return new AsyncFunction(...Object.keys(scope), code)(...Object.values(scope));
-}
 
 const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
