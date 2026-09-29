@@ -60,7 +60,8 @@ The wasm binary is found automatically: next to the JS in Node, and via
 `new URL(…, import.meta.url)` in browsers and in bundlers such as Vite and
 webpack. To host it yourself, call `init(urlOrBytes)` first. The binary
 itself carries no license notices; you can put the package's
-`THIRD_PARTY_LICENSES.txt` next to it (see [License](#license)). To give up on a download that stalls, pass a signal:
+`THIRD_PARTY_LICENSES.txt` next to it (see [License](#license)). To give up
+on a download that stalls, pass a signal:
 `init(url, { signal: AbortSignal.timeout(10_000) })`. See the
 [loading guide](https://github.com/julianhille/wav2flac/blob/main/docs/loading.md).
 

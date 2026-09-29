@@ -140,10 +140,10 @@ whenever a new recording comes in.
   signal aborted, or `onProgress` threw. So after a failed job, the pool asks
   the worker for `wasmMemoryBytes()`, which only fails once the worker is
   dead or its wasm failed to start, and replaces such a worker with a fresh
-  one. A worker that dies
-  without an `error` event can't fail its job, so the job stays pending. To
-  bound a job, pass a `signal` such as `AbortSignal.timeout()`. The worker
-  then doesn't answer the check either, and after 5 seconds it is replaced.
+  one. A worker that dies without an `error` event can't fail its job, so the
+  job stays pending. To bound a job, pass a `signal` such as
+  `AbortSignal.timeout()`. The worker then doesn't answer the check either,
+  and after 5 seconds it is replaced.
 - **Node.** The same code works with `worker_threads`.
   `navigator.hardwareConcurrency` is available in Node ≥ 21, or use
   `os.availableParallelism()`.
