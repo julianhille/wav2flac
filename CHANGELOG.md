@@ -32,6 +32,8 @@ links are collected at the bottom of this file.
   `pkg/cjs/index.min.cjs` and `worker.min.cjs`, each with a source map, also
   exported as `wav2flac/min`. About 6 KiB smaller gzipped (index + worker).
   `wav2flac` still resolves to the normal bundles, which are unchanged.
+- Docs: a how-to for loading from a CDN, including starting the worker
+  there.
 
 ### Changed
 

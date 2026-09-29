@@ -13,6 +13,11 @@
  * only wasm the page fetches. Each bundler must emit the package's `.wasm`
  * byte for byte, since its first section holds the license notices.
  *
+ * A last page follows the CDN how-to: a second server with CORS headers
+ * stands in for the CDN, the page imports `index.min.js` from there, and
+ * starts the worker with the `blob:` snippet taken from the docs. The
+ * default worker must be refused there, and the snippet's must encode.
+ *
  * `WAV2FLAC_CHROMIUM` (or `_FIREFOX`, `_WEBKIT`) points at another browser
  * executable.
  *
@@ -26,7 +31,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { chromium, firefox, webkit } from 'playwright';
+import { type Browser, chromium, firefox, webkit } from 'playwright';
 
 /** Bundler versions under test (exact, so the run is repeatable). */
 const VITE = '8.3.1';
@@ -132,11 +137,34 @@ const MIME: Record<string, string> = {
 const CUSTOM_WASM = '/custom/route/w2f.wasm';
 
 /**
+ * Writes the CDN page, `cdn.html`, and `cdn-worker.js`: the `blob:` worker
+ * snippet from the CDN how-to, with its jsDelivr URL pointed at `cdn`.
+ * @param cdn origin of the server standing in for the CDN
+ */
+function prepareCdn(cdn: string): void {
+  const doc = readFileSync(join(root, 'docs/how-to/load-from-cdn.md'), 'utf8');
+  const jsdelivr = 'https://cdn.jsdelivr.net/npm/wav2flac@1/';
+  const snippet = [...doc.matchAll(/```js\n([\s\S]*?)```/g)].map((m) => m[1]!)
+    .find((s) => s.includes('createObjectURL'));
+  if (snippet === undefined || !snippet.includes(jsdelivr) || !snippet.includes('const encoder')) {
+    throw new Error('load-from-cdn.md no longer has the blob: worker snippet');
+  }
+  writeFileSync(join(app, 'cdn-worker.js'),
+    `${snippet.replaceAll(jsdelivr, `${cdn}/node_modules/wav2flac/`)}export { encoder };\n`);
+  const imports = { wav2flac: `${cdn}/node_modules/wav2flac/pkg/esm/index.min.js` };
+  writeFileSync(join(app, 'cdn.html'), '<!doctype html><meta charset="utf-8">'
+    + `<script type="importmap">${JSON.stringify({ imports })}</script>`
+    + '<script type="module" src="./cdn.js"></script>\n');
+}
+
+/**
  * Serves `app/` on 127.0.0.1, plus the package's wasm at {@link CUSTOM_WASM}.
  * @param log receives the path of every request
+ * @param headers extra response headers, such as CORS for the stand-in CDN
  * @returns the server's origin and a function that stops it
  */
-async function serve(log: string[]): Promise<{ origin: string; close: () => void }> {
+async function serve(log: string[], headers: Record<string, string> = {}):
+  Promise<{ origin: string; close: () => void }> {
   const server = createServer((req, res) => {
     if (req.url === '/favicon.ico') {
       res.writeHead(204).end();
@@ -157,7 +185,7 @@ async function serve(log: string[]): Promise<{ origin: string; close: () => void
       res.writeHead(404).end();
       return;
     }
-    res.writeHead(200, { 'content-type': MIME[extname(file!)] ?? 'application/octet-stream' });
+    res.writeHead(200, { ...headers, 'content-type': MIME[extname(file!)] ?? 'application/octet-stream' });
     res.end(readFileSync(file!));
   });
   await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
@@ -176,13 +204,48 @@ const PAGES = {
 };
 const ENGINES = { chromium, firefox, webkit };
 
+/**
+ * Opens a page and waits for the `window.result` it reports.
+ * @param browser browser to open the page in
+ * @param url page URL
+ * @param errors receives the page's uncaught errors and console errors
+ * @returns the page's result
+ */
+async function visit(browser: Browser, url: string, errors: string[]): Promise<Record<string, string>> {
+  const page = await browser.newPage();
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  try {
+    await page.goto(url);
+    return await page.waitForFunction(() => (window as { result?: unknown }).result,
+      null, { timeout: 60_000 }).then((h) => h.jsonValue()) as Record<string, string>;
+  } finally {
+    await page.close();
+  }
+}
+
 try {
   const want = await expected();
   prepare();
   const log: string[] = [];
   const { origin, close } = await serve(log);
+  const cdnLog: string[] = [];
+  const cdn = await serve(cdnLog, { 'access-control-allow-origin': '*' });
+  prepareCdn(cdn.origin);
   const names = (process.env.WAV2FLAC_BROWSERS ?? 'chromium').split(',').map((s) => s.trim());
   let failed = 0;
+  /**
+   * Prints the outcome of one page and counts failures.
+   * @param label what ran
+   * @param problem what went wrong, or `''`
+   * @param errors the page's errors
+   */
+  const report = (label: string, problem: string, errors: string[]): void => {
+    if (errors.length > 0) problem += ` ${errors.join('; ')}`;
+    const ok = problem === '';
+    if (!ok) failed++;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}${ok ? '' : `: ${problem.trim()}`}`);
+  };
   try {
     for (const name of names) {
       const engine = ENGINES[name as keyof typeof ENGINES];
@@ -193,16 +256,11 @@ try {
       try {
         for (const [label, path] of Object.entries(PAGES)) {
           for (const custom of [false, true]) {
-            const page = await browser.newPage();
             const errors: string[] = [];
-            page.on('pageerror', (e) => errors.push(String(e)));
-            page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
             log.length = 0;
             let problem = '';
             try {
-              await page.goto(origin + path + (custom ? `?wasm=${CUSTOM_WASM}` : ''));
-              const got = await page.waitForFunction(() => (window as { result?: unknown }).result,
-                null, { timeout: 60_000 }).then((h) => h.jsonValue()) as Record<string, string>;
+              const got = await visit(browser, origin + path + (custom ? `?wasm=${CUSTOM_WASM}` : ''), errors);
               const bad = Object.keys(want).filter((k) => got[k] !== want[k]);
               if (got.error !== undefined) problem = got.error;
               else if (bad.length > 0) problem = `mismatch in ${bad.join(', ')}`;
@@ -222,22 +280,41 @@ try {
               }
             } catch (e) {
               problem = String(e);
-            } finally {
-              await page.close();
             }
-            if (errors.length > 0) problem += ` ${errors.join('; ')}`;
-            const ok = problem === '';
-            if (!ok) failed++;
-            console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} / ${label}${custom ? ' / custom wasm route' : ''}` +
-              (ok ? '' : `: ${problem.trim()}`));
+            report(`${name} / ${label}${custom ? ' / custom wasm route' : ''}`, problem, errors);
           }
         }
+
+        // The CDN how-to: package and worker from another origin.
+        const errors: string[] = [];
+        log.length = 0;
+        cdnLog.length = 0;
+        let problem = '';
+        try {
+          const got = await visit(browser, `${origin}/cdn.html`, errors);
+          const bad = ['encode', 'worker'].filter((k) => got[k] !== want[k]);
+          const pkg = '/node_modules/wav2flac/pkg/';
+          if (got.error !== undefined) problem = got.error;
+          else if (bad.length > 0) problem = `mismatch in ${bad.join(', ')}`;
+          else if (got.defaultWorker !== 'refused') problem = 'the default worker started cross-origin';
+          else if (log.some((p) => p.startsWith(pkg))) {
+            problem = `fetched the package from the page's origin: ${log.join(', ')}`;
+          } else if (!cdnLog.includes(`${pkg}esm/worker.min.js`)) {
+            problem = `the worker did not come from the CDN, which served ${cdnLog.join(', ')}`;
+          }
+        } catch (e) {
+          problem = String(e);
+        }
+        // Firefox also logs the refusal of the default worker.
+        const refusal = /Security Error: .* may not load data from .*\/worker\.min\.js/;
+        report(`${name} / CDN, blob: worker`, problem, errors.filter((e) => !refusal.test(e)));
       } finally {
         await browser.close();
       }
     }
   } finally {
     close();
+    cdn.close();
   }
   if (failed > 0) process.exitCode = 1;
 } finally {
