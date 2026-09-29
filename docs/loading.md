@@ -67,6 +67,10 @@ copy of bytes, so you can reuse or transfer your buffer right after the call.
 A `Response` can be read only once, so after a load from a `Response` failed,
 pass a new one.
 
+A worker encoder loads the wasm once, when you create it. If that load fails,
+every job of that encoder rejects with its error; create a new encoder to try
+again.
+
 A caller that waits **without** a signal keeps the load going. Its wait is
 never cut short by another caller's timeout, and it waits as long as the load
 takes.

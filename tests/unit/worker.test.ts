@@ -250,6 +250,23 @@ describe('worker protocol', () => {
     expect(port.post).not.toHaveBeenCalled();
   });
 
+  it('fails every job of an encoder whose wasm failed to load', async () => {
+    vi.resetModules();
+    const client = await import('../../ts/lib/worker-client.js');
+    const port: Port<FromWorker, ToWorker> = {
+      post: vi.fn(),
+      listen: () => undefined,
+      ref: () => undefined,
+      close: () => undefined,
+    };
+    const w = client.connect(port, Promise.resolve(new Response(null, { status: 404 })));
+    open.push(w);
+    await expect(w.encode(wav.slice())).rejects.toThrow(/404/);
+    await expect(w.probe(wav.slice(0, 64))).rejects.toThrow(/404/);
+    await expect(w.wasmMemoryBytes()).rejects.toThrow(/404/);
+    expect(port.post).not.toHaveBeenCalled();
+  });
+
   it('rejects a request whose message cannot be posted', async () => {
     const ch = new MessageChannel();
     serve(wrap<ToWorker, FromWorker>(ch.port2));
