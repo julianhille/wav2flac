@@ -123,13 +123,12 @@ whenever a new recording comes in.
 - **Pool size.** Leaving one core for the UI thread is a good default, and
   never fewer than one worker. More workers than cores doesn't make encoding
   faster. Each worker costs a thread and its own wasm memory: about 2 MiB,
-  or about 20 MiB with `blockSize: 65535` and 8 channels at 24 bits.
+  or up to about 20 MiB with `blockSize: 65535` and 8 channels.
 - **Memory.** Up to `size` jobs run at once. Each running job holds its
   input and its growing output in JS memory until it finishes, so peak memory
   is roughly the sum of the `size` largest jobs in flight. The encoder's own
-  state in wasm memory stops growing within the first seconds of a job. How
-  large it gets depends on `blockSize`, the number of channels and the bit
-  depth, not on the length of the job.
+  state in wasm memory is bounded: it depends on `blockSize`, the number of
+  channels, the bit depth and resampling, and doesn't grow with long jobs.
 - **Transfers.** In-memory input is transferred to the worker, which detaches
   your copy, when the job *starts*, not when you call `pool.encode()`. Pass
   `copy: true` to keep it.
