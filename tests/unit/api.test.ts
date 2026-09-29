@@ -319,7 +319,7 @@ describe('encode / encodeSync / encodeStream', () => {
   });
 
   it('reports the version', () => {
-    expect(version()).toMatch(/^wav2flac \d+\.\d+\.\d+ \(libflac-rs/);
+    expect(version()).toMatch(/^wav2flac \d+\.\d+\.\d+(-[0-9A-Za-z.]+)? \(libflac-rs/);
   });
 });
 

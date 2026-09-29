@@ -128,6 +128,25 @@ fn mixed(bits: u32, ch: usize, frames: usize) -> Vec<i32> {
         .collect()
 }
 
+/// Replaces the crate version in the vendor string with `X`, so a version bump does not change
+/// every hash. Fixes the vendor length and the `VORBIS_COMMENT` block length that precede it.
+fn normalize(out: &[u8]) -> Vec<u8> {
+    let version = concat!("wav2flac ", env!("CARGO_PKG_VERSION"), " (").as_bytes();
+    let Some(p) = out.windows(version.len()).position(|w| w == version) else {
+        return out.to_vec();
+    };
+    let shrink = env!("CARGO_PKG_VERSION").len() - 1;
+    let vendor_len = u32::from_le_bytes(out[p - 4..p].try_into().unwrap()) - shrink as u32;
+    let block = &out[p - 7..p - 4];
+    let block_len = u32::from_be_bytes([0, block[0], block[1], block[2]]) - shrink as u32;
+    let mut v = out[..p - 7].to_vec();
+    v.extend_from_slice(&block_len.to_be_bytes()[1..]);
+    v.extend_from_slice(&vendor_len.to_le_bytes());
+    v.extend_from_slice(b"wav2flac X (");
+    v.extend_from_slice(&out[p + version.len()..]);
+    v
+}
+
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
@@ -149,7 +168,7 @@ fn load() -> BTreeMap<String, String> {
 fn golden_hashes() {
     let actual: BTreeMap<String, String> = cases()
         .into_iter()
-        .map(|(k, out)| (k, hex(&Sha256::digest(&out))))
+        .map(|(k, out)| (k, hex(&Sha256::digest(normalize(&out)))))
         .collect();
     if std::env::var("UPDATE_GOLDEN").as_deref() == Ok("1") {
         let body: Vec<String> = actual
