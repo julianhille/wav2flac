@@ -1,0 +1,13 @@
+{
+  "name": "wav2flac-api-docs",
+  "private": true,
+  "description": "Generates the API reference (docs/reference/api/) from the TSDoc in ts/. Separate from the root package: TypeDoc needs TypeScript's JS API (≤ 6.0), the package builds with TypeScript 7.",
+  "license": "0BSD",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "typedoc": "0.28.20",
+    "typedoc-plugin-markdown": "4.13.1",
+    "typescript": "6.0.3"
+  }
+}

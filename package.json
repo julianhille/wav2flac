@@ -63,7 +63,9 @@
     "lint:pkg": "publint --strict && attw --pack . --profile node16 --exclude-entrypoints wasm",
     "bench": "node bench/node-bench.ts",
     "bench:browser": "node bench/browser-bench.ts",
-    "bench:serve": "node bench/server.ts"
+    "bench:serve": "node bench/server.ts",
+    "docs:api": "cd scripts/api-docs && npm ci --ignore-scripts --no-audit --no-fund && npx typedoc --options typedoc.json",
+    "docs:third-party": "node scripts/gen-third-party.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",

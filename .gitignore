@@ -9,6 +9,7 @@
 # Docs
 /site/
 /docs/reference/api/
+/scripts/api-docs/node_modules/
 /docs/index.md
 /.venv/
 

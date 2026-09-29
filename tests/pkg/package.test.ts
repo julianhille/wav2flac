@@ -80,7 +80,14 @@ describe('installed package', () => {
     for (const name of ['hound', 'libflac-rs', 'rubato', 'wasm-bindgen']) {
       expect(text).toMatch(new RegExp(`^${name} \\d`, 'm'));
     }
-    expect(text).toMatch(/^Rust standard library \S+: core, alloc, std, dlmalloc$/m);
+    // The parts of the standard library that the wasm links, each with its notices.
+    for (const part of ['core, alloc, std', 'dlmalloc', 'compiler_builtins, libm']) {
+      expect(text).toMatch(new RegExp(`^Rust standard library \\S+: ${part}$`, 'm'));
+    }
+    expect(text).toContain('Copyright © 1991-2024 Unicode, Inc.');
+    expect(text).toContain('Copyright (c) 2014 Alex Crichton');
+    expect(text).toContain('---- LLVM Exceptions to the Apache 2.0 License ----');
+    expect(text).toContain('Copyright © 2005-2020 Rich Felker, et al.');
   });
 
   it('puts the BSD and MIT notices at the head of every bundle', () => {
@@ -97,6 +104,14 @@ describe('installed package', () => {
         expect(head, f).toMatch(new RegExp(`^ \\* ${mit} .*\\(MIT.*\\):$`, 'm'));
       }
       expect(head, f).toContain(' * Copyright (c) The Rust Project Contributors');
+      expect(head, f).toContain(' * Copyright (c) 2014 Alex Crichton');
+      expect(head, f).toContain(' *       Copyright (c) 2009-2016 by the contributors listed in CREDITS.TXT');
+      expect(head, f).toContain(' *     Copyright (c) 2018 Jorge Aparicio');
+      // One copy of the MIT permission notice serves every crate under it.
+      expect(head.split('Permission is hereby granted, free of charge').length - 1, f).toBe(1);
+      expect(head, f).toMatch(/^ \* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE$/m);
+      // The banner points to the notices file for the long Apache-2.0 text.
+      expect(head, f).not.toContain('TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION');
     }
   });
 

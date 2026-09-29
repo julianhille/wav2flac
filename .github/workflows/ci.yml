@@ -293,3 +293,37 @@ jobs:
         run: npm run test:browser
         env:
           WAV2FLAC_BROWSERS: ${{ matrix.browser }}
+
+  docs:
+    name: Docs site (MkDocs, API reference)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Node that Read the Docs uses (.readthedocs.yaml).
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/api-docs/package-lock.json
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      # The page is committed so Read the Docs needs no Rust; keep it in sync.
+      - name: Third-party page matches Cargo.lock
+        run: |
+          npm run docs:third-party
+          git diff --exit-code docs/third-party.md \
+            || { echo "::error::docs/third-party.md is out of date; run npm run docs:third-party"; exit 1; }
+      - name: Install MkDocs
+        run: python3 -m venv "$RUNNER_TEMP/venv" && "$RUNNER_TEMP/venv/bin/pip" install -q -r docs/requirements.txt
+      # Warnings (broken TSDoc links, unknown tags) fail the build.
+      - name: Generate the API reference
+        run: npm run docs:api
+      - name: Build the site like Read the Docs (strict)
+        run: cp README.md docs/index.md && "$RUNNER_TEMP/venv/bin/mkdocs" build --strict

@@ -43,6 +43,9 @@ const flac = await encode(wavBytes); // Uint8Array in, Uint8Array (a .flac file)
   input-size limits, stable error codes, ESM + CommonJS, TypeScript types.
   The output is deterministic: the same input and options give the same
   bytes, however the input is chunked.
+- **Zero dependencies.** `npm install wav2flac` installs just this package:
+  JS bundles, types and one `.wasm` file. In Node it uses only built-in
+  modules.
 - **Fast.** One minute of CD-quality stereo encodes in ~0.3 s (~200×
   realtime) with ~2 MiB of wasm memory, about 70 % of native Rust speed.
   Measured on an Intel Core Ultra 9 185H, Node 22, level 5.
@@ -55,9 +58,10 @@ npm install wav2flac
 
 The wasm binary is found automatically: next to the JS in Node, and via
 `new URL(…, import.meta.url)` in browsers and in bundlers such as Vite and
-webpack. To host it yourself, call `init(urlOrBytes)` first. To give up on
-a download that stalls, pass a signal: `init(url, { signal:
-AbortSignal.timeout(10_000) })`. See the
+webpack. To host it yourself, call `init(urlOrBytes)` first, and put
+`THIRD_PARTY_LICENSES.txt` next to the `.wasm`: the binary itself carries no
+license notices. To give up on a download that stalls, pass a signal:
+`init(url, { signal: AbortSignal.timeout(10_000) })`. See the
 [loading guide](https://github.com/julianhille/wav2flac/blob/main/docs/loading.md).
 
 ## Usage
@@ -148,6 +152,12 @@ Buffers passed to a worker are *transferred* by default, which detaches your
 copy, also when the job fails. Pass `copy: true` to keep it, for example to
 retry with other options.
 
+Several calls on one thread take turns rather than run in parallel. For real
+parallelism use several workers; see
+[concurrent encodes](https://github.com/julianhille/wav2flac/blob/main/docs/concurrency.md),
+the [worker pool](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/parallel-encoding.md)
+and the [FIFO queue](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/fifo-queue.md).
+
 ### Inspect a WAV without encoding
 
 ```js
@@ -173,6 +183,10 @@ const info = await probe(wav);
 
 `input` is a `Uint8Array`, an `ArrayBuffer` or a `ReadableStream<Uint8Array>`
 of a WAV file, or raw PCM when `options.pcm` is set.
+
+Every function, option and type is described in the
+[API reference](https://wav2flac.readthedocs.io/en/latest/reference/api/),
+generated from the TSDoc in the source.
 
 ### Options
 
@@ -212,6 +226,14 @@ Other failures keep their own type:
 Formats that aren't PCM (A-law, µ-law, ADPCM) and RF64 are rejected with a
 clear message. Nothing is ever converted lossily unless you ask for it.
 
+## Guides
+
+- [Raw PCM input](https://github.com/julianhille/wav2flac/blob/main/docs/pcm.md)
+- [Concurrent encodes](https://github.com/julianhille/wav2flac/blob/main/docs/concurrency.md): what happens when you start several at once
+- How-to guides ([all](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/index.md)):
+  - [Encode in parallel with a worker pool](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/parallel-encoding.md)
+  - [Encode one at a time with a FIFO queue](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/fifo-queue.md)
+
 ## Benchmark
 
 Clone the repo and run `npm run bench:serve` to compare `encode()`,
@@ -224,12 +246,16 @@ same in Node and adds the native Rust build to the comparison. See
 **0BSD**: use it for anything, with no conditions and no attribution. There
 is no warranty. The compiled `.wasm` also contains permissively licensed Rust
 crates: libflac-rs (BSD-3-Clause), hound (Apache-2.0), and rubato and others
-(MIT or Apache-2.0). If you redistribute the `.wasm`, keep their notices.
+(MIT or Apache-2.0), and the parts of the Rust standard library they use. If
+you redistribute the `.wasm`, keep their notices.
 They ship in `THIRD_PARTY_LICENSES.txt`, and every JS file of the package
 starts with a `/*! @license */` comment that lists the crates and reproduces
 the BSD-3-Clause and MIT notices. Not every bundler keeps such comments (Vite,
 for one, drops them from its output chunks), so when you ship a bundle, ship
 `THIRD_PARTY_LICENSES.txt` with it.
+
+The [third-party components](https://github.com/julianhille/wav2flac/blob/main/docs/third-party.md)
+page lists every crate with its version, license and source.
 
 [Changelog](https://github.com/julianhille/wav2flac/blob/main/CHANGELOG.md) ·
 [Source](https://github.com/julianhille/wav2flac) ·
