@@ -5,14 +5,10 @@
 // build tools. The page is committed, so Read the Docs
 // needs no Rust toolchain; CI regenerates it and fails when it is out of date.
 // Usage: node scripts/gen-third-party.ts [output file]
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { STD_PARTS, rustVersion, shippedCrates } from './crates.ts';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { STD_PARTS, noticeFiles, rustVersion, shippedCrates } from './crates.ts';
 
 const out = process.argv[2] ?? 'docs/third-party.md';
-
-/** License file names, as gen-licenses.ts picks them. */
-const LICENSE_FILE = /^(licen[cs]e|copying)/i;
 
 /**
  * Links each SPDX identifier of a license expression to its SPDX page.
@@ -25,8 +21,8 @@ function spdxLinks(expr: string): string {
 }
 
 const rows = shippedCrates().map((c) => {
-  const texts = readdirSync(dirname(c.manifest_path)).filter((f) => LICENSE_FILE.test(f)).sort();
-  if (c.license_file !== null && !texts.includes(c.license_file)) texts.push(c.license_file);
+  // The files whose texts THIRD_PARTY_LICENSES.txt reproduces.
+  const texts = noticeFiles(c);
   const license = [
     c.license === null ? 'see license text' : spdxLinks(c.license),
     // docs.rs serves every published crate's sources at the exact version.

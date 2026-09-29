@@ -25,6 +25,17 @@ links are collected at the bottom of this file.
   the third-party page, and is gone from the generated API reference, where
   it led to a 404.
 - Docs site: every Python package of the build is pinned, not only MkDocs.
+- License banner: a crate's MIT permission notice is shortened to the pointer
+  whatever its line breaks, including the common break before "THE
+  SOFTWARE.", and every copy of it is. The banner prints a fixed copy of the
+  notice instead of the first one it found.
+- License banner: a pointer to the Unicode-3.0 notice of the Rust standard
+  library, which the banner leaves out.
+- Third-party notices: the Rust version they name comes from
+  `rust-toolchain.toml`, not from the `rustc` on the path, and the build
+  fails when the standard library's license texts are from another release.
+- Third-party page: crates are sorted the same in every locale, and the page
+  links the same notice files that `THIRD_PARTY_LICENSES.txt` reproduces.
 
 ## [1.0.0-rc.3] - 2026-09-29
 

@@ -4,8 +4,8 @@
 // time), and the parts of the Rust standard library linked in with them.
 // Shared by gen-licenses.ts and gen-third-party.ts.
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 /** A package as `cargo metadata` describes it. */
 export interface Package {
@@ -28,7 +28,8 @@ interface Metadata {
 }
 
 /**
- * The crates linked into the wasm, sorted by name.
+ * The crates linked into the wasm, sorted by name. The order is the same in
+ * every locale, so the generated files are too.
  * @returns The packages.
  */
 export function shippedCrates(): Package[] {
@@ -49,15 +50,53 @@ export function shippedCrates(): Package[] {
       todo.push(d.pkg);
     }
   }
-  return [...seen].map((id) => packages.get(id)!).sort((a, b) => a.name.localeCompare(b.name));
+  return [...seen].map((id) => packages.get(id)!).sort((a, b) => a.name.localeCompare(b.name, 'en'));
+}
+
+/** The files that hold a crate's license notices, by name. */
+const NOTICE_FILE = /^(licen[cs]e|copying|notice|authors)/i;
+
+/**
+ * The files in a crate's sources that carry its license notices: license
+ * texts, NOTICE and AUTHORS files, and the `license-file` of its manifest.
+ * @param c The crate.
+ * @returns File names relative to the crate's directory, sorted.
+ * @throws {Error} When the crate has none.
+ */
+export function noticeFiles(c: Package): string[] {
+  const dir = dirname(c.manifest_path);
+  const files = readdirSync(dir).filter((f) => NOTICE_FILE.test(f)).sort();
+  if (c.license_file !== null && !files.includes(c.license_file)) files.push(c.license_file);
+  if (files.length === 0) throw new Error(`${c.name} ${c.version}: no license file found in ${dir}`);
+  return files;
 }
 
 /**
- * The rustc version the wasm is built with.
+ * The Rust release whose license texts are in scripts/std-licenses/. Change it
+ * only after comparing the texts with the new release (see the README.md there).
+ */
+export const STD_TEXTS_RELEASE = '1.98.1';
+
+let toolchain: string | undefined;
+/**
+ * The Rust release the wasm is built with: the channel in rust-toolchain.toml.
  * @returns E.g. `1.98.1`.
+ * @throws {Error} When the channel is not an exact release, or the texts in
+ *   scripts/std-licenses/ come from another one.
  */
 export function rustVersion(): string {
-  return /^rustc (\S+)/.exec(execFileSync('rustc', ['--version'], { encoding: 'utf8' }))?.[1] ?? 'unknown';
+  if (toolchain !== undefined) return toolchain;
+  const file = join(import.meta.dirname, '..', 'rust-toolchain.toml');
+  const channel = /^channel\s*=\s*"([^"]*)"/m.exec(readFileSync(file, 'utf8'))?.[1];
+  if (channel === undefined || !/^\d+\.\d+\.\d+$/.test(channel)) {
+    throw new Error(`rust-toolchain.toml: the channel must be a release such as "1.98.1", not ${channel}`);
+  }
+  if (channel !== STD_TEXTS_RELEASE) {
+    throw new Error(`rust-toolchain.toml pins Rust ${channel}, but the texts in scripts/std-licenses/ ` +
+      `are from ${STD_TEXTS_RELEASE}. Compare them with the new release, then update STD_TEXTS_RELEASE ` +
+      'in scripts/crates.ts.');
+  }
+  return (toolchain = channel);
 }
 
 /** A license text of a part of the Rust standard library. */
@@ -66,7 +105,11 @@ export interface StdNotice {
   title: string;
   /** The copy of it in scripts/std-licenses/. */
   file: string;
-  /** Whether the JS banner reproduces it (without the Apache-2.0 text). */
+  /**
+   * Whether the JS banner reproduces it. The banner shortens the texts of the
+   * Apache License and the MIT permission notice to pointers, and names a
+   * notice it leaves out.
+   */
   banner: boolean;
 }
 /** A part of the Rust standard library that is linked into the wasm. */
@@ -85,8 +128,8 @@ export interface StdPart {
  * cargo does not list them, so they are written down here. To check the list,
  * build with `CARGO_PROFILE_RELEASE_STRIP=false` and read the crate names in
  * the wasm's name section. The license texts in scripts/std-licenses/ come
- * from the Rust release in rust-toolchain.toml (see the README.md there);
- * compare them again when the toolchain changes.
+ * from the Rust release in STD_TEXTS_RELEASE (see the README.md there);
+ * rustVersion() fails until they are compared with a new toolchain.
  */
 export const STD_PARTS: StdPart[] = [
   {
