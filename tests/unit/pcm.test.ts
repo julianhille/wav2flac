@@ -8,12 +8,13 @@ import { runInNewContext } from 'node:vm';
 import fc from 'fast-check';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  encode, encodeStream, encodeSync, init, Wav2FlacError, type Options, type PcmSampleFormat, type Progress,
+  encode, encodeStream, encodeSync, init, Wav2FlacError, wasmMemoryBytes, type Options, type PcmSampleFormat, type Progress,
 } from '../../ts/index.js';
 import type { FromWorker, Port, ToWorker } from '../../ts/lib/protocol.js';
 import { connect, type WorkerEncoder } from '../../ts/lib/worker-client.js';
 import { serve } from '../../ts/lib/worker-host.js';
 import { params } from '../helpers/fc.js';
+import { liveSessions } from '../../ts/lib/engine.js';
 import { collect, rng, streamOf } from '../helpers/wav.js';
 import { has } from '../helpers/tools.js';
 
@@ -389,5 +390,75 @@ describe('pcm errors', () => {
     const w = worker();
     expect(await codeOf(() => w.encode(new Uint8Array(4), mono()))).toBe('INVALID_OPTIONS');
     expect(await codeOf(() => w.encode(streamOf(new Uint8Array(3), 1), mono('s16')))).toBe('TRUNCATED');
+  });
+});
+
+describe('pcm aborts', () => {
+  const raw = new Int16Array(200_000).map((_, i) => (i * 37) & 0x7fff);
+  const opts = (signal?: AbortSignal): Options => ({
+    pcm: { sampleRate: 16000, channels: 1, format: 's16' }, ...(signal && { signal }),
+  });
+  const stream = (): ReadableStream<Uint8Array> => streamOf(new Uint8Array(raw.buffer), 4096);
+  const reason = new Error('stop');
+
+  it('aborts before start on every path, for arrays and streams', async () => {
+    const pre = AbortSignal.abort(reason);
+    await expect(encode(raw, opts(pre))).rejects.toBe(reason);
+    await expect(encode(stream(), opts(pre))).rejects.toBe(reason);
+    expect(() => encodeSync(raw, opts(pre))).toThrow(reason);
+    await expect(collect(encodeStream(raw, opts(pre)))).rejects.toBe(reason);
+    await expect(collect(encodeStream(stream(), opts(pre)))).rejects.toBe(reason);
+    await expect(worker().encode(raw.slice(), opts(pre))).rejects.toBe(reason);
+    expect(liveSessions()).toBe(0);
+  });
+
+  it('aborts during the work, cancels the source and frees the encoder', async () => {
+    let cancelled: unknown;
+    const tracked = (): ReadableStream<Uint8Array> => {
+      const r = stream().getReader();
+      return new ReadableStream<Uint8Array>({
+        async pull(c) {
+          const x = await r.read();
+          if (x.done) c.close();
+          else c.enqueue(x.value);
+        },
+        cancel(why) {
+          cancelled = why;
+          return r.cancel(why);
+        },
+      });
+    };
+    const ac = new AbortController();
+    await expect(encode(tracked(), { ...opts(ac.signal), onProgress: () => ac.abort(reason) }))
+      .rejects.toBe(reason);
+    expect(cancelled).toBe(reason);
+    expect(liveSessions()).toBe(0);
+
+    const ac2 = new AbortController();
+    const r = encodeStream(stream(), opts(ac2.signal)).getReader();
+    await r.read();
+    ac2.abort(reason);
+    await expect(r.read()).rejects.toBe(reason);
+    expect(liveSessions()).toBe(0);
+
+    const w = worker();
+    const ac3 = new AbortController();
+    await expect(w.encode(stream(), { ...opts(ac3.signal), onProgress: () => ac3.abort(reason) }))
+      .rejects.toBe(reason);
+    // The worker survives and still encodes PCM.
+    expect(await w.encode(raw.slice(), opts())).toEqual(encodeSync(raw, opts()));
+  });
+
+  it('ignores an abort after completion and keeps wasm memory flat', async () => {
+    const ac = new AbortController();
+    const out = await encode(raw, opts(ac.signal));
+    ac.abort(reason);
+    expect(out).toEqual(encodeSync(raw, opts()));
+    const before = wasmMemoryBytes();
+    for (let i = 0; i < 5; i++) {
+      const a = new AbortController();
+      await encode(stream(), { ...opts(a.signal), onProgress: () => a.abort(reason) }).catch(() => 0);
+    }
+    expect(wasmMemoryBytes()).toBe(before);
   });
 });
