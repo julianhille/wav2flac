@@ -780,6 +780,47 @@ mod tests {
     }
 
     #[test]
+    fn maps_every_hound_error() {
+        let cases = [
+            (hound::Error::Unsupported, ErrorCode::UnsupportedFormat),
+            (
+                hound::Error::FormatError("bits per sample is not a multiple of 8"),
+                ErrorCode::UnsupportedBitDepth,
+            ),
+            (hound::Error::FormatError("bad"), ErrorCode::InvalidWav),
+            (hound::Error::TooWide, ErrorCode::InvalidWav),
+            (hound::Error::InvalidSampleFormat, ErrorCode::InvalidWav),
+        ];
+        for (e, code) in cases {
+            assert_eq!(map_hound(e).code(), code);
+        }
+    }
+
+    #[test]
+    fn rejects_bad_fmt_bodies() {
+        let fmt = |tag: u16, ch: u16, rate: u32, align: u16, bits: u16| {
+            let mut f = tag.to_le_bytes().to_vec();
+            f.extend_from_slice(&ch.to_le_bytes());
+            f.extend_from_slice(&rate.to_le_bytes());
+            f.extend_from_slice(&(rate * u32::from(align)).to_le_bytes());
+            f.extend_from_slice(&align.to_le_bytes());
+            f.extend_from_slice(&bits.to_le_bytes());
+            f
+        };
+        let cases = [
+            (vec![1, 0, 1, 0], ErrorCode::InvalidWav),
+            (fmt(0x0055, 1, 8000, 1, 8), ErrorCode::UnsupportedFormat),
+            (fmt(0x0003, 1, 8000, 8, 64), ErrorCode::UnsupportedFormat),
+            (fmt(0x0001, 1, 8000, 5, 40), ErrorCode::UnsupportedBitDepth),
+            (fmt(0x0001, 1, 0, 2, 16), ErrorCode::InvalidWav),
+        ];
+        for (raw, code) in cases {
+            let got = parse_fmt(&raw).err().map(|e| e.code());
+            assert_eq!(got, Some(code), "{raw:?}");
+        }
+    }
+
+    #[test]
     fn rejects_data_before_fmt() {
         let mut f = b"RIFF\x24\0\0\0WAVEdata\0\0\0\0".to_vec();
         f.extend_from_slice(&[0; 16]);
