@@ -41,7 +41,9 @@ links are collected at the bottom of this file.
   wasm links: `core`, `alloc` and `std` (with the Unicode-3.0 license of the
   Unicode tables in `core`), `dlmalloc`, and `compiler_builtins` with its
   `libm`. Before, they named `core, alloc, std, dlmalloc` with one MIT notice.
-  The banner grows by about 8 kB per bundle.
+  The banner gives the permission notice of the MIT license once, after the
+  copyright notices of the crates under it, and grows by about 3 kB per
+  bundle.
 
 ## [1.0.0-rc.2] - 2026-09-29
 

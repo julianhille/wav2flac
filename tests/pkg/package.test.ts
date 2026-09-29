@@ -107,6 +107,9 @@ describe('installed package', () => {
       expect(head, f).toContain(' * Copyright (c) 2014 Alex Crichton');
       expect(head, f).toContain(' *       Copyright (c) 2009-2016 by the contributors listed in CREDITS.TXT');
       expect(head, f).toContain(' *     Copyright (c) 2018 Jorge Aparicio');
+      // One copy of the MIT permission notice serves every crate under it.
+      expect(head.split('Permission is hereby granted, free of charge').length - 1, f).toBe(1);
+      expect(head, f).toMatch(/^ \* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE$/m);
       // The banner points to the notices file for the long Apache-2.0 text.
       expect(head, f).not.toContain('TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION');
     }

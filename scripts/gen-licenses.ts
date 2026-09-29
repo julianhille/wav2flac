@@ -4,7 +4,9 @@
 // With a second argument it also writes a `/*! @license */` comment for the
 // head of the JS bundles: the crate list plus the full notice of every crate
 // licensed only under a BSD or MIT license (BSD clause 2 asks binary
-// redistributions to reproduce it; MIT asks for it in all copies). Parts of
+// redistributions to reproduce it; MIT asks for it in all copies). The
+// comment gives the permission notice of the MIT license once, after the
+// copyright notices of the crates that share it. Parts of
 // the Rust standard library are linked in too; crates.ts lists them and
 // scripts/std-licenses/ holds their notices. Run by scripts/build.sh after
 // the cargo build, so every crate's sources are in the local registry.
@@ -48,6 +50,34 @@ function withoutApacheText(text: string): string {
     return `\n[The text of the Apache License, Version 2.0${llvm}\nis in THIRD_PARTY_LICENSES.txt.]\n`;
   }).join(rule);
 }
+/** The permission notice of the MIT license, from its first word to its last. */
+const MIT_TEXT = /Permission is hereby granted, free of charge,[\s\S]*?DEALINGS IN THE\s+SOFTWARE\./;
+/** Stands in the banner for the permission notice. */
+const MIT_POINTER = '[The permission notice of the MIT License is at the end of this comment.]';
+/** The permission notice as the first notice in the banner words it. */
+let mitText: string | undefined;
+/**
+ * Replaces the permission notice of the MIT license by a pointer to the one
+ * copy of it at the end of the banner. A notice that words it differently
+ * (line breaks aside) keeps its own.
+ * @param text A notice.
+ * @returns The notice for the banner.
+ */
+function withoutMitText(text: string): string {
+  const found = MIT_TEXT.exec(text)?.[0];
+  if (found === undefined) return text;
+  const words = (t: string): string => t.replace(/\s+/g, ' ');
+  mitText ??= found;
+  return words(found) === words(mitText) ? text.replace(found, MIT_POINTER) : text;
+}
+/**
+ * The lines of a notice as the banner prints them.
+ * @param text A notice.
+ * @returns The lines.
+ */
+function bannerLines(text: string): string[] {
+  return withoutMitText(withoutApacheText(text)).split('\n');
+}
 const bsd: string[] = [];
 for (const c of crates) {
   const dir = dirname(c.manifest_path);
@@ -62,7 +92,7 @@ for (const c of crates) {
     // A crate with only a license file gets the BSD treatment when its text
     // carries the binary-redistribution clause.
     const isBsd = c.license === null ? BSD_CLAUSE.test(text) : NOTICE_ONLY.test(c.license);
-    if (isBsd && /licen[cs]e/i.test(f)) bsd.push('', `${c.name} ${c.version} (${c.license ?? f}):`, '', ...text.split('\n'));
+    if (isBsd && /licen[cs]e/i.test(f)) bsd.push('', `${c.name} ${c.version} (${c.license ?? f}):`, '', ...bannerLines(text));
   }
 }
 for (const p of STD_PARTS) {
@@ -73,9 +103,10 @@ for (const p of STD_PARTS) {
     parts.push('', `--- ${n.title} ---`, '', text);
     if (!n.banner) continue;
     const title = p.notices.filter((o) => o.banner).length > 1 ? `: ${n.title}` : '';
-    bsd.push('', `${stdName(p)}${title} (${p.license}${chosen}):`, '', ...withoutApacheText(text).split('\n'));
+    bsd.push('', `${stdName(p)}${title} (${p.license}${chosen}):`, '', ...bannerLines(text));
   }
 }
+if (mitText !== undefined) bsd.push('', 'MIT License, the permission notice:', '', ...mitText.split('\n'));
 writeFileSync(out, `${parts.join('\n')}\n`);
 console.log(`  ${crates.length} crates, ${STD_PARTS.length} parts of the standard library → ${out}`);
 
