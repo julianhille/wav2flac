@@ -43,6 +43,9 @@ const flac = await encode(wavBytes); // Uint8Array in, Uint8Array (a .flac file)
   input-size limits, stable error codes, ESM + CommonJS, TypeScript types.
   The output is deterministic: the same input and options give the same
   bytes, however the input is chunked.
+- **Zero dependencies.** `npm install wav2flac` installs just this package:
+  JS bundles, types and one `.wasm` file. In Node it uses only built-in
+  modules.
 - **Fast.** One minute of CD-quality stereo encodes in ~0.3 s (~200×
   realtime) with ~2 MiB of wasm memory, about 70 % of native Rust speed.
   Measured on an Intel Core Ultra 9 185H, Node 22, level 5.
