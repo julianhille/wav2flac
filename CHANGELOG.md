@@ -36,7 +36,9 @@ links are collected at the bottom of this file.
 - Docs: the FIFO queue sample no longer keeps the last result alive, and a
   rejection that nobody handles is reported again.
 - Docs: buffered output is held in JS memory, not in wasm memory, and the
-  wasm memory of an encoder doesn't grow with the job.
+  wasm memory of an encoder doesn't grow with the job. It depends on
+  `blockSize` and the channel count instead, from well under 1 MiB with the
+  defaults to several MiB with the largest block size.
 - Docs site: the how-to overview is titled "Overview" instead of "Index".
   "Edit on GitHub" opens the README on the home page and the generator on
   the third-party page, and is gone from the generated API reference, where
