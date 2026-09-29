@@ -245,7 +245,8 @@ same in Node and adds the native Rust build to the comparison. See
 **0BSD**: use it for anything, with no conditions and no attribution. There
 is no warranty. The compiled `.wasm` also contains permissively licensed Rust
 crates: libflac-rs (BSD-3-Clause), hound (Apache-2.0), and rubato and others
-(MIT or Apache-2.0). If you redistribute the `.wasm`, keep their notices.
+(MIT or Apache-2.0), and the parts of the Rust standard library they use. If
+you redistribute the `.wasm`, keep their notices.
 They ship in `THIRD_PARTY_LICENSES.txt`, and every JS file of the package
 starts with a `/*! @license */` comment that lists the crates and reproduces
 the BSD-3-Clause and MIT notices. Not every bundler keeps such comments (Vite,

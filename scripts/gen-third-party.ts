@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: 0BSD
 // Writes docs/third-party.md: every Rust crate compiled into the wasm (see
-// crates.ts) with its version, license and links, the npm runtime
-// dependencies and the build tools. The page is committed, so Read the Docs
+// crates.ts) with its version, license and links, the parts of the Rust
+// standard library linked in with them, the npm runtime dependencies and the
+// build tools. The page is committed, so Read the Docs
 // needs no Rust toolchain; CI regenerates it and fails when it is out of date.
 // Usage: node scripts/gen-third-party.ts [output file]
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { RUST_STD_PARTS, rustVersion, shippedCrates } from './crates.ts';
+import { STD_PARTS, rustVersion, shippedCrates } from './crates.ts';
 
 const out = process.argv[2] ?? 'docs/third-party.md';
 
@@ -34,8 +35,10 @@ const rows = shippedCrates().map((c) => {
   const source = c.repository === null ? '' : `[repository](${c.repository})`;
   return `| [${c.name}](https://crates.io/crates/${c.name}/${c.version}) | ${c.version} | ${license} | ${source} |`;
 });
-rows.push(`| Rust standard library (${RUST_STD_PARTS}) | ${rustVersion()} | ${spdxLinks('MIT OR Apache-2.0')} | ` +
-  '[repository](https://github.com/rust-lang/rust) |');
+for (const p of STD_PARTS) {
+  rows.push(`| Rust standard library: ${p.name} | ${rustVersion()} | ${spdxLinks(p.license)} | ` +
+    `[repository](${p.repository}) |`);
+}
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
   dependencies?: Record<string, string>;
@@ -75,7 +78,8 @@ const page = `<!-- SPDX-License-Identifier: 0BSD -->
 # Third-party components
 
 wav2flac itself is licensed 0BSD. The WebAssembly module also contains the
-Rust crates below. Their full license notices ship in the package as
+Rust crates below, and the parts of the Rust standard library that they use.
+Their full license notices ship in the package as
 \`THIRD_PARTY_LICENSES.txt\`, and each JS file of the package starts with a
 \`/*! @license */\` comment that lists them.
 

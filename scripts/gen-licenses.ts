@@ -4,39 +4,16 @@
 // With a second argument it also writes a `/*! @license */` comment for the
 // head of the JS bundles: the crate list plus the full notice of every crate
 // licensed only under a BSD or MIT license (BSD clause 2 asks binary
-// redistributions to reproduce it; MIT asks for it in all copies). The Rust
-// standard library (core, alloc, std and its dlmalloc allocator) is linked in
-// too and gets its notice from RUST_STD below. Run by scripts/build.sh after
+// redistributions to reproduce it; MIT asks for it in all copies). Parts of
+// the Rust standard library are linked in too; crates.ts lists them and
+// scripts/std-licenses/ holds their notices. Run by scripts/build.sh after
 // the cargo build, so every crate's sources are in the local registry.
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { RUST_STD_PARTS, rustVersion, shippedCrates } from './crates.ts';
+import { STD_PARTS, shippedCrates, stdName, stdNoticeText } from './crates.ts';
 
 const [out, bannerOut] = process.argv.slice(2);
 if (out === undefined) throw new Error('usage: gen-licenses.ts <output file> [banner file]');
-
-/** The Rust standard library as linked into every wasm32 build. */
-const RUST_STD_NAME = `Rust standard library ${rustVersion()}: ${RUST_STD_PARTS}`;
-/** Its MIT notice (the MIT option of its MIT OR Apache-2.0 license). */
-const RUST_STD = `Copyright (c) The Rust Project Contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.`;
 
 const NOTICE = /^(licen[cs]e|copying|notice|authors)/i;
 const crates = shippedCrates();
@@ -48,12 +25,29 @@ const parts = [
   'contains the following Rust crates; their license notices follow.',
   '',
   ...crates.map((c) => `  ${c.name} ${c.version} (${c.license ?? 'see below'})`),
-  `  ${RUST_STD_NAME} (MIT OR Apache-2.0)`,
+  ...STD_PARTS.map((p) => `  ${stdName(p)} (${p.license})`),
 ];
 /** License expressions that leave no choice but a BSD or MIT license. */
 const NOTICE_ONLY = /^(BSD-[23]-Clause|MIT)$/;
 /** BSD clause 2, for crates that declare no license expression. */
 const BSD_CLAUSE = /Redistributions in binary form must reproduce/i;
+/** A line of dashes, which the notices of compiler_builtins and libm put between their sections. */
+const SECTION = /^-{20,}$/m;
+/**
+ * Replaces the text of the Apache License in a notice by a pointer to it, to
+ * keep the banner short. The notices file has the text in full.
+ * @param text A notice whose sections are separated by lines of dashes.
+ * @returns The notice for the banner.
+ */
+function withoutApacheText(text: string): string {
+  const rule = SECTION.exec(text)?.[0];
+  if (rule === undefined) return text;
+  return text.split(SECTION).map((s) => {
+    if (!/^\s*Apache License\s*$/.test(s.trimStart().split('\n')[0] ?? '')) return s;
+    const llvm = /LLVM Exceptions/.test(s) ? ' and of the LLVM exceptions to it' : '';
+    return `\n[The text of the Apache License, Version 2.0${llvm}\nis in THIRD_PARTY_LICENSES.txt.]\n`;
+  }).join(rule);
+}
 const bsd: string[] = [];
 for (const c of crates) {
   const dir = dirname(c.manifest_path);
@@ -71,11 +65,19 @@ for (const c of crates) {
     if (isBsd && /licen[cs]e/i.test(f)) bsd.push('', `${c.name} ${c.version} (${c.license ?? f}):`, '', ...text.split('\n'));
   }
 }
-parts.push('', rule, RUST_STD_NAME, 'License: MIT OR Apache-2.0',
-  'Source: https://github.com/rust-lang/rust', '', RUST_STD);
-bsd.push('', `${RUST_STD_NAME} (MIT OR Apache-2.0, MIT chosen):`, '', ...RUST_STD.split('\n'));
+for (const p of STD_PARTS) {
+  parts.push('', rule, stdName(p), `License: ${p.license}`, `Source: ${p.repository}`);
+  const chosen = p.chosen === undefined ? '' : `, ${p.chosen} chosen`;
+  for (const n of p.notices) {
+    const text = stdNoticeText(n);
+    parts.push('', `--- ${n.title} ---`, '', text);
+    if (!n.banner) continue;
+    const title = p.notices.filter((o) => o.banner).length > 1 ? `: ${n.title}` : '';
+    bsd.push('', `${stdName(p)}${title} (${p.license}${chosen}):`, '', ...withoutApacheText(text).split('\n'));
+  }
+}
 writeFileSync(out, `${parts.join('\n')}\n`);
-console.log(`  ${crates.length} crates → ${out}`);
+console.log(`  ${crates.length} crates, ${STD_PARTS.length} parts of the standard library → ${out}`);
 
 if (bannerOut !== undefined) {
   const lines = [
@@ -84,7 +86,7 @@ if (bannerOut !== undefined) {
     'the following Rust crates (full notices: THIRD_PARTY_LICENSES.txt):',
     '',
     ...crates.map((c) => `  ${c.name} ${c.version} (${c.license ?? 'see THIRD_PARTY_LICENSES.txt'})`),
-    `  ${RUST_STD_NAME} (MIT OR Apache-2.0)`,
+    ...STD_PARTS.map((p) => `  ${stdName(p)} (${p.license})`),
     ...bsd,
   ];
   const body = lines.map((l) => (l.trim() === '' ? ' *' : ` * ${l.trimEnd()}`)).join('\n');

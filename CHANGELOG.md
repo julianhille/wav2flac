@@ -32,6 +32,15 @@ links are collected at the bottom of this file.
 - Docs: a third-party components page listing every crate compiled into the
   wasm with its version, license and links, generated from `Cargo.lock`.
 
+### Changed
+
+- `THIRD_PARTY_LICENSES.txt`, the `@license` banner of the JS bundles and the
+  third-party page now name every part of the Rust standard library that the
+  wasm links: `core`, `alloc` and `std` (with the Unicode-3.0 license of the
+  Unicode tables in `core`), `dlmalloc`, and `compiler_builtins` with its
+  `libm`. Before, they named `core, alloc, std, dlmalloc` with one MIT notice.
+  The banner grows by about 8 kB per bundle.
+
 ## [1.0.0-rc.2] - 2026-09-29
 
 ### Added

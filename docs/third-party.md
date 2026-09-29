@@ -3,7 +3,8 @@
 # Third-party components
 
 wav2flac itself is licensed 0BSD. The WebAssembly module also contains the
-Rust crates below. Their full license notices ship in the package as
+Rust crates below, and the parts of the Rust standard library that they use.
+Their full license notices ship in the package as
 `THIRD_PARTY_LICENSES.txt`, and each JS file of the package starts with a
 `/*! @license */` comment that lists them.
 
@@ -32,7 +33,9 @@ Rust crates below. Their full license notices ship in the package as
 | [wasm-bindgen](https://crates.io/crates/wasm-bindgen/0.2.129) | 0.2.129 | [MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)<br>[LICENSE-APACHE](https://docs.rs/crate/wasm-bindgen/0.2.129/source/LICENSE-APACHE)<br>[LICENSE-MIT](https://docs.rs/crate/wasm-bindgen/0.2.129/source/LICENSE-MIT) | [repository](https://github.com/wasm-bindgen/wasm-bindgen) |
 | [wasm-bindgen-shared](https://crates.io/crates/wasm-bindgen-shared/0.2.129) | 0.2.129 | [MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)<br>[LICENSE-APACHE](https://docs.rs/crate/wasm-bindgen-shared/0.2.129/source/LICENSE-APACHE)<br>[LICENSE-MIT](https://docs.rs/crate/wasm-bindgen-shared/0.2.129/source/LICENSE-MIT) | [repository](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared) |
 | [windowfunctions](https://crates.io/crates/windowfunctions/0.1.1) | 0.1.1 | [MIT](https://spdx.org/licenses/MIT.html)<br>[LICENSE.txt](https://docs.rs/crate/windowfunctions/0.1.1/source/LICENSE.txt) | [repository](https://github.com/HEnquist/windowfunctions-rs) |
-| Rust standard library (core, alloc, std, dlmalloc) | 1.98.1 | [MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) | [repository](https://github.com/rust-lang/rust) |
+| Rust standard library: core, alloc, std | 1.98.1 | ([MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)) AND [Unicode-3.0](https://spdx.org/licenses/Unicode-3.0.html) | [repository](https://github.com/rust-lang/rust) |
+| Rust standard library: dlmalloc | 1.98.1 | [MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) | [repository](https://github.com/alexcrichton/dlmalloc-rs) |
+| Rust standard library: compiler_builtins, libm | 1.98.1 | [MIT](https://spdx.org/licenses/MIT.html) AND [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) WITH [LLVM-exception](https://spdx.org/licenses/LLVM-exception.html) AND ([MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)) | [repository](https://github.com/rust-lang/compiler-builtins) |
 
 ## npm dependencies
 
