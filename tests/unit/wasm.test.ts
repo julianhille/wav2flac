@@ -110,6 +110,118 @@ describe('init', () => {
     expect(w.isReady()).toBe(true);
   });
 
+  it('rejects a bad signal, and an aborted one before loading', async () => {
+    const w = await fresh();
+    await expect(w.init(bytes, { signal: {} as never })).rejects.toThrow(TypeError);
+    const reason = new Error('stop');
+    await expect(w.init(bytes, { signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
+    expect(w.isReady()).toBe(false);
+    await w.init(bytes, { signal: new AbortController().signal });
+    expect(w.isReady()).toBe(true);
+    await expect(w.init(undefined, { signal: {} as never })).rejects.toThrow(TypeError);
+  });
+
+  it('gives up on a stalled fetch and retries with a new one', async () => {
+    const signals: AbortSignal[] = [];
+    const fetch = vi.fn((_: URL, opts: RequestInit) => {
+      signals.push(opts.signal!);
+      // The first request never answers until it is aborted.
+      if (signals.length === 1) {
+        return new Promise<Response>((_, reject) => {
+          opts.signal!.addEventListener('abort', () => reject(opts.signal!.reason));
+        });
+      }
+      return Promise.resolve(new Response(bytes));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const w = await fresh();
+    const url = 'https://cdn.example/wav2flac.wasm';
+    await expect(w.init(url, { signal: AbortSignal.timeout(10) })).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(signals[0]!.aborted).toBe(true);
+    await w.init(url);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('keeps a load alive while another caller still waits', async () => {
+    let answer!: (r: Response) => void;
+    const w = await fresh();
+    const a = new AbortController();
+    const first = w.init(new Promise<Response>((r) => { answer = r; }), { signal: a.signal });
+    const b = new AbortController();
+    const second = w.init(undefined, { signal: b.signal });
+    const third = w.init();
+    a.abort();
+    b.abort();
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(second).rejects.toMatchObject({ name: 'AbortError' });
+    // `third` has no signal, so the same load goes on.
+    answer(new Response(bytes));
+    await third;
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('drops a load that finishes after it was abandoned', async () => {
+    let answer!: (r: Response) => void;
+    const w = await fresh();
+    const a = new AbortController();
+    const stale = w.init(new Promise<Response>((r) => { answer = r; }), { signal: a.signal });
+    a.abort();
+    await expect(stale).rejects.toMatchObject({ name: 'AbortError' });
+    // A source that cannot be cancelled still arrives; it must not instantiate.
+    answer(new Response(bytes));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(w.isReady()).toBe(false);
+    await w.init(bytes);
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('shares a failed load with every waiter', async () => {
+    const w = await fresh();
+    const a = w.init(new Uint8Array([1, 2, 3]), { signal: new AbortController().signal });
+    const b = w.init(undefined, { signal: new AbortController().signal });
+    await expect(a).rejects.toThrow();
+    await expect(b).rejects.toThrow();
+  });
+
+  it('encode and encodeStream stop waiting for a stalled load on abort', async () => {
+    vi.resetModules();
+    const real = process;
+    let reads = 0;
+    vi.stubGlobal('process', new Proxy(real, {
+      get: (t, k) => (k === 'getBuiltinModule'
+        ? (id: string) => (id === 'fs'
+          ? {
+              promises: {
+                // The default file never arrives until the read is aborted.
+                readFile: (_: URL, o: { signal: AbortSignal }) => {
+                  reads++;
+                  return new Promise((_, reject) => o.signal.addEventListener('abort', () => reject(o.signal.reason)));
+                },
+              },
+            }
+          : real.getBuiltinModule(id))
+        : Reflect.get(t, k)),
+    }));
+    const api = await import('../../ts/index.js');
+    const reason = new Error('too slow');
+    const c = new AbortController();
+    let cancelled: unknown;
+    const s = new ReadableStream<Uint8Array>({ cancel: (why) => { cancelled = why; } });
+    const encoding = api.encode(s, { signal: c.signal });
+    const streaming = collectAll(api.encodeStream(new Uint8Array(10), { signal: c.signal }));
+    c.abort(reason);
+    await expect(encoding).rejects.toBe(reason);
+    await expect(streaming).rejects.toBe(reason);
+    expect(cancelled).toBe(reason);
+    // The next call starts a new read.
+    const d = new AbortController();
+    const again = api.encode(new Uint8Array(10), { signal: d.signal });
+    expect(reads).toBe(2);
+    d.abort();
+    await expect(again).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('initSync accepts bytes or a Module', async () => {
     let w = await fresh();
     w.initSync(bytes);

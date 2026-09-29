@@ -23,7 +23,7 @@ export type { Bytes } from './lib/engine.js';
 export type { Input, PcmBuffer, PcmInput, PcmSamples } from './lib/input.js';
 export type { Options, PcmFormat, PcmSampleFormat, Progress, ResampleQuality } from './lib/options.js';
 export type { WavInfo } from './lib/probe.js';
-export { init, initSync, wasmMemoryBytes, type WasmSource } from './lib/wasm.js';
+export { init, initSync, wasmMemoryBytes, type InitOptions, type WasmSource } from './lib/wasm.js';
 export { createWorkerEncoder, type WorkerEncoder, type WorkerEncoderOptions } from './lib/worker-client.js';
 
 /**
@@ -52,7 +52,7 @@ export { createWorkerEncoder, type WorkerEncoder, type WorkerEncoderOptions } fr
  */
 export async function encode(input: Input | PcmInput, options?: Options): Promise<Bytes> {
   const p = preparePcm(input, normalizeOptions(options, false));
-  await init().catch((e: unknown) => {
+  await init(undefined, { signal: options?.signal }).catch((e: unknown) => {
     // As for any failed encode, a stream input is cancelled.
     if (isStream(p.input)) void p.input.cancel(e).catch(ignore);
     throw e;
@@ -90,7 +90,7 @@ export function encodeStream(
   const hooks = { signal: options?.signal, onProgress: options?.onProgress };
   if (isReady()) return runStream(bytes, args, hooks);
   const { readable, writable } = new TransformStream<Bytes, Bytes>();
-  init()
+  init(undefined, { signal: options?.signal })
     .then(
       () => runStream(bytes, args, hooks).pipeTo(writable),
       (e: unknown) => {

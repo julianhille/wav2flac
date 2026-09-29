@@ -171,8 +171,9 @@ function uint(o: Record<string, unknown>, key: string, dflt: number, max = 2 ** 
  * members the encoder actually uses must be there.
  * @param s Candidate.
  * @returns `true` if it can be used as a signal.
+ * @internal
  */
-function isSignal(s: unknown): boolean {
+export function isSignal(s: unknown): boolean {
   if (typeof s !== 'object' || s === null || !('aborted' in s)) return false;
   const o = s as Record<string, unknown>;
   return typeof o['addEventListener'] === 'function' && typeof o['removeEventListener'] === 'function'

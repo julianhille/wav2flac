@@ -4,7 +4,8 @@
  * @module
  */
 import initGlue, { initSync as initGlueSync } from '../../build/bindgen/wav2flac.js';
-import { builtin, isNode } from './platform.js';
+import { isSignal } from './options.js';
+import { builtin, ignore, isNode } from './platform.js';
 
 /**
  * Where to load the wasm from: its bytes, a compiled module, a URL (string or
@@ -13,9 +14,29 @@ import { builtin, isNode } from './platform.js';
  */
 export type WasmSource = BufferSource | WebAssembly.Module | URL | string | Response | PromiseLike<Response>;
 
+/** Options for {@link init}. */
+export interface InitOptions {
+  /**
+   * Stops waiting for the load; `init()` then rejects with the signal's
+   * reason. Use `AbortSignal.timeout(ms)` for a timeout.
+   */
+  signal?: AbortSignal | undefined;
+}
+
+/** One attempt at loading the module, shared by every init() waiting on it. */
+interface Load {
+  promise: Promise<void>;
+  /** Cancels the fetch or file read once nobody waits any more. */
+  stop: AbortController;
+  /** Callers with a signal that still wait. */
+  waiters: number;
+  /** A caller without a signal waits, so the load is never abandoned. */
+  pinned: boolean;
+}
+
 let compiled: WebAssembly.Module | undefined;
 let memory: WebAssembly.Memory | undefined;
-let pending: Promise<void> | undefined;
+let pending: Load | undefined;
 /** Whether init() is inside the glue's async instantiation. */
 let instantiating = false;
 
@@ -33,9 +54,9 @@ export function defaultWasmUrl(): URL {
  * @param url File URL.
  * @returns The file contents.
  */
-async function readFileUrl(url: URL): Promise<Uint8Array<ArrayBuffer>> {
+async function readFileUrl(url: URL, signal: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
   const fs = builtin<typeof import('node:fs')>('fs');
-  return fs.promises.readFile(url);
+  return fs.promises.readFile(url, { signal });
 }
 
 /**
@@ -60,9 +81,10 @@ function toUrl(source: string | URL): URL {
 /**
  * Compiles a module from any {@link WasmSource}.
  * @param source The source.
+ * @param signal Cancels a fetch or file read started here.
  * @returns The compiled module.
  */
-async function compile(source: WasmSource): Promise<WebAssembly.Module> {
+async function compile(source: WasmSource, signal: AbortSignal): Promise<WebAssembly.Module> {
   if (source instanceof WebAssembly.Module) return source;
   if (ArrayBuffer.isView(source) || source instanceof ArrayBuffer) return WebAssembly.compile(source as BufferSource);
   if (typeof SharedArrayBuffer === 'function' && (source as unknown) instanceof SharedArrayBuffer) {
@@ -71,8 +93,8 @@ async function compile(source: WasmSource): Promise<WebAssembly.Module> {
   let res: Response | PromiseLike<Response>;
   if (typeof source === 'string' || source instanceof URL) {
     const url = toUrl(source);
-    if (url.protocol === 'file:' && isNode()) return WebAssembly.compile(await readFileUrl(url));
-    res = fetch(url);
+    if (url.protocol === 'file:' && isNode()) return WebAssembly.compile(await readFileUrl(url, signal));
+    res = fetch(url, { signal });
   } else if (typeof source === 'object' && source !== null && ('ok' in source || 'then' in source)) {
     res = source as Response | PromiseLike<Response>;
   } else {
@@ -87,29 +109,18 @@ async function compile(source: WasmSource): Promise<WebAssembly.Module> {
 }
 
 /**
- * Loads and instantiates the wasm module. Safe to call repeatedly and
- * concurrently; later calls return the first call's promise and ignore
- * their `source`: one module is loaded per realm (page, worker or Node
- * process), so pass a custom location on the first call, before anything
- * encodes. `encode`, `encodeStream`, `probe` and workers call it
- * automatically.
- *
- * @param source Where to load the wasm from. Default: `wav2flac.wasm` next to
- *   the package's JS (read with `fs` in Node, `fetch`ed elsewhere).
- * @returns Resolves once the module is ready.
- * @example
- * ```ts
- * import { init, encodeSync } from 'wav2flac';
- * await init();                       // or init(new URL('/assets/wav2flac.wasm', location.href))
- * const flac = encodeSync(wavBytes);
- * ```
+ * Starts loading and instantiating the module.
+ * @param source Where to load the wasm from.
+ * @returns The load.
  */
-export function init(source?: WasmSource): Promise<void> {
-  if (compiled !== undefined) return Promise.resolve();
-  const p: Promise<void> = pending ??= (async () => {
-    const mod = await compile(source ?? defaultWasmUrl());
+function startLoad(source: WasmSource): Load {
+  const load: Load = { promise: undefined as never, stop: new AbortController(), waiters: 0, pinned: false };
+  load.promise = (async () => {
+    const mod = await compile(source, load.stop.signal);
     // initSync() may have finished while this was compiling; its instance wins.
     if (compiled !== undefined) return;
+    // Abandoned while compiling a source that cannot be cancelled.
+    if (pending !== load) throw load.stop.signal.reason;
     // The glue keeps one instance; initSync() must not start another meanwhile.
     instantiating = true;
     try {
@@ -120,11 +131,88 @@ export function init(source?: WasmSource): Promise<void> {
       instantiating = false;
     }
   })().catch((e: unknown) => {
-    if (pending === p) pending = undefined;
+    if (pending === load) pending = undefined;
     // A failed load does not matter once initSync() succeeded meanwhile.
     if (compiled === undefined) throw e;
   });
-  return p;
+  return load;
+}
+
+/**
+ * Waits for `load` until `signal` aborts. When the last waiter gives up, the
+ * load is abandoned so that the next init() starts a new one.
+ * @param load The load.
+ * @param signal The caller's signal.
+ * @returns Settles with the load, or rejects with the signal's reason.
+ */
+function waitFor(load: Load, signal: AbortSignal): Promise<void> {
+  load.waiters++;
+  return new Promise<void>((resolve, reject) => {
+    const done = (): void => {
+      signal.removeEventListener('abort', onAbort);
+      load.waiters--;
+    };
+    const onAbort = (): void => {
+      done();
+      reject(signal.reason);
+      // Instantiating does not wait on I/O, so let it finish.
+      if (load.waiters === 0 && !load.pinned && pending === load && !instantiating) {
+        pending = undefined;
+        load.stop.abort(signal.reason);
+        // Nobody waits for the abandoned load's outcome any more.
+        load.promise.catch(ignore);
+      }
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    load.promise.then(
+      () => { done(); resolve(); },
+      (e: unknown) => { done(); reject(e); },
+    );
+  });
+}
+
+/**
+ * Loads and instantiates the wasm module. Safe to call repeatedly and
+ * concurrently; later calls share the load in progress and ignore their
+ * `source`: one module is loaded per realm (page, worker or Node process), so
+ * pass a custom location on the first call, before anything encodes.
+ * `encode`, `encodeStream`, `probe` and workers call it automatically.
+ *
+ * A load that never finishes (a stalled download, say) keeps `init()`
+ * pending. Pass a `signal` to give up: `init()` then rejects with its reason,
+ * and once every caller waiting on the load has given up, the download is
+ * cancelled and the next `init()` starts over. A failed load is retried by
+ * the next call, too.
+ *
+ * @param source Where to load the wasm from. Default: `wav2flac.wasm` next to
+ *   the package's JS (read with `fs` in Node, `fetch`ed elsewhere).
+ * @param options A signal to stop waiting.
+ * @returns Resolves once the module is ready.
+ * @throws {TypeError} If `options.signal` is not an `AbortSignal`.
+ * @example
+ * ```ts
+ * import { init, encodeSync } from 'wav2flac';
+ * await init();                       // or init(new URL('/assets/wav2flac.wasm', location.href))
+ * const flac = encodeSync(wavBytes);
+ * ```
+ * @example Give up after 10 seconds:
+ * ```ts
+ * await init(undefined, { signal: AbortSignal.timeout(10_000) });
+ * ```
+ */
+export function init(source?: WasmSource, options?: InitOptions): Promise<void> {
+  const signal = options?.signal;
+  if (signal !== undefined && !isSignal(signal)) {
+    return Promise.reject(new TypeError('wav2flac: init() option signal must be an AbortSignal'));
+  }
+  if (compiled !== undefined) return Promise.resolve();
+  if (signal?.aborted === true) return Promise.reject(signal.reason);
+  const load = pending ??= startLoad(source ?? defaultWasmUrl());
+  if (signal === undefined) {
+    load.pinned = true;
+    return load.promise;
+  }
+  return waitFor(load, signal);
 }
 
 /**
