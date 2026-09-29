@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: 0BSD
 # Publishes a release when a `vX.Y.Z` (or `vX.Y.Z-pre`) tag is pushed:
 #   1. the tag must match every manifest version and have a dated CHANGELOG
-#      section, and the tagged commit must be on main;
+#      section;
 #   2. the whole CI suite runs on the tag, with the full test tier;
 #   3. the package is built, its package tests run on that build, and the
 #      same tarball is published to npm with provenance
 #      (npm trusted publishing via OIDC; prereleases go to the `next` tag);
 #   4. a GitHub release is created with the CHANGELOG section as its text and
 #      the tarball, the wasm and SHA256SUMS attached.
-# Cut a release with `node scripts/release.ts prepare X.Y.Z`, then push the
-# commit and the tag it prints.
+# Releases are tagged on a release branch (e.g. `release/v1.0.0-rc.1`) whose
+# head bumps the versions and dates the CHANGELOG section.
 name: Release
 
 on:
@@ -33,14 +33,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
       - name: Versions and changelog match the tag
         run: node scripts/release.ts check "$GITHUB_REF_NAME" notes.md
-      - name: Tagged commit is on main
-        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-notes
