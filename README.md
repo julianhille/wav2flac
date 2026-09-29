@@ -218,6 +218,14 @@ Other failures keep their own type:
 Formats that aren't PCM (A-law, µ-law, ADPCM) and RF64 are rejected with a
 clear message. Nothing is ever converted lossily unless you ask for it.
 
+## Guides
+
+- [Raw PCM input](https://github.com/julianhille/wav2flac/blob/main/docs/pcm.md)
+- [Concurrent encodes](https://github.com/julianhille/wav2flac/blob/main/docs/concurrency.md): what happens when you start several at once
+- How-to guides ([all](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/index.md)):
+  - [Encode in parallel with a worker pool](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/parallel-encoding.md)
+  - [Encode one at a time with a FIFO queue](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/fifo-queue.md)
+
 ## Benchmark
 
 Clone the repo and run `npm run bench:serve` to compare `encode()`,

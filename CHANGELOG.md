@@ -26,6 +26,7 @@ links are collected at the bottom of this file.
 - Docs: how concurrent `encode()` calls are scheduled (interleaved on one
   thread, parallel across workers), and how-to guides for a worker pool and
   a FIFO queue.
+- Docs: a how-to section, and a Guides list in the README.
 
 ## [1.0.0-rc.2] - 2026-09-29
 
