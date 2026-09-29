@@ -60,8 +60,8 @@ links are collected at the bottom of this file.
   whatever its line breaks, including the common break before "THE
   SOFTWARE.", and every copy of it is. The banner prints a fixed copy of the
   notice instead of the first one it found.
-- License banner: a pointer to the Unicode-3.0 notice of the Rust standard
-  library, which the banner leaves out.
+- License banner: it points to the Unicode-3.0 notice of the Rust standard
+  library, which it leaves out.
 - Third-party notices: the Rust version they name comes from
   `rust-toolchain.toml`, not from the `rustc` on the path, and the build
   fails when the standard library's license texts are from another release.

@@ -20,8 +20,7 @@ Rust 1.98.1, the release in `rust-toolchain.toml`:
 When the toolchain changes, compare the files with the new release, then
 set `STD_TEXTS_RELEASE` in `scripts/crates.ts` to it. Until then the
 generators fail, so the notices never name a release their texts are not
-from. The
-versions of the crates that a release uses are in its `library/Cargo.lock`.
-To see which parts the wasm links, build it with
+from. The versions of the crates that a release uses are in its
+`library/Cargo.lock`. To see which parts the wasm links, build it with
 `CARGO_PROFILE_RELEASE_STRIP=false` and read the crate names in the name
 section of `target/wasm32-unknown-unknown/release/wav2flac.wasm`.
