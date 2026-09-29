@@ -17,6 +17,12 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- Worker encoder: `terminate()` and a crash reject a `probe()` or
+  `wasmMemoryBytes()` call made while the wasm still loads. Before, such a
+  call stayed pending forever.
+- Worker encoder: `wasmMemoryBytes()` rejects when the worker's wasm failed
+  to start, so it tells whether the worker can still encode. Before, it
+  answered 0.
 - `init()` retries a failed or abandoned load from the URL, path, bytes or
   module it was given. Before, after `init(url, { signal })` gave up, the
   `init()` inside `encode()` loaded from the default location instead.

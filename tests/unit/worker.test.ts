@@ -231,6 +231,25 @@ describe('worker protocol', () => {
     await expect(w.wasmMemoryBytes()).rejects.toThrow('crashed');
   });
 
+  it('rejects requests on terminate while the wasm still loads', async () => {
+    // A fresh loader, whose download never finishes.
+    vi.resetModules();
+    const client = await import('../../ts/lib/worker-client.js');
+    const port: Port<FromWorker, ToWorker> = {
+      post: vi.fn(),
+      listen: () => undefined,
+      ref: () => undefined,
+      close: () => undefined,
+    };
+    const w = client.connect(port, new Promise<Response>(() => {}));
+    const stats = w.wasmMemoryBytes();
+    const info = w.probe(wav.slice(0, 64));
+    w.terminate();
+    await expect(stats).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(info).rejects.toMatchObject({ name: 'AbortError' });
+    expect(port.post).not.toHaveBeenCalled();
+  });
+
   it('does not lock a stream when the signal is already aborted', async () => {
     const { w } = pair();
     const s = streamOf(wav, 4096);
@@ -258,7 +277,9 @@ describe('worker protocol', () => {
     client.post({ t: 'probe', id: 1, data: wav.slice(0, 64) }, []);
     const args = normalizeOptions(undefined, false);
     client.post({ t: 'job', id: 2, args, input: wav.slice(), progress: false, window: OUTPUT_WINDOW }, []);
-    await vi.waitFor(() => expect(inbox).toHaveLength(2));
+    // So wasmMemoryBytes() tells a caller that this worker cannot encode.
+    client.post({ t: 'stats', id: 3 }, []);
+    await vi.waitFor(() => expect(inbox).toHaveLength(3));
     for (const m of inbox) expect(m).toMatchObject({ t: 'error', error: { message: expect.stringMatching(/env/) } });
     ch.port1.close();
   });

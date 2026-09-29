@@ -36,9 +36,10 @@ export function createEncoderPool(size = Math.max(1, (navigator.hardwareConcurre
     if (next !== undefined) next.resolve(w);
     else idle.push(w);
   };
-  // After a failed job, check that the worker is still alive: wasmMemoryBytes()
-  // rejects once the worker has crashed or was terminated, and a worker that
-  // doesn't answer within 5 seconds counts as dead, too.
+  // After a failed job, check that the worker can still encode:
+  // wasmMemoryBytes() rejects once the worker has crashed or was terminated,
+  // or when its wasm failed to start. A worker that doesn't answer within
+  // 5 seconds counts as dead, too.
   const check = async (w) => {
     let timer;
     try {
@@ -121,7 +122,8 @@ whenever a new recording comes in.
   also fail while its worker is fine: the input is not a valid WAV, the
   signal aborted, or `onProgress` threw. So after a failed job, the pool asks
   the worker for `wasmMemoryBytes()`, which only fails once the worker is
-  dead, and replaces a dead worker with a fresh one. A worker that dies
+  dead or its wasm failed to start, and replaces such a worker with a fresh
+  one. A worker that dies
   without an `error` event can't fail its job, so the job stays pending. To
   bound a job, pass a `signal` such as `AbortSignal.timeout()`. The worker
   then doesn't answer the check either, and after 5 seconds it is replaced.

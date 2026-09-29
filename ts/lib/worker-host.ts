@@ -148,7 +148,9 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
         }
         return;
       case 'stats':
-        send({ t: 'stats', id: m.id, wasmBytes: wasmMemoryBytes() });
+        // A worker whose wasm failed to start can't encode; say so.
+        if (initError !== undefined) send({ t: 'error', id: m.id, error: serializeError(initError) });
+        else send({ t: 'stats', id: m.id, wasmBytes: wasmMemoryBytes() });
         return;
     }
   }, ignore);
