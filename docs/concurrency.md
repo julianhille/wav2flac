@@ -29,8 +29,9 @@ const [a, b, c] = await Promise.all([encode(x), encode(y), encode(z)]);
   output in JS memory until it finishes, so peak memory is about the sum of
   all jobs. The encoders themselves share one wasm memory. With the default
   block size they need well under 1 MiB each. The largest `blockSize`,
-  65535, needs several MiB per encoder, about 6 MiB for 8 channels at
-  24 bits. wasm memory never shrinks once it has grown.
+  65535, needs much more: with 8 channels at 24 bits, the first job grows
+  the wasm memory to about 18 MiB, and each more job at once adds a few MiB.
+  wasm memory never shrinks once it has grown.
 
 Jobs don't share any state, so interleaving is always safe. An error or an
 abort in one job doesn't affect the others.
