@@ -29,6 +29,8 @@ links are collected at the bottom of this file.
 - Docs: a how-to section, and a Guides list in the README.
 - Docs: an API reference generated from the TSDoc (TypeDoc), on Read the Docs
   and checked in CI.
+- Docs: a third-party components page listing every crate compiled into the
+  wasm with its version, license and links, generated from `Cargo.lock`.
 
 ## [1.0.0-rc.2] - 2026-09-29
 

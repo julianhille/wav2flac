@@ -249,6 +249,9 @@ the BSD-3-Clause and MIT notices. Not every bundler keeps such comments (Vite,
 for one, drops them from its output chunks), so when you ship a bundle, ship
 `THIRD_PARTY_LICENSES.txt` with it.
 
+The [third-party components](https://github.com/julianhille/wav2flac/blob/main/docs/third-party.md)
+page lists every crate with its version, license and source.
+
 [Changelog](https://github.com/julianhille/wav2flac/blob/main/CHANGELOG.md) ·
 [Source](https://github.com/julianhille/wav2flac) ·
 [Issues](https://github.com/julianhille/wav2flac/issues)

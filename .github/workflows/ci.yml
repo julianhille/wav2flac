@@ -312,6 +312,14 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: scripts/api-docs/package-lock.json
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      # The page is committed so Read the Docs needs no Rust; keep it in sync.
+      - name: Third-party page matches Cargo.lock
+        run: |
+          npm run docs:third-party
+          git diff --exit-code docs/third-party.md \
+            || { echo "::error::docs/third-party.md is out of date; run npm run docs:third-party"; exit 1; }
       - name: Install MkDocs
         run: python3 -m venv "$RUNNER_TEMP/venv" && "$RUNNER_TEMP/venv/bin/pip" install -q -r docs/requirements.txt
       # Warnings (broken TSDoc links, unknown tags) fail the build.

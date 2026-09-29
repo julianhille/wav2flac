@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: 0BSD
-// Writes the license notices of every Rust crate compiled into the wasm to the
-// file given as the first argument: normal dependencies for wasm32, not dev or
-// build dependencies, and not proc macros (they only run at compile time).
+// Writes the license notices of every Rust crate compiled into the wasm (see
+// crates.ts) to the file given as the first argument.
 // With a second argument it also writes a `/*! @license */` comment for the
 // head of the JS bundles: the crate list plus the full notice of every crate
 // licensed only under a BSD or MIT license (BSD clause 2 asks binary
@@ -9,52 +8,15 @@
 // standard library (core, alloc, std and its dlmalloc allocator) is linked in
 // too and gets its notice from RUST_STD below. Run by scripts/build.sh after
 // the cargo build, so every crate's sources are in the local registry.
-import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-
-interface Package {
-  id: string;
-  name: string;
-  version: string;
-  license: string | null;
-  license_file: string | null;
-  repository: string | null;
-  manifest_path: string;
-  targets: { kind: string[] }[];
-}
-interface Node {
-  id: string;
-  deps: { pkg: string; dep_kinds: { kind: string | null }[] }[];
-}
-interface Metadata {
-  packages: Package[];
-  resolve: { root: string; nodes: Node[] };
-}
+import { RUST_STD_PARTS, rustVersion, shippedCrates } from './crates.ts';
 
 const [out, bannerOut] = process.argv.slice(2);
 if (out === undefined) throw new Error('usage: gen-licenses.ts <output file> [banner file]');
 
-const meta = JSON.parse(execFileSync('cargo', [
-  'metadata', '--format-version', '1', '--locked', '--filter-platform', 'wasm32-unknown-unknown',
-], { encoding: 'utf8', maxBuffer: 64 << 20 })) as Metadata;
-
-const nodes = new Map(meta.resolve.nodes.map((n) => [n.id, n]));
-const packages = new Map(meta.packages.map((p) => [p.id, p]));
-const seen = new Set<string>();
-const todo = [meta.resolve.root];
-while (todo.length > 0) {
-  const id = todo.pop()!;
-  for (const d of nodes.get(id)?.deps ?? []) {
-    if (!d.dep_kinds.some((k) => k.kind === null) || seen.has(d.pkg)) continue;
-    if (packages.get(d.pkg)!.targets.some((t) => t.kind.includes('proc-macro'))) continue;
-    seen.add(d.pkg);
-    todo.push(d.pkg);
-  }
-}
-
 /** The Rust standard library as linked into every wasm32 build. */
-const RUST_STD_NAME = `Rust standard library ${rustVersion()}: core, alloc, std, dlmalloc`;
+const RUST_STD_NAME = `Rust standard library ${rustVersion()}: ${RUST_STD_PARTS}`;
 /** Its MIT notice (the MIT option of its MIT OR Apache-2.0 license). */
 const RUST_STD = `Copyright (c) The Rust Project Contributors
 
@@ -76,16 +38,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.`;
 
-/**
- * The rustc version the wasm is built with.
- * @returns E.g. `1.98.1`.
- */
-function rustVersion(): string {
-  return /^rustc (\S+)/.exec(execFileSync('rustc', ['--version'], { encoding: 'utf8' }))?.[1] ?? 'unknown';
-}
-
 const NOTICE = /^(licen[cs]e|copying|notice|authors)/i;
-const crates = [...seen].map((id) => packages.get(id)!).sort((a, b) => a.name.localeCompare(b.name));
+const crates = shippedCrates();
 const rule = '='.repeat(78);
 const parts = [
   'Third-party software compiled into wav2flac.wasm',
