@@ -223,6 +223,9 @@ describe('installed package', () => {
       if (Buffer.compare(out, viaWorker) !== 0) throw new Error('worker output differs');
       readFileSync(new URL(import.meta.resolve('wav2flac/wasm')));
       readFileSync(new URL(import.meta.resolve('wav2flac/package.json')));
+      if (!readFileSync(new URL(import.meta.resolve('wav2flac/THIRD_PARTY_LICENSES.txt')), 'utf8').includes('libflac-rs')) {
+        throw new Error('THIRD_PARTY_LICENSES.txt does not resolve');
+      }
       process.stdout.write(out);
     `);
     writeFileSync(join(consumer, 'consumer.cjs'), `
@@ -238,6 +241,9 @@ describe('installed package', () => {
         if (Buffer.compare(out, viaWorker) !== 0) throw new Error('worker output differs');
         readFileSync(require.resolve('wav2flac/wasm'));
         readFileSync(require.resolve('wav2flac/package.json'));
+        if (!readFileSync(require.resolve('wav2flac/THIRD_PARTY_LICENSES.txt'), 'utf8').includes('libflac-rs')) {
+          throw new Error('THIRD_PARTY_LICENSES.txt does not resolve');
+        }
         process.stdout.write(out);
       })().catch((e) => { console.error(e); process.exit(1); });
     `);

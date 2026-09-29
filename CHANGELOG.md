@@ -10,6 +10,11 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+
+- `wav2flac/THIRD_PARTY_LICENSES.txt` resolves to the notices file in the
+  package, for tools that copy it next to a bundle or a self-hosted `.wasm`.
+
 ### Fixed
 
 - Docs: the worker pool sample replaces a worker that crashed. Before, the
@@ -36,6 +41,9 @@ links are collected at the bottom of this file.
   fails when the standard library's license texts are from another release.
 - Third-party page: crates are sorted the same in every locale, and the page
   links the same notice files that `THIRD_PARTY_LICENSES.txt` reproduces.
+- README: shipping `THIRD_PARTY_LICENSES.txt` is optional, and the README
+  says where it is. The license section names the licenses of the Rust
+  standard library parts (Unicode-3.0, LLVM exception).
 
 ## [1.0.0-rc.3] - 2026-09-29
 
@@ -56,6 +64,7 @@ links are collected at the bottom of this file.
   thread, parallel across workers), and how-to guides for a worker pool and
   a FIFO queue.
 - Docs: a how-to section, and a Guides list in the README.
+- README: the package has no runtime dependencies (a new feature bullet).
 - Docs: an API reference generated from the TSDoc (TypeDoc), on Read the Docs
   and checked in CI.
 - Docs: a third-party components page listing every crate compiled into the

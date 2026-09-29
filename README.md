@@ -58,9 +58,9 @@ npm install wav2flac
 
 The wasm binary is found automatically: next to the JS in Node, and via
 `new URL(…, import.meta.url)` in browsers and in bundlers such as Vite and
-webpack. To host it yourself, call `init(urlOrBytes)` first, and put
-`THIRD_PARTY_LICENSES.txt` next to the `.wasm`: the binary itself carries no
-license notices. To give up on a download that stalls, pass a signal:
+webpack. To host it yourself, call `init(urlOrBytes)` first. The binary
+itself carries no license notices; you can put the package's
+`THIRD_PARTY_LICENSES.txt` next to it (see [License](#license)). To give up on a download that stalls, pass a signal:
 `init(url, { signal: AbortSignal.timeout(10_000) })`. See the
 [loading guide](https://github.com/julianhille/wav2flac/blob/main/docs/loading.md).
 
@@ -246,13 +246,18 @@ same in Node and adds the native Rust build to the comparison. See
 **0BSD**: use it for anything, with no conditions and no attribution. There
 is no warranty. The compiled `.wasm` also contains permissively licensed Rust
 crates: libflac-rs (BSD-3-Clause), hound (Apache-2.0), and rubato and others
-(MIT or Apache-2.0), and the parts of the Rust standard library they use. If
-you redistribute the `.wasm`, keep their notices.
-They ship in `THIRD_PARTY_LICENSES.txt`, and every JS file of the package
-starts with a `/*! @license */` comment that lists the crates and reproduces
-the BSD-3-Clause and MIT notices. Not every bundler keeps such comments (Vite,
-for one, drops them from its output chunks), so when you ship a bundle, ship
-`THIRD_PARTY_LICENSES.txt` with it.
+(MIT or Apache-2.0). It also contains the parts of the Rust standard library
+they use: MIT or Apache-2.0, Unicode-3.0 for the Unicode tables in `core`,
+and Apache-2.0 with the LLVM exception for `compiler_builtins`. If you
+redistribute the `.wasm`, keep their notices.
+
+Every JS file of the package starts with a `/*! @license */` comment that
+lists the crates and reproduces the BSD-3-Clause and MIT notices. Not every
+bundler keeps such comments (Vite, for one, drops them from its output
+chunks). The package also has every notice in full, in
+`pkg/THIRD_PARTY_LICENSES.txt`, which resolves as
+`wav2flac/THIRD_PARTY_LICENSES.txt`. You don't have to ship that file, but
+you can, for example next to a bundle or a self-hosted `.wasm`.
 
 The [third-party components](https://github.com/julianhille/wav2flac/blob/main/docs/third-party.md)
 page lists every crate with its version, license and source.

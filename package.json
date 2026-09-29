@@ -38,6 +38,7 @@
       }
     },
     "./wasm": "./pkg/wav2flac.wasm",
+    "./THIRD_PARTY_LICENSES.txt": "./pkg/THIRD_PARTY_LICENSES.txt",
     "./package.json": "./package.json"
   },
   "files": [
@@ -60,7 +61,7 @@
     "test:pkg": "vitest run --project pkg",
     "coverage": "vitest run --project unit --coverage",
     "test:browser": "node tests/browser/run.ts",
-    "lint:pkg": "publint --strict && attw --pack . --profile node16 --exclude-entrypoints wasm",
+    "lint:pkg": "publint --strict && attw --pack . --profile node16 --exclude-entrypoints wasm THIRD_PARTY_LICENSES.txt",
     "bench": "node bench/node-bench.ts",
     "bench:browser": "node bench/browser-bench.ts",
     "bench:serve": "node bench/server.ts",
