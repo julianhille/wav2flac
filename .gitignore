@@ -12,6 +12,7 @@
 /scripts/api-docs/node_modules/
 /docs/index.md
 /.venv/
+__pycache__/
 
 # Test data (generated at test time)
 *.wav

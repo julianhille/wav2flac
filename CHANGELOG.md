@@ -20,6 +20,11 @@ links are collected at the bottom of this file.
   rejection that nobody handles is reported again.
 - Docs: buffered output is held in JS memory, not in wasm memory, and the
   wasm memory of an encoder doesn't grow with the job.
+- Docs site: the how-to overview is titled "Overview" instead of "Index".
+  "Edit on GitHub" opens the README on the home page and the generator on
+  the third-party page, and is gone from the generated API reference, where
+  it led to a 404.
+- Docs site: every Python package of the build is pinned, not only MkDocs.
 
 ## [1.0.0-rc.3] - 2026-09-29
 
