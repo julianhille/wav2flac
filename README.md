@@ -148,6 +148,12 @@ Buffers passed to a worker are *transferred* by default, which detaches your
 copy, also when the job fails. Pass `copy: true` to keep it, for example to
 retry with other options.
 
+Several calls on one thread take turns rather than run in parallel. For real
+parallelism use several workers; see
+[concurrent encodes](https://github.com/julianhille/wav2flac/blob/main/docs/concurrency.md),
+the [worker pool](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/parallel-encoding.md)
+and the [FIFO queue](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/fifo-queue.md).
+
 ### Inspect a WAV without encoding
 
 ```js

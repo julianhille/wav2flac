@@ -23,6 +23,9 @@ links are collected at the bottom of this file.
   abort also ends the wait for the wasm to load.
 - Docs: a guide to loading the wasm (where it comes from, self-hosting,
   timeouts and retries).
+- Docs: how concurrent `encode()` calls are scheduled (interleaved on one
+  thread, parallel across workers), and how-to guides for a worker pool and
+  a FIFO queue.
 
 ## [1.0.0-rc.2] - 2026-09-29
 

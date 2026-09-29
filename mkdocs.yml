@@ -14,4 +14,9 @@ nav:
   - Home: index.md
   - Loading the wasm: loading.md
   - Raw PCM input: pcm.md
+  - Concurrent encodes: concurrency.md
+  - How-to:
+    - how-to/index.md
+    - Encode in parallel: how-to/parallel-encoding.md
+    - FIFO queue: how-to/fifo-queue.md
   - Benchmark: benchmark.md
