@@ -19,17 +19,23 @@ describe('parallel-encoding.md', () => {
     static all: StubWorker[] = [];
     readonly id = StubWorker.all.push(this);
     dead = false;
-    /** Stopped without an error event: nothing it was sent ever settles. */
+    /** Stopped without an error event: nothing it was sent settles until terminate(). */
     gone = false;
     jobs = 0;
+    /** Rejects the calls still pending, like terminate() on a real worker encoder. */
+    private readonly pending = new Set<(e: Error) => void>();
+    private hang<T>(signal?: AbortSignal): Promise<T> {
+      return new Promise((_, reject) => {
+        this.pending.add(reject);
+        signal?.addEventListener('abort', () => reject(signal.reason));
+      });
+    }
     async encode(input: string, options?: { signal?: AbortSignal }): Promise<string> {
       if (this.dead) throw new Error('wav2flac worker exited with code 1');
       this.jobs++;
       if (input === 'vanish') {
         this.gone = true;
-        return new Promise((_, reject) => {
-          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
-        });
+        return this.hang(options?.signal);
       }
       await tick();
       if (input === 'crash') {
@@ -40,12 +46,14 @@ describe('parallel-encoding.md', () => {
       return `flac(${input})@${this.id}`;
     }
     async wasmMemoryBytes(): Promise<number> {
-      if (this.gone) return new Promise(() => {});
       if (this.dead) throw new Error('wav2flac worker exited with code 1');
+      if (this.gone) return this.hang();
       return 1 << 20;
     }
     terminate(): void {
       this.dead = true;
+      for (const reject of this.pending) reject(new Error('The worker was terminated.'));
+      this.pending.clear();
     }
   }
 
@@ -121,6 +129,9 @@ describe('parallel-encoding.md', () => {
     await expect(running).rejects.toThrow('done');
     pool.terminate();
     await expect(after).rejects.toThrow('terminated');
+    // terminate() ended the check of the busy worker without a replacement.
+    await tick();
+    expect(StubWorker.all).toHaveLength(1);
   });
 
   it('keeps the other results of a batch when files fail', async () => {
