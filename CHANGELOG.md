@@ -10,6 +10,8 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-09-29
+
 ### Added
 
 - Streaming WAV → FLAC encoder core in Rust, built on libflac-rs (a
@@ -103,4 +105,5 @@ links are collected at the bottom of this file.
 - Documentation site on Read the Docs (MkDocs): the README plus the raw PCM
   and benchmark guides, at <https://wav2flac.readthedocs.io/>.
 
-[Unreleased]: https://github.com/julianhille/wav2flac/commits/main
+[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.1...HEAD
+[1.0.0-rc.1]: https://github.com/julianhille/wav2flac/tree/v1.0.0-rc.1
