@@ -1,0 +1,89 @@
+<!-- SPDX-License-Identifier: 0BSD -->
+# Loading the wasm
+
+The encoder is a WebAssembly module, `wav2flac.wasm`. It is loaded once per
+realm (page, worker or Node process), the first time you encode.
+
+## Where it comes from
+
+`encode`, `encodeStream`, `probe` and `createWorkerEncoder` call `init()` for
+you. Without an argument, `init()` loads the `.wasm` that ships next to the
+package's JS:
+
+- **Node**: read from disk with `fs`.
+- **Browsers and bundlers** (Vite, webpack): fetched from
+  `new URL('../wav2flac.wasm', import.meta.url)`, which bundlers detect and
+  emit as an asset.
+
+To host it yourself, call `init()` before anything encodes. It takes a URL or
+path, the bytes, a compiled `WebAssembly.Module`, or a `Response` (or a
+promise of one):
+
+```ts
+import { init } from 'wav2flac';
+await init(new URL('/assets/wav2flac.wasm', location.href));
+```
+
+Only the first call's source counts. Later calls share the load already in
+progress and ignore their argument.
+
+## Timeouts and stalled downloads
+
+A download that never finishes, from a hung CDN or a dead connection, keeps
+`init()` pending. Pass a `signal` to stop waiting. `init()` then rejects with
+the signal's reason, which is a `TimeoutError` for `AbortSignal.timeout()`:
+
+```ts
+try {
+  await init(wasmUrl, { signal: AbortSignal.timeout(10_000) });
+} catch (e) {
+  if (e instanceof DOMException && e.name === 'TimeoutError') {
+    showError('The encoder could not be downloaded. Check your connection and try again.');
+  }
+  throw e;
+}
+```
+
+`encode()` and `encodeStream()` pass their own `signal` to `init()`, so one
+signal covers both loading and encoding:
+
+```ts
+const flac = await encode(wav, { signal: AbortSignal.timeout(30_000) });
+```
+
+### Retrying
+
+Every caller shares one load. The load is cancelled (its `fetch` or file read
+is aborted) once every caller waiting on it has given up. The next `init()`,
+or the next `encode()`, then starts a new download. A load that fails, such as
+a 404 or a network error, rejects every caller and is also retried by the
+next call.
+
+A caller that waits **without** a signal keeps the load going. Its wait is
+never cut short by another caller's timeout, and it waits as long as the load
+takes.
+
+A source that cannot be cancelled, such as a `Response` promise you created,
+is simply no longer waited for. If it arrives later, it is dropped.
+
+## Which APIs this applies to
+
+| API | Waits for the wasm | Can be aborted while it loads |
+|---|---|---|
+| `init(source, { signal })` | yes | yes, with `signal` |
+| `encode(input, { signal })` | yes | yes, with `signal` |
+| `encodeStream(input, { signal })` | yes | yes, with `signal`; the stream errors |
+| `probe(input)` | yes | no; call `init()` with a signal first |
+| `createWorkerEncoder()` | yes | a job's `signal` aborts that job, but the load goes on |
+| `initSync(source?)` | no: loads synchronously | not needed |
+| `encodeSync(input)` | no: throws if not loaded | not needed |
+
+`initSync()` takes bytes or a module you already have, or in Node reads the
+bundled file synchronously, so it cannot stall on a download.
+`encodeSync()` never loads anything: call `await init()` or `initSync()`
+first.
+
+## Self-hosting and licenses
+
+If you host the `.wasm` yourself, redistribute its license notices with it.
+See [License](index.md#license).

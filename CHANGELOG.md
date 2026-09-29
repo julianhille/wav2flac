@@ -21,6 +21,8 @@ links are collected at the bottom of this file.
   retry got the same pending promise.
 - `encode()` and `encodeStream()` pass their `signal` to `init()`, so an
   abort also ends the wait for the wasm to load.
+- Docs: a guide to loading the wasm (where it comes from, self-hosting,
+  timeouts and retries).
 
 ## [1.0.0-rc.2] - 2026-09-29
 
