@@ -116,6 +116,8 @@
         <label class="check"><input type="checkbox" name="mode" value="sync" checked> Main thread, <code>encodeSync()</code></label>
         <label class="check"><input type="checkbox" name="mode" value="worker" checked> Web Worker</label>
         <label class="check"><input type="checkbox" name="mode" value="native" disabled> Native Rust (Node only)</label>
+        <label class="check"><input type="checkbox" name="mode" value="libav"> libav.js (FFmpeg FLAC, its own worker)</label>
+        <label class="check"><input type="checkbox" name="mode" value="libflac"> libflac.js (libFLAC, main thread)</label>
       </fieldset>
       <fieldset>
         <legend>Extras</legend>
@@ -145,6 +147,9 @@
         24-bit), or as a <code>Float32Array</code> like Web Audio delivers, converted back to the source bit depth.
         The conversion from the WAV happens before timing. MB/s and the output ratio refer to the input actually
         passed, so a <code>Float32Array</code> of 16-bit audio is twice the bytes.</li>
+      <li><b>Other libraries.</b> libav.js (FFmpeg's FLAC encoder, in its own worker) and libflac.js (libFLAC, on the
+        main thread) get the same samples as integer PCM, prepared before timing. Any conversion a library needs on top of
+        that is timed. They don't transcode.</li>
       <li><b>Timing</b> covers one encode call with the input already in memory. Worker runs include transferring
         the input to the worker; the worker is started once per mode, and its start-up time is listed separately.</li>
       <li><b>Longest block</b> is the longest gap between 1 ms timer ticks on the page's main thread. That's how long

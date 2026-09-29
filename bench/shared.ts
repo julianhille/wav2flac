@@ -63,7 +63,11 @@ export type Mode =
   /** `createWorkerEncoder().encode()`: Web Worker / worker_threads. */
   | 'worker'
   /** The native Rust build (`examples/encode`), Node runner only. */
-  | 'native';
+  | 'native'
+  /** Another library: libav.js (FFmpeg's FLAC encoder; its own worker in browsers). See `competitors.ts`. */
+  | 'libav'
+  /** Another library: libflac.js (the reference libFLAC, on the calling thread). */
+  | 'libflac';
 
 /** Human-readable mode names. */
 export const MODE_LABEL: Readonly<Record<Mode, string>> = {
@@ -71,7 +75,21 @@ export const MODE_LABEL: Readonly<Record<Mode, string>> = {
   sync: 'Main thread (encodeSync)',
   worker: 'Worker',
   native: 'Native Rust (baseline)',
+  libav: 'libav.js (FFmpeg)',
+  libflac: 'libflac.js (libFLAC)',
 };
+
+/** Modes that run another library instead of wav2flac. */
+export const COMPETITORS: readonly Mode[] = ['libav', 'libflac'];
+
+/**
+ * Why a configuration can't run another library, if it can't.
+ * @param c The configuration.
+ * @returns The reason, or `null`.
+ */
+export function competitorUnsupported(c: BenchConfig): string | null {
+  return c.transcode === 'none' ? null : 'not benchmarked with transcoding (wav2flac only)';
+}
 
 /** One benchmark configuration. */
 export interface BenchConfig {

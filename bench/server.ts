@@ -23,10 +23,16 @@ import { parseConfig, type BenchConfig } from './shared.ts';
 
 const BENCH = fileURLToPath(new URL('.', import.meta.url));
 const PKG = resolve(fileURLToPath(new URL('../pkg/', import.meta.url)));
+/** The other libraries compared by the benchmark (dev dependencies), by URL prefix. */
+const VENDOR: Readonly<Record<string, string>> = {
+  '/vendor/libav/': resolve(fileURLToPath(new URL('../node_modules/@libav.js/variant-flac/dist/', import.meta.url))),
+  '/vendor/libflac/': resolve(fileURLToPath(new URL('../node_modules/libflacjs/dist/', import.meta.url))),
+};
 
 const MIME: Readonly<Record<string, string>> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.cjs': 'text/javascript; charset=utf-8',
   '.map': 'application/json',
   '.json': 'application/json',
@@ -152,20 +158,22 @@ async function nodeBench(req: IncomingMessage, res: ServerResponse): Promise<voi
 }
 
 /**
- * Serves a file from `pkg/`, refusing paths that escape it.
- * @param path URL path after `/pkg/`.
+ * Serves a file from a directory, refusing paths that escape it.
+ * @param dir The directory.
+ * @param path URL path below it.
  * @param res The response.
+ * @param hint What to run if the file is missing.
  */
-async function pkgFile(path: string, res: ServerResponse): Promise<void> {
-  const file = resolve(PKG, `.${sep}${decodeURIComponent(path)}`);
-  if (!file.startsWith(PKG + sep)) {
+async function dirFile(dir: string, path: string, res: ServerResponse, hint: string): Promise<void> {
+  const file = resolve(dir, `.${sep}${decodeURIComponent(path)}`);
+  if (!file.startsWith(dir + sep)) {
     send(res, 403, 'text/plain', 'forbidden');
     return;
   }
   try {
     send(res, 200, MIME[extname(file)] ?? 'application/octet-stream', await readFile(file));
   } catch {
-    send(res, 404, 'text/plain', `not found: /pkg/${path} (run npm run build)`);
+    send(res, 404, 'text/plain', `not found: ${path} (run ${hint})`);
   }
 }
 
@@ -180,7 +188,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'text/plain', 'method not allowed');
   if (pathname === '/' || pathname === '/index.html') return send(res, 200, MIME['.html']!, await readFile(join(BENCH, 'index.html')));
   if (pathname === '/app.js') return send(res, 200, MIME['.js']!, await bundle());
-  if (pathname.startsWith('/pkg/')) return pkgFile(pathname.slice('/pkg/'.length), res);
+  if (pathname.startsWith('/pkg/')) return dirFile(PKG, pathname.slice('/pkg/'.length), res, 'npm run build');
+  for (const [prefix, dir] of Object.entries(VENDOR)) {
+    if (pathname.startsWith(prefix)) return dirFile(dir, pathname.slice(prefix.length), res, 'npm ci');
+  }
   if (pathname === '/favicon.ico') return send(res, 204, 'text/plain', '');
   return send(res, 404, 'text/plain', 'not found');
 }

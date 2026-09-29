@@ -10,8 +10,11 @@
  * @module
  */
 import {
+  type CompetitorMode, type FlacLib, type LibAVInstance, type PcmSamples, competitorInput, loadCompetitor,
+} from './competitors.ts';
+import {
   type BenchConfig, type BenchReport, type EncoderInput, type Mode, type ModeResult, type RunSample,
-  encoderInput, encoderOptions,
+  competitorUnsupported, encoderInput, encoderOptions,
 } from './shared.ts';
 
 /** The package's public API. */
@@ -19,6 +22,33 @@ export type Lib = typeof import('../ts/index.js');
 
 /** Where the page loads the built package from (served by `server.ts`). */
 const LIB_URL = '/pkg/esm/index.js';
+
+/** Where `server.ts` serves the other libraries from `node_modules`. */
+const VENDOR = { libav: '/vendor/libav/libav-flac.mjs', libflac: '/vendor/libflac/libflac.wasm.js' };
+
+/** Loads the other libraries in the page. */
+const LOADERS = {
+  libav: async (): Promise<LibAVInstance> => {
+    const url: string = VENDOR.libav;
+    const { default: LibAV } = (await import(url)) as { default: { LibAV(): Promise<LibAVInstance> } };
+    return LibAV.LibAV();
+  },
+  libflac: async (): Promise<FlacLib> => {
+    const g = globalThis as { Flac?: FlacLib; FLAC_SCRIPT_LOCATION?: string };
+    if (g.Flac === undefined) {
+      // A classic script: it defines the global `Flac` and loads its .wasm next to itself.
+      g.FLAC_SCRIPT_LOCATION = VENDOR.libflac.replace(/[^/]*$/, '');
+      await new Promise<void>((ok, fail) => {
+        const s = document.createElement('script');
+        s.src = VENDOR.libflac;
+        s.onload = () => ok();
+        s.onerror = () => fail(new Error(`loading ${VENDOR.libflac} failed (npm ci?)`));
+        document.head.append(s);
+      });
+    }
+    return g.Flac!;
+  },
+};
 
 /** Resident-memory probe injected by the Playwright driver: KiB, or `null`. */
 export type RssProbe = (phase: 'before' | 'after') => Promise<number | null>;
@@ -145,7 +175,7 @@ export function environment(): string {
  * @param rss Optional RSS probe.
  * @returns The sample.
  */
-async function measure(run: () => Promise<number>, wasmBytes: () => Promise<number>, rss: RssProbe | undefined): Promise<RunSample> {
+async function measure(run: () => Promise<number>, wasmBytes: () => Promise<number | null>, rss: RssProbe | undefined): Promise<RunSample> {
   gc();
   const baseRssKb = rss === undefined ? null : await rss('before');
   let heap = heapUsed();
@@ -186,38 +216,48 @@ async function measure(run: () => Promise<number>, wasmBytes: () => Promise<numb
  * @param onRun Progress callback.
  * @returns The result.
  */
-async function runMode(l: Lib, mode: Mode, input: EncoderInput, config: BenchConfig, extra: BrowserOptions, onRun: OnRun): Promise<ModeResult> {
+async function runMode(l: Lib, mode: Mode, input: EncoderInput, wav: Uint8Array<ArrayBuffer>, config: BenchConfig, extra: BrowserOptions, onRun: OnRun): Promise<ModeResult> {
   const res: ModeResult = { mode, samples: [], startupMs: null, uaMemoryBytes: null, error: null };
   const rss = (globalThis as { __wav2flacRss?: RssProbe }).__wav2flacRss;
   const opts = encoderOptions(config, input);
-  const wav = input.data;
+  const data = input.data;
   let close = (): void => undefined;
   let prepare = (): void => undefined;
   try {
     let run: () => Promise<number>;
-    let wasmBytes: () => Promise<number>;
-    if (mode === 'worker') {
+    let wasmBytes: () => Promise<number | null>;
+    if (mode === 'libav' || mode === 'libflac') {
+      const why = competitorUnsupported(config);
+      if (why !== null) throw new Error(why);
+      const pcm: PcmSamples = competitorInput(wav);
+      const t = performance.now();
+      const c = await loadCompetitor(mode as CompetitorMode, LOADERS);
+      if (mode === 'libav') res.startupMs = performance.now() - t;
+      close = () => c.close();
+      run = async () => (await c.encode(pcm, config.level)).length;
+      wasmBytes = async () => c.wasmBytes();
+    } else if (mode === 'worker') {
       const t = performance.now();
       const w = l.createWorkerEncoder();
       close = () => w.terminate();
       await w.wasmMemoryBytes(); // resolves once the worker has loaded wasm
       res.startupMs = performance.now() - t;
       // Transferred to the worker: prepare() makes a fresh copy per run, outside the timing.
-      let copy = wav;
+      let copy = data;
       prepare = () => {
-        copy = wav.slice();
+        copy = data.slice();
       };
       run = config.output === 'stream'
         ? () => drain(w.encodeStream(copy, opts))
         : async () => (await w.encode(copy, opts)).length;
       wasmBytes = () => w.wasmMemoryBytes();
     } else if (mode === 'sync') {
-      run = async () => l.encodeSync(wav, opts).length;
+      run = async () => l.encodeSync(data, opts).length;
       wasmBytes = async () => l.wasmMemoryBytes();
     } else if (mode === 'main') {
       run = config.output === 'stream'
-        ? () => drain(l.encodeStream(wav, opts))
-        : async () => (await l.encode(wav, opts)).length;
+        ? () => drain(l.encodeStream(data, opts))
+        : async () => (await l.encode(data, opts)).length;
       wasmBytes = async () => l.wasmMemoryBytes();
     } else {
       throw new Error('only available in Node');
@@ -253,7 +293,7 @@ export async function runBrowserBench(config: BenchConfig, input: BenchInput, ex
   const l = await loadLib();
   const enc = encoderInput(input.bytes, config.input);
   const results: ModeResult[] = [];
-  for (const mode of config.modes) results.push(await runMode(l, mode, enc, config, extra, onRun));
+  for (const mode of config.modes) results.push(await runMode(l, mode, enc, input.bytes, config, extra, onRun));
   return {
     environment: environment(),
     version: l.version(),
