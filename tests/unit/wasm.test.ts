@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: 0BSD
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const WASM = 'build/bindgen/wav2flac_bg.wasm';
@@ -191,6 +193,37 @@ describe('init', () => {
     await expect(w.init('https://b.example/x.wasm')).rejects.toThrow(/404/);
     await w.init();
     expect(urls).toEqual(['https://a.example/x.wasm', 'https://b.example/x.wasm', 'https://b.example/x.wasm']);
+  });
+
+  it('skips a Response when it retries, and uses the source before it', async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn((url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(urls.length === 1 ? new Response(null, { status: 503 }) : new Response(bytes));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const w = await fresh();
+    const url = 'https://cdn.example/wav2flac.wasm';
+    await expect(w.init(url)).rejects.toThrow(/503/);
+    await expect(w.init(Promise.resolve(new Response(null, { status: 404 })))).rejects.toThrow(/404/);
+    await w.init();
+    expect(urls).toEqual([url, url]);
+  });
+
+  it('lets go of the bytes it loaded from', async () => {
+    setFlagsFromString('--expose-gc');
+    const gc = runInNewContext('gc') as () => void;
+    const w = await fresh();
+    let ref: WeakRef<ArrayBuffer> | undefined;
+    await (async () => {
+      // A copy: slice() of a Node Buffer shares its memory.
+      const copy = new Uint8Array(bytes);
+      ref = new WeakRef(copy.buffer);
+      await w.init(copy);
+    })();
+    await new Promise((r) => setTimeout(r, 0));
+    gc();
+    expect(ref!.deref()).toBeUndefined();
   });
 
   it('keeps a load alive while another caller still waits', async () => {

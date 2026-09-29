@@ -38,8 +38,9 @@ let compiled: WebAssembly.Module | undefined;
 let memory: WebAssembly.Memory | undefined;
 let pending: Load | undefined;
 /**
- * The source of the last load that was given one that can be read again, for
- * the loads that retry it after it failed or was abandoned.
+ * The last source that started a load and can be read again, for the loads
+ * that retry after it failed or was abandoned. Cleared once the module is
+ * ready.
  */
 let configured: WasmSource | undefined;
 /** Whether init() is inside the glue's async instantiation. */
@@ -132,6 +133,8 @@ function startLoad(source: WasmSource): Load {
       const out = await initGlue({ module_or_path: mod });
       compiled = mod;
       memory = out.memory;
+      // Nothing retries any more; don't keep the bytes alive.
+      configured = undefined;
     } finally {
       instantiating = false;
     }
@@ -195,9 +198,9 @@ function waitFor(load: Load, signal: AbortSignal): Promise<void> {
  * retried by the next call, too.
  *
  * A retry loads from the `source` of that call. Without one, it loads from
- * the URL, path, bytes or module that started the last load, so the `init()`
- * inside `encode()` retries your custom location. A `Response` can be read
- * only once; after it failed, pass a new one.
+ * the last URL, path, bytes or module that a load started with, so the
+ * `init()` inside `encode()` retries your custom location. A `Response` can
+ * be read only once; after it failed, pass a new one.
  *
  * @param source Where to load the wasm from. Default: `wav2flac.wasm` next to
  *   the package's JS (read with `fs` in Node, `fetch`ed elsewhere).
@@ -269,6 +272,7 @@ export function initSync(source?: BufferSource | WebAssembly.Module): void {
   const out = initGlueSync({ module: mod });
   compiled = mod;
   memory = out.memory;
+  configured = undefined;
 }
 
 /**

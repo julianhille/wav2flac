@@ -61,8 +61,8 @@ a 404 or a network error, rejects every caller and is also retried by the
 next call.
 
 A retry loads from the source passed to that call. Without one, as in
-`encode()`, it loads from the URL, path, bytes or module that started the
-last load, not from the default location. A `Response` can be read only once,
+`encode()`, it loads from the last URL, path, bytes or module that a load
+started with, not from the default location. A `Response` can be read only once,
 so after a load from a `Response` failed, pass a new one.
 
 A caller that waits **without** a signal keeps the load going. Its wait is
