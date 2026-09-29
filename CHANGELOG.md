@@ -28,8 +28,12 @@ links are collected at the bottom of this file.
 - `init()` retries a failed or abandoned load from the URL, path, bytes or
   module it was given. Before, after `init(url, { signal })` gave up, the
   `init()` inside `encode()` loaded from the default location instead. It
-  keeps a copy of bytes until the wasm is ready, so a buffer you transfer or
-  change after the call can't break the retry.
+  keeps a copy of bytes or of a `URL` until the wasm is ready, so a buffer
+  you transfer or a `URL` you change after the call can't break the retry.
+  Bytes that were already transferred (detached) reject with an error that
+  says so, and a retry doesn't use them.
+- `initSync()` accepts a `SharedArrayBuffer`, like `init()`. Before, it
+  threw.
 - `init()` loads from an `ArrayBuffer` of another realm, such as an iframe or
   a `vm` context. Before, it rejected it as not being wasm bytes.
 - Docs: the worker pool sample replaces a worker that crashed. Before, the

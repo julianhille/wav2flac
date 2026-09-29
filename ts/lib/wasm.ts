@@ -4,7 +4,7 @@
  * @module
  */
 import initGlue, { initSync as initGlueSync } from '../../build/bindgen/wav2flac.js';
-import { isBuffer } from './input.js';
+import { isBuffer, isDetached } from './input.js';
 import { isSignal } from './options.js';
 import { builtin, ignore, isNode } from './platform.js';
 
@@ -86,6 +86,16 @@ function toUrl(source: string | URL): URL {
 }
 
 /**
+ * Bytes as WebAssembly takes them: it rejects a bare `SharedArrayBuffer`, but
+ * not a view of one.
+ * @param bytes A buffer or a view.
+ * @returns A view, or `bytes` as it is.
+ */
+function bufferSource(bytes: ArrayBufferView | ArrayBufferLike): BufferSource {
+  return (isBuffer(bytes) ? new Uint8Array(bytes) : bytes) as BufferSource;
+}
+
+/**
  * Compiles a module from any {@link WasmSource}.
  * @param source The source.
  * @param signal Cancels a fetch or file read started here.
@@ -93,7 +103,7 @@ function toUrl(source: string | URL): URL {
  */
 async function compile(source: WasmSource, signal: AbortSignal): Promise<WebAssembly.Module> {
   if (source instanceof WebAssembly.Module) return source;
-  if (ArrayBuffer.isView(source) || isBuffer(source)) return WebAssembly.compile(source as BufferSource);
+  if (ArrayBuffer.isView(source) || isBuffer(source)) return WebAssembly.compile(bufferSource(source));
   let res: Response | PromiseLike<Response>;
   if (typeof source === 'string' || source instanceof URL) {
     const url = toUrl(source);
@@ -226,7 +236,12 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
   if (compiled !== undefined) return Promise.resolve();
   if (signal?.aborted === true) return Promise.reject(signal.reason);
   if (pending === undefined) {
-    const again = source === undefined ? undefined : retrySource(source);
+    let again: WasmSource | undefined;
+    try {
+      again = source === undefined ? undefined : retrySource(source);
+    } catch (e) {
+      return Promise.reject(e);
+    }
     if (again !== undefined) configured = again;
     pending = startLoad(again ?? source ?? configured ?? defaultWasmUrl());
   }
@@ -239,22 +254,20 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
 }
 
 /**
- * What a retry of a load from `source` loads from: a URL, a path or a module
- * as it is, and a copy of bytes, which the caller may change or transfer
- * meanwhile. A `Response` can be read only once, so it has none.
+ * What a retry of a load from `source` loads from: a path or a module as it
+ * is, and a copy of a `URL` or of bytes, which the caller may change or
+ * transfer meanwhile. A `Response` can be read only once, so it has none.
  * @param source The source.
  * @returns The source for a retry, or `undefined`.
+ * @throws {TypeError} For detached bytes.
  */
 function retrySource(source: WasmSource): WasmSource | undefined {
-  if (typeof source === 'string' || source instanceof URL || source instanceof WebAssembly.Module) return source;
-  try {
-    if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength).slice();
-    if (isBuffer(source)) return new Uint8Array(source).slice();
-  } catch {
-    // A detached buffer; the load reports it.
-    return source;
-  }
-  return undefined;
+  if (typeof source === 'string' || source instanceof WebAssembly.Module) return source;
+  if (source instanceof URL) return new URL(source.href);
+  if (!ArrayBuffer.isView(source) && !isBuffer(source)) return undefined;
+  if (isDetached(source)) throw new TypeError('wav2flac: init() got wasm bytes that were transferred (detached)');
+  if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength).slice();
+  return new Uint8Array(source).slice();
 }
 
 /**
@@ -276,7 +289,7 @@ export function initSync(source?: BufferSource | WebAssembly.Module): void {
     throw new Error('wav2flac: init() is instantiating the module; await it instead of calling initSync()');
   }
   const bytes = source ?? builtin<typeof import('node:fs')>('fs').readFileSync(defaultWasmUrl());
-  const mod = bytes instanceof WebAssembly.Module ? bytes : new WebAssembly.Module(bytes as BufferSource);
+  const mod = bytes instanceof WebAssembly.Module ? bytes : new WebAssembly.Module(bufferSource(bytes));
   const out = initGlueSync({ module: mod });
   compiled = mod;
   memory = out.memory;

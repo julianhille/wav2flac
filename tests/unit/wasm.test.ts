@@ -246,18 +246,53 @@ describe('init', () => {
     expect(w.isReady()).toBe(true);
   });
 
-  it('rejects detached bytes, and retries from a new source', async () => {
+  it('rejects detached bytes, and does not retry from them', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn((url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(urls.length === 1 ? new Response(null, { status: 503 }) : new Response(bytes));
+    }));
     const w = await fresh();
+    const url = 'https://cdn.example/wav2flac.wasm';
+    await expect(w.init(url)).rejects.toThrow(/503/);
     const buffer = new Uint8Array(bytes).buffer;
     const view = new Uint8Array(buffer, 8);
     structuredClone(buffer, { transfer: [buffer] });
-    await expect(w.init(buffer)).rejects.toThrow();
-    await expect(w.init(view)).rejects.toThrow();
-    await w.init(new Uint8Array(bytes));
-    expect(w.isReady()).toBe(true);
+    await expect(w.init(buffer)).rejects.toThrow(/detached/);
+    await expect(w.init(view)).rejects.toThrow(/detached/);
+    // The retry loads from the last source that could be read.
+    await w.init();
+    expect(urls).toEqual([url, url]);
   });
 
-  it('loads from a copy of bytes, so the caller can transfer them at once', async () => {
+  it('rejects a source it cannot inspect instead of throwing', async () => {
+    const w = await fresh();
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    await expect(w.init(proxy as never)).rejects.toThrow(TypeError);
+  });
+
+  it('retries from the URL it was given, not from a later change to it', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn((url: URL) => {
+      urls.push(url.href);
+      return new Promise<Response>(() => {});
+    }));
+    const w = await fresh();
+    const url = new URL('https://cdn.example/wav2flac.wasm');
+    const stop = new AbortController();
+    const first = w.init(url, { signal: stop.signal });
+    stop.abort(new Error('gave up'));
+    await expect(first).rejects.toThrow('gave up');
+    url.pathname = '/other.wasm';
+    const again = new AbortController();
+    const second = w.init(undefined, { signal: again.signal });
+    again.abort(new Error('gave up'));
+    await expect(second).rejects.toThrow('gave up');
+    expect(urls).toEqual(['https://cdn.example/wav2flac.wasm', 'https://cdn.example/wav2flac.wasm']);
+  });
+
+  it('lets the caller transfer its bytes right after the call', async () => {
     const w = await fresh();
     const buffer = new Uint8Array(bytes).buffer;
     const done = w.init(buffer);
@@ -380,6 +415,11 @@ describe('init', () => {
   it('initSync accepts bytes or a Module', async () => {
     let w = await fresh();
     w.initSync(bytes);
+    expect(w.isReady()).toBe(true);
+    w = await fresh();
+    const sab = new SharedArrayBuffer(bytes.length);
+    new Uint8Array(sab).set(bytes);
+    w.initSync(sab as never);
     expect(w.isReady()).toBe(true);
     w = await fresh();
     w.initSync(new WebAssembly.Module(bytes));
