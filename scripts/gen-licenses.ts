@@ -32,12 +32,29 @@ const parts = [
 ];
 /** License expressions that leave no choice but a BSD or MIT license. */
 const NOTICE_ONLY = /^(BSD-[23]-Clause|MIT)$/;
+/**
+ * License expressions whose notices only THIRD_PARTY_LICENSES.txt carries. A
+ * crate with any other expression fails the build, so that a new license gets
+ * a decision.
+ */
+const FILE_ONLY = new Set([
+  'Apache-2.0',
+  'MIT OR Apache-2.0',
+  '(MIT OR Apache-2.0) AND Unicode-3.0',
+  '0BSD OR Apache-2.0',
+]);
 /** BSD clause 2, for crates that declare no license expression. */
 const BSD_CLAUSE = /Redistributions in binary form must reproduce/i;
 const bsd: string[] = [];
 for (const c of crates) {
   const dir = dirname(c.manifest_path);
   const files = noticeFiles(c);
+  const known = c.license === null
+    ? files.some((f) => BSD_CLAUSE.test(readFileSync(join(dir, f), 'utf8')))
+    : NOTICE_ONLY.test(c.license) || FILE_ONLY.has(c.license);
+  if (!known) {
+    throw new Error(`${c.name} ${c.version}: license ${c.license ?? 'file'} is neither in the banner nor in FILE_ONLY`);
+  }
   parts.push('', rule, `${c.name} ${c.version}`, `License: ${c.license ?? 'see file'}`);
   if (c.repository !== null) parts.push(`Source: ${c.repository}`);
   for (const f of files) {
