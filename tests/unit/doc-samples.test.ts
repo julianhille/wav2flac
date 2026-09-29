@@ -105,6 +105,24 @@ describe('parallel-encoding.md', () => {
     }
   });
 
+  it('rejects a waiting job as soon as its signal aborts', async () => {
+    const pool = await createEncoderPool(1);
+    const busy = new AbortController();
+    const running = pool.encode('vanish', { signal: busy.signal });
+    const stop = new AbortController();
+    const waiting = pool.encode('a', { signal: stop.signal });
+    const after = pool.encode('b');
+    stop.abort(new Error('gave up'));
+    await expect(waiting).rejects.toThrow('gave up');
+    await expect(pool.encode('c', { signal: AbortSignal.abort(new Error('early')) })).rejects.toThrow('early');
+    // The worker is still busy with the first job, and the next job still waits.
+    expect(StubWorker.all[0]!.jobs).toBe(1);
+    busy.abort(new Error('done'));
+    await expect(running).rejects.toThrow('done');
+    pool.terminate();
+    await expect(after).rejects.toThrow('terminated');
+  });
+
   it('keeps the other results of a batch when files fail', async () => {
     StubWorker.all = [];
     const files = ['a', 'crash', 'b', 'bad', 'c', 'd', 'e', 'f'];

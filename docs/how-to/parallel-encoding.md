@@ -25,10 +25,25 @@ export function createEncoderPool(size = Math.max(1, (navigator.hardwareConcurre
   let closed = false;
   const terminated = () => new DOMException('The pool was terminated.', 'AbortError');
 
-  const acquire = () => {
+  const acquire = (signal) => {
     if (closed) return Promise.reject(terminated());
     const w = idle.shift();
-    return w !== undefined ? Promise.resolve(w) : new Promise((resolve, reject) => waiting.push({ resolve, reject }));
+    if (w !== undefined) return Promise.resolve(w);
+    return new Promise((resolve, reject) => {
+      signal?.throwIfAborted();
+      // A job whose signal aborts stops waiting at once.
+      const onAbort = () => {
+        waiting.splice(waiting.indexOf(entry), 1);
+        reject(signal.reason);
+      };
+      const settle = (fn) => (value) => {
+        signal?.removeEventListener('abort', onAbort);
+        fn(value);
+      };
+      const entry = { resolve: settle(resolve), reject: settle(reject) };
+      waiting.push(entry);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   };
   const release = (w) => {
     if (closed) return;
@@ -62,7 +77,7 @@ export function createEncoderPool(size = Math.max(1, (navigator.hardwareConcurre
 
   return {
     async encode(input, options) {
-      const w = await acquire();
+      const w = await acquire(options?.signal);
       try {
         const flac = await w.encode(input, options);
         release(w);
@@ -118,7 +133,7 @@ whenever a new recording comes in.
   your copy, when the job *starts*, not when you call `pool.encode()`. Pass
   `copy: true` to keep it.
 - **Cancelling.** `signal` works as usual. A job whose signal aborts while it
-  waits for a worker rejects as soon as it gets one.
+  waits for a worker rejects at once and gives up its place in the queue.
 - **Crashes.** If a worker crashes, for example because it runs out of
   memory, its job rejects and so would every later job sent to it. A job can
   also fail while its worker is fine: the input is not a valid WAV, the
