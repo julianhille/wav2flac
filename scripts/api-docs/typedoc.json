@@ -14,5 +14,7 @@
   "useCodeBlocks": true,
   "useHTMLEncodedBrackets": true,
   "parametersFormat": "table",
-  "interfacePropertiesFormat": "table"
+  "interfacePropertiesFormat": "table",
+  "typeDeclarationFormat": "table",
+  "enumMembersFormat": "table"
 }
