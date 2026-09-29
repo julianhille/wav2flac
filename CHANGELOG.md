@@ -43,7 +43,8 @@ links are collected at the bottom of this file.
   made the batch terminate the pool, which failed every job still running or
   waiting. A failed job rejects at once, and a worker that stops answering
   is replaced after 5 seconds. A job whose signal aborts while it waits for
-  a worker rejects at once, too, not only once it gets one.
+  a worker rejects at once, too, not only once it gets one, and a job whose
+  signal already aborted doesn't take an idle worker.
 - Docs: the FIFO queue sample no longer keeps the last result alive, and a
   rejection that nobody handles is reported again.
 - Docs: buffered output is held in JS memory, not in wasm memory, and the

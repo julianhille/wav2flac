@@ -17,6 +17,10 @@ describe('parallel-encoding.md', () => {
   /** A stand-in for a worker encoder whose jobs can fail or crash it. */
   class StubWorker {
     static all: StubWorker[] = [];
+    /** The inputs of the jobs, in the order the workers started them. */
+    static started: string[] = [];
+    /** Jobs with the input 'hold' wait for it. */
+    static gate: Promise<void> = Promise.resolve();
     readonly id = StubWorker.all.push(this);
     dead = false;
     /** Stopped without an error event: nothing it was sent settles until terminate(). */
@@ -33,6 +37,8 @@ describe('parallel-encoding.md', () => {
     async encode(input: string, options?: { signal?: AbortSignal }): Promise<string> {
       if (this.dead) throw new Error('wav2flac worker exited with code 1');
       this.jobs++;
+      StubWorker.started.push(input);
+      if (input === 'hold') await StubWorker.gate;
       if (input === 'vanish') {
         this.gone = true;
         return this.hang(options?.signal);
@@ -60,6 +66,7 @@ describe('parallel-encoding.md', () => {
   type Pool = { encode(input: string, options?: { signal?: AbortSignal }): Promise<string>; terminate(): void };
   const createEncoderPool = async (size?: unknown): Promise<Pool> => {
     StubWorker.all = [];
+    StubWorker.started = [];
     const factory = (await run(`${poolCode}\nreturn createEncoderPool;`, {
       createWorkerEncoder: () => new StubWorker(),
       navigator: { hardwareConcurrency: 4 },
@@ -132,6 +139,82 @@ describe('parallel-encoding.md', () => {
     // terminate() ended the check of the busy worker without a replacement.
     await tick();
     expect(StubWorker.all).toHaveLength(1);
+  });
+
+  /**
+   * Holds the jobs with the input 'hold' until the returned function is called.
+   * @returns Lets them go on.
+   */
+  const hold = (): (() => void) => {
+    let open!: () => void;
+    StubWorker.gate = new Promise((r) => { open = r; });
+    return open;
+  };
+  /** Settles with `p`, or with 'pending' when it doesn't settle soon. */
+  const soon = <T>(p: Promise<T>): Promise<T | 'pending'> => Promise.race([p, tick(50).then(() => 'pending' as const)]);
+
+  it('starts waiting jobs in the order they came', async () => {
+    const pool = await createEncoderPool(1);
+    const open = hold();
+    const jobs = ['hold', 'a', 'b', 'c'].map((f) => pool.encode(f));
+    open();
+    await Promise.all(jobs);
+    expect(StubWorker.started).toEqual(['hold', 'a', 'b', 'c']);
+    pool.terminate();
+  });
+
+  it('hands the worker to the next job after a waiting job aborted', async () => {
+    const pool = await createEncoderPool(1);
+    const open = hold();
+    const running = pool.encode('hold');
+    const stop = new AbortController();
+    const waiting = pool.encode('a', { signal: stop.signal });
+    const after = pool.encode('b');
+    stop.abort(new Error('gave up'));
+    await expect(waiting).rejects.toThrow('gave up');
+    open();
+    await running;
+    expect(await soon(after)).toBe('flac(b)@1');
+    pool.terminate();
+  });
+
+  it('ignores the signal of a job once it has a worker', async () => {
+    const pool = await createEncoderPool(1);
+    const open = hold();
+    const running = pool.encode('hold');
+    const stop = new AbortController();
+    const started = pool.encode('b', { signal: stop.signal });
+    const last = pool.encode('c');
+    open();
+    await running;
+    // 'b' has the worker; its abort must not drop 'c' from the queue.
+    stop.abort();
+    await started;
+    expect(await soon(last)).toBe('flac(c)@1');
+    pool.terminate();
+  });
+
+  it('does not take a worker for a job whose signal already aborted', async () => {
+    const pool = await createEncoderPool(1);
+    await expect(pool.encode('a', { signal: AbortSignal.abort(new Error('early')) })).rejects.toThrow('early');
+    expect(StubWorker.all[0]!.jobs).toBe(0);
+    pool.terminate();
+  });
+
+  it('leaves no timer behind after checking a worker', async () => {
+    vi.useFakeTimers();
+    try {
+      const pool = await createEncoderPool(1);
+      const job = expect(pool.encode('bad')).rejects.toThrow('not a WAV');
+      await vi.advanceTimersByTimeAsync(0);
+      await job;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(StubWorker.all).toHaveLength(1);
+      pool.terminate();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the other results of a batch when files fail', async () => {

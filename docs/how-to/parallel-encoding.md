@@ -27,10 +27,10 @@ export function createEncoderPool(size = Math.max(1, (navigator.hardwareConcurre
 
   const acquire = (signal) => {
     if (closed) return Promise.reject(terminated());
+    if (signal?.aborted) return Promise.reject(signal.reason);
     const w = idle.shift();
     if (w !== undefined) return Promise.resolve(w);
     return new Promise((resolve, reject) => {
-      signal?.throwIfAborted();
       // A job whose signal aborts stops waiting at once.
       const onAbort = () => {
         waiting.splice(waiting.indexOf(entry), 1);
@@ -130,20 +130,26 @@ whenever a new recording comes in.
   state in wasm memory is bounded: it depends on `blockSize`, the number of
   channels, the bit depth and resampling, and doesn't grow with long jobs.
 - **Transfers.** In-memory input is transferred to the worker, which detaches
-  your copy, when the job *starts*, not when you call `pool.encode()`. Pass
-  `copy: true` to keep it.
+  your copy, when the job *starts*, not when you call `pool.encode()`. It is
+  gone even when the job fails, so pass `copy: true` to keep it, for example
+  to retry the files that failed.
 - **Cancelling.** `signal` works as usual. A job whose signal aborts while it
   waits for a worker rejects at once and gives up its place in the queue.
+  The time of an `AbortSignal.timeout()` counts from the `pool.encode()`
+  call, so it includes the wait for a worker; allow for the jobs queued
+  ahead.
 - **Crashes.** If a worker crashes, for example because it runs out of
   memory, its job rejects and so would every later job sent to it. A job can
   also fail while its worker is fine: the input is not a valid WAV, the
   signal aborted, or `onProgress` threw. So after a failed job, the pool asks
   the worker for `wasmMemoryBytes()`, which only fails once the worker is
   dead or its wasm failed to start, and replaces such a worker with a fresh
-  one. A worker that dies without an `error` event can't fail its job, so the
-  job stays pending. To bound a job, pass a `signal` such as
+  one. A worker that stops responding, say in an endless loop, can't fail its
+  job, so the job stays pending. To bound a job, pass a `signal` such as
   `AbortSignal.timeout()`. The worker then doesn't answer the check either,
-  and after 5 seconds it is replaced.
+  and after 5 seconds it is replaced. A worker that fails every time, such as
+  one whose wasm can't load, is replaced after every job; the pool doesn't
+  back off.
 - **Node.** The same code works with `worker_threads`.
   `navigator.hardwareConcurrency` is available in Node ≥ 21, or use
   `os.availableParallelism()`.
