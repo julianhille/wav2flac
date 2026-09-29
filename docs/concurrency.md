@@ -25,9 +25,10 @@ const [a, b, c] = await Promise.all([encode(x), encode(y), encode(z)]);
 - **Total time doesn't go down.** Three interleaved jobs take about as
   long as three sequential ones. You gain responsiveness and overlapping
   progress callbacks, not speed.
-- **Memory adds up.** All running encoders and their buffered output live in
-  the same wasm memory at once, so peak memory is about the sum of all jobs.
-  wasm memory never shrinks once it has grown.
+- **Memory adds up.** Each running job holds its input and its growing
+  output in JS memory until it finishes, so peak memory is about the sum of
+  all jobs. The encoders themselves share one wasm memory and need well under
+  1 MiB each. wasm memory never shrinks once it has grown.
 
 Jobs don't share any state, so interleaving is always safe. An error or an
 abort in one job doesn't affect the others.

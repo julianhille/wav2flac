@@ -10,6 +10,17 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Docs: the worker pool sample replaces a worker that crashed. Before, the
+  pool kept handing jobs to it, and each of them failed. It also rejects a
+  size below 1, which made every job wait forever, and its batch example
+  keeps the results of the other files when one fails.
+- Docs: the FIFO queue sample no longer keeps the last result alive, and a
+  rejection that nobody handles is reported again.
+- Docs: buffered output is held in JS memory, not in wasm memory, and the
+  wasm memory of an encoder doesn't grow with the job.
+
 ## [1.0.0-rc.3] - 2026-09-29
 
 ### Added

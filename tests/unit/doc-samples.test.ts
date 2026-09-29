@@ -1,0 +1,195 @@
+// SPDX-License-Identifier: 0BSD
+// The code samples of the how-to guides, run as they are printed. Each sample
+// is read from its Markdown file; its `import` lines are replaced by stubs.
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
+import { describe, expect, it } from 'vitest';
+import { encode } from '../../ts/index.js';
+import { makeWav } from '../helpers/wav.js';
+
+/**
+ * Returns the ```js blocks of a Markdown file.
+ * @param path The file.
+ * @param count How many blocks the tests expect.
+ * @returns The code of each block.
+ */
+function jsBlocks(path: string, count: number): string[] {
+  const md = readFileSync(path, 'utf8');
+  const blocks = [...md.matchAll(/^```js\n([\s\S]*?)^```$/gm)].map((m) => m[1] ?? '');
+  if (blocks.length !== count) throw new Error(`${path}: ${blocks.length} js blocks, expected ${count}`);
+  return blocks;
+}
+
+/**
+ * Turns a sample module into a script: drops its imports and `export`s.
+ * @param code The sample.
+ * @returns The code without imports.
+ */
+function asScript(code: string): string {
+  return code.replace(/^import .* from 'wav2flac';$/gm, '').replace(/^export /gm, '');
+}
+
+const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
+  ...args: string[]
+) => (...values: unknown[]) => Promise<unknown>;
+
+/**
+ * Runs `code` as the body of an async function.
+ * @param code The body.
+ * @param scope Names and values the body can use.
+ * @returns What the body returns.
+ */
+function run(code: string, scope: Record<string, unknown>): Promise<unknown> {
+  return new AsyncFunction(...Object.keys(scope), code)(...Object.values(scope));
+}
+
+const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+describe('parallel-encoding.md', () => {
+  const [poolCode = '', batchCode = ''] = jsBlocks('docs/how-to/parallel-encoding.md', 2).map(asScript);
+
+  /** A stand-in for a worker encoder whose jobs can fail or crash it. */
+  class StubWorker {
+    static all: StubWorker[] = [];
+    readonly id = StubWorker.all.push(this);
+    dead = false;
+    jobs = 0;
+    async encode(input: string): Promise<string> {
+      if (this.dead) throw new Error('wav2flac worker exited with code 1');
+      this.jobs++;
+      await tick();
+      if (input === 'crash') {
+        this.dead = true;
+        throw new Error('wav2flac worker exited with code 1');
+      }
+      if (input === 'bad') throw new Error('not a WAV file');
+      return `flac(${input})@${this.id}`;
+    }
+    async wasmMemoryBytes(): Promise<number> {
+      if (this.dead) throw new Error('wav2flac worker exited with code 1');
+      return 1 << 20;
+    }
+    terminate(): void {
+      this.dead = true;
+    }
+  }
+
+  type Pool = { encode(input: string): Promise<string>; terminate(): void };
+  const createEncoderPool = async (size?: unknown): Promise<Pool> => {
+    StubWorker.all = [];
+    const factory = (await run(`${poolCode}\nreturn createEncoderPool;`, {
+      createWorkerEncoder: () => new StubWorker(),
+      navigator: { hardwareConcurrency: 4 },
+    })) as (size?: unknown) => Pool;
+    return factory(size);
+  };
+
+  it('rejects a pool size that is not a positive integer', async () => {
+    for (const size of [0, -1, 1.5, Number.NaN, '2']) {
+      await expect(createEncoderPool(size), String(size)).rejects.toThrow(RangeError);
+    }
+    await createEncoderPool();
+    expect(StubWorker.all).toHaveLength(3);
+  });
+
+  it('replaces a crashed worker and keeps a healthy one after a failed job', async () => {
+    const pool = await createEncoderPool(2);
+    await expect(pool.encode('crash')).rejects.toThrow('exited');
+    await expect(pool.encode('bad')).rejects.toThrow('not a WAV');
+    const results = await Promise.all(Array.from({ length: 20 }, (_, i) => pool.encode(`f${i}`)));
+    expect(results).toEqual(Array.from({ length: 20 }, (_, i) => expect.stringMatching(`^flac\\(f${i}\\)`)));
+    // The crashed worker was replaced once; the one with the bad input was kept.
+    expect(StubWorker.all).toHaveLength(3);
+    expect(StubWorker.all.filter((w) => w.dead)).toHaveLength(1);
+    pool.terminate();
+    expect(StubWorker.all.every((w) => w.dead)).toBe(true);
+  });
+
+  it('keeps the other results of a batch when files fail', async () => {
+    StubWorker.all = [];
+    const files = ['a', 'crash', 'b', 'bad', 'c', 'd', 'e', 'f'];
+    const results = await run(`${poolCode}\n${batchCode}\nreturn results;`, {
+      createWorkerEncoder: () => new StubWorker(),
+      navigator: { hardwareConcurrency: 3 },
+      files,
+      console: { error: () => {} },
+    });
+    const status = (results as PromiseSettledResult<string>[]).map((r) => r.status);
+    expect(status).toEqual(files.map((f) => (f === 'crash' || f === 'bad' ? 'rejected' : 'fulfilled')));
+  });
+
+  it('rejects waiting jobs on terminate, and replaces nothing after it', async () => {
+    const pool = await createEncoderPool(1);
+    const running = pool.encode('crash');
+    const waiting = pool.encode('a');
+    pool.terminate();
+    await expect(running).rejects.toThrow();
+    await expect(waiting).rejects.toThrow('terminated');
+    await expect(pool.encode('b')).rejects.toThrow('terminated');
+    expect(StubWorker.all).toHaveLength(1);
+  });
+});
+
+describe('fifo-queue.md', () => {
+  const [queueCode = '', uploadCode = '', workerCode = ''] = jsBlocks('docs/how-to/fifo-queue.md', 3).map(asScript);
+  const wavA = makeWav({ frames: 4410, seed: 1 });
+  const wavB = makeWav({ frames: 441, seed: 2 });
+
+  it('runs jobs one at a time, in call order', async () => {
+    const [first, second] = (await run(`${queueCode}\nreturn [first, second];`, {
+      encode,
+      wavA,
+      wavB,
+    })) as [Promise<Uint8Array>, Promise<Uint8Array>];
+    const order: string[] = [];
+    await Promise.all([first.then(() => order.push('A')), second.then(() => order.push('B'))]);
+    expect(order).toEqual(['A', 'B']);
+  });
+
+  it('moves on after a failed job, and runs the upload and worker samples', async () => {
+    const uploaded: unknown[] = [];
+    const errors: unknown[] = [];
+    const worker = { encode: async (x: unknown) => (x === 'bad' ? Promise.reject(new Error('bad')) : `flac(${x})`) };
+    await run(`${queueCode.replace(/^const enqueue[\s\S]*/m, '')}\n${workerCode}\n${uploadCode}`, {
+      createWorkerEncoder: () => worker,
+      recordings: ['r1', 'bad', 'r2'],
+      upload: (f: unknown) => uploaded.push(f),
+      console: { error: (_: string, e: unknown) => errors.push(e) },
+    });
+    await tick(10);
+    expect(uploaded).toEqual(['flac(r1)', 'flac(r2)']);
+    expect(errors).toHaveLength(1);
+  });
+
+  it('does not keep the last result alive', async () => {
+    setFlagsFromString('--expose-gc');
+    const gc = runInNewContext('gc') as () => void;
+    const enqueue = (await run(`${queueCode.replace(/^const enqueue[\s\S]*/m, '')}\nreturn createQueue;`, {})) as (
+      run: () => Promise<object>,
+    ) => () => Promise<object>;
+    const queue = enqueue(async () => ({ big: new Uint8Array(1 << 20) }));
+    let ref: WeakRef<object> | undefined;
+    await queue().then((r) => {
+      ref = new WeakRef(r);
+    });
+    await tick();
+    gc();
+    await tick();
+    gc();
+    expect(ref?.deref()).toBeUndefined();
+  });
+
+  it('reports a rejection that nobody handles', () => {
+    const code = `${queueCode.replace(/^const enqueue[\s\S]*/m, '')}
+      let n = 0;
+      process.on('unhandledRejection', () => n++);
+      const enqueue = createQueue(async () => { throw new Error('x'); });
+      enqueue();
+      enqueue().catch(() => {});
+      setTimeout(() => console.log(n), 50);`;
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8' });
+    expect(out.trim()).toBe('1');
+  });
+});
