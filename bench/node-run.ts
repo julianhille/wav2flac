@@ -11,8 +11,10 @@
  */
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { createRequire } from 'node:module';
+import { competitorInput, loadCompetitor, type CompetitorMode, type FlacLib, type LibAVInstance } from './competitors.ts';
 import type { RunSample, BenchConfig } from './shared.ts';
-import { encoderInput, encoderOptions } from './shared.ts';
+import { competitorUnsupported, encoderInput, encoderOptions } from './shared.ts';
 
 type Lib = typeof import('../ts/index.js');
 
@@ -37,6 +39,27 @@ async function drain(s: ReadableStream<Uint8Array>): Promise<number> {
   return n;
 }
 
+/** Loads the other libraries from `node_modules`. */
+const LOADERS = {
+  libav: async (): Promise<LibAVInstance> => {
+    const { default: LibAV } = await import('@libav.js/variant-flac');
+    return (await LibAV.LibAV()) as unknown as LibAVInstance;
+  },
+  libflac: async (): Promise<FlacLib> => {
+    // Its Emscripten loader prefers fetch() when it exists, which can't read
+    // files; without it, it reads the .wasm with fs.
+    const f = globalThis.fetch;
+    Reflect.deleteProperty(globalThis, 'fetch');
+    try {
+      const flac = (createRequire(import.meta.url)('libflacjs') as (v: string) => FlacLib)('wasm');
+      if (!flac.isReady()) await new Promise<void>((ok) => flac.on('ready', ok));
+      return flac;
+    } finally {
+      globalThis.fetch = f;
+    }
+  },
+};
+
 /**
  * Collects GC garbage if `--expose-gc` is set.
  */
@@ -60,7 +83,7 @@ async function main(): Promise<ChildResult> {
 
   let startupMs: number | null = null;
   let run: () => Promise<number>;
-  let wasmBytes: () => Promise<number>;
+  let wasmBytes: () => Promise<number | null>;
   let close = (): void => undefined;
   let prepare = (): void => undefined;
   if (mode === 'worker') {
@@ -86,6 +109,16 @@ async function main(): Promise<ChildResult> {
       ? () => drain(lib.encodeStream(wav, opts))
       : async () => (await lib.encode(wav, opts)).length;
     wasmBytes = async () => lib.wasmMemoryBytes();
+  } else if (mode === 'libav' || mode === 'libflac') {
+    const why = competitorUnsupported(config);
+    if (why !== null) throw new Error(why);
+    const pcm = competitorInput(new Uint8Array(readFileSync(wavPath)));
+    const t = performance.now();
+    const c = await loadCompetitor(mode as CompetitorMode, LOADERS);
+    if (mode === 'libav') startupMs = performance.now() - t;
+    run = async () => (await c.encode(pcm, config.level)).length;
+    wasmBytes = async () => c.wasmBytes();
+    close = () => c.close();
   } else {
     throw new Error(`unknown mode ${mode}`);
   }
