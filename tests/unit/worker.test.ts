@@ -83,6 +83,7 @@ describe('worker protocol', () => {
     await new Promise((r) => setTimeout(r, 50));
     // Without further reads the worker may only run OUTPUT_WINDOW chunks ahead.
     expect(toClient.filter((m) => m.t === 'out').length).toBeLessThanOrEqual(OUTPUT_WINDOW + 1);
+    expect(Object.prototype.toString.call(first.value!.buffer)).toBe('[object ArrayBuffer]');
     const rest: Uint8Array[] = [first.value!];
     for (;;) {
       const r = await s.read();
@@ -162,6 +163,27 @@ describe('worker protocol', () => {
     const { w } = pair();
     await expect(w.probe(wav)).resolves.toMatchObject({ channels: 2, frames: 44100 * 2 });
     await expect(w.probe(new Uint8Array(100))).rejects.toMatchObject({ code: 'INVALID_WAV' });
+  });
+
+  it('probes a header behind a large chunk by growing the prefix', async () => {
+    const { w } = pair();
+    const junk = 300_000;
+    const big = new Uint8Array(wav.length + 8 + junk);
+    big.set(wav.subarray(0, 12));
+    big.set([0x4a, 0x55, 0x4e, 0x4b], 12); // "JUNK"
+    new DataView(big.buffer).setUint32(16, junk, true);
+    big.set(wav.subarray(12), 20 + junk);
+    new DataView(big.buffer).setUint32(4, big.length - 8, true);
+    await expect(w.probe(big)).resolves.toMatchObject({ channels: 2, frames: 44100 * 2 });
+    expect(big.length).toBeGreaterThan(junk); // still attached: only prefixes were copied
+  });
+
+  it('explains a retry with an input transferred by an earlier call', async () => {
+    const { w } = pair();
+    const input = wav.slice();
+    await w.encode(input);
+    await expect(w.encode(input)).rejects.toThrow(/transferred.*copy: true/);
+    expect(() => encodeSync(input)).toThrow(TypeError);
   });
 
   it('rejects pending and later jobs after terminate', async () => {

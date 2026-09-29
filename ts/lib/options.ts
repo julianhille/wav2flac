@@ -14,8 +14,9 @@ import { invalidOption } from './errors.js';
  * @returns `true` for plain objects.
  */
 function isPlainObject(v: object): boolean {
+  if (Array.isArray(v)) return false;
   const proto: unknown = Object.getPrototypeOf(v);
-  return proto === Object.prototype || proto === null;
+  return proto === Object.prototype || proto === null || Object.getPrototypeOf(proto) === null;
 }
 
 /** Progress report passed to {@link Options.onProgress}. */
@@ -31,6 +32,27 @@ export interface Progress {
 /** Resampler filter quality. */
 export type ResampleQuality = 'fast' | 'balanced' | 'best';
 
+/**
+ * Sample encoding of raw PCM: little-endian, interleaved. `u8` is unsigned
+ * (silence = 128), `s24` is packed in 3 bytes, `f32` is nominally −1.0–1.0.
+ */
+export type PcmSampleFormat = 'u8' | 's16' | 's24' | 's32' | 'f32';
+
+/**
+ * Describes raw, headerless PCM input (see {@link Options.pcm}).
+ */
+export interface PcmFormat {
+  /** Sample rate in Hz. */
+  sampleRate: number;
+  /** Channel count, 1–8, in WAV/FLAC channel order. */
+  channels: number;
+  /**
+   * Sample encoding. Inferred from `Int16Array` (`s16`), `Int32Array` (`s32`)
+   * and `Float32Array` (`f32`) input; required for bytes and streams.
+   */
+  format?: PcmSampleFormat | undefined;
+}
+
 /** Encoder options. All are optional; the defaults give lossless level-5 FLAC. */
 export interface Options {
   /** 0 (fastest) – 8 (smallest), the libFLAC presets. Default 5. */
@@ -41,7 +63,12 @@ export interface Options {
   sampleRate?: number | undefined;
   /** Resampler filter quality. Default `'balanced'`. */
   resampleQuality?: ResampleQuality | undefined;
-  /** Target bit depth, 4–32. Required for float WAV input. */
+  /**
+   * The input is raw PCM, not WAV. Accepts typed arrays, one typed array per
+   * channel (planar), bytes, or a stream (which needs `format`).
+   */
+  pcm?: PcmFormat | undefined;
+  /** Target bit depth, 4–32. Required for float input. */
   bitsPerSample?: number | undefined;
   /**
    * Dither used when samples are requantized: a lower bit depth, float input or
@@ -95,11 +122,21 @@ export interface EncoderArgs {
   /** -1 = unlimited. */
   maxInputBytes: number;
   streaming: boolean;
+  /** 0 = WAV input; else a {@link PCM_FORMATS} index + 1; -1 = PCM, format still to infer. */
+  pcmFormat: number;
+  pcmChannels: number;
+  pcmRate: number;
+  /** PCM input length in bytes; -1 = unknown (streams). */
+  pcmTotalBytes: number;
 }
+
+/** PCM sample formats in wasm constructor order (index + 1). @internal */
+export const PCM_FORMATS: readonly PcmSampleFormat[] = ['u8', 's16', 's24', 's32', 'f32'];
 
 const KNOWN: ReadonlySet<string> = new Set<keyof Options>([
   'compressionLevel', 'blockSize', 'sampleRate', 'resampleQuality', 'bitsPerSample', 'dither',
   'ditherSeed', 'tags', 'seekPointInterval', 'padding', 'maxInputBytes', 'signal', 'onProgress', 'copy',
+  'pcm',
 ]);
 
 const QUALITY: Readonly<Record<ResampleQuality, number>> = { fast: 0, balanced: 1, best: 2 };
@@ -124,6 +161,19 @@ function uint(o: Record<string, unknown>, key: string, dflt: number, max = 2 ** 
 }
 
 /**
+ * Duck-types an `AbortSignal` (also from another realm or a polyfill): the
+ * members the encoder actually uses must be there.
+ * @param s Candidate.
+ * @returns `true` if it can be used as a signal.
+ */
+function isSignal(s: unknown): boolean {
+  if (typeof s !== 'object' || s === null || !('aborted' in s)) return false;
+  const o = s as Record<string, unknown>;
+  return typeof o['addEventListener'] === 'function' && typeof o['removeEventListener'] === 'function'
+    && typeof o['throwIfAborted'] === 'function';
+}
+
+/**
  * Validates option types and converts them to constructor arguments.
  * @param opts User options.
  * @param streaming Whether the header is emitted first.
@@ -133,16 +183,16 @@ function uint(o: Record<string, unknown>, key: string, dflt: number, max = 2 ** 
  */
 export function normalizeOptions(opts: Options | undefined | null, streaming: boolean): EncoderArgs {
   if (opts === undefined || opts === null) opts = {};
-  if (typeof opts !== 'object') throw invalidOption('options must be an object');
+  if (typeof opts !== 'object' || !isPlainObject(opts)) throw invalidOption('options must be an object');
   const o = opts as Record<string, unknown>;
   for (const k of Object.keys(o)) {
     if (!KNOWN.has(k)) throw invalidOption(`unknown option "${k}"`);
   }
-  const rq = o['resampleQuality'] ?? 'balanced';
+  const rq = o['resampleQuality'] === undefined ? 'balanced' : o['resampleQuality'];
   if (typeof rq !== 'string' || !Object.hasOwn(QUALITY, rq)) {
     throw invalidOption('resampleQuality must be "fast", "balanced" or "best"');
   }
-  const dither = o['dither'] ?? 'tpdf';
+  const dither = o['dither'] === undefined ? 'tpdf' : o['dither'];
   if (dither !== 'tpdf' && dither !== 'none') throw invalidOption('dither must be "tpdf" or "none"');
   const tagKeys: string[] = [];
   const tagValues: string[] = [];
@@ -157,16 +207,19 @@ export function normalizeOptions(opts: Options | undefined | null, streaming: bo
       tagValues.push(v);
     }
   }
-  const spi = o['seekPointInterval'] ?? 10;
-  if (typeof spi !== 'number' || !(spi >= 0)) throw invalidOption('seekPointInterval must be a number ≥ 0');
+  const spi = o['seekPointInterval'] === undefined ? 10 : o['seekPointInterval'];
+  if (typeof spi !== 'number' || !(spi >= 0) || !Number.isFinite(spi)) {
+    throw invalidOption('seekPointInterval must be a finite number ≥ 0');
+  }
   const signal = o['signal'];
-  if (signal !== undefined && !(typeof signal === 'object' && signal !== null && 'aborted' in signal)) {
+  if (signal !== undefined && !isSignal(signal)) {
     throw invalidOption('signal must be an AbortSignal');
   }
   if (o['onProgress'] !== undefined && typeof o['onProgress'] !== 'function') {
     throw invalidOption('onProgress must be a function');
   }
   if (o['copy'] !== undefined && typeof o['copy'] !== 'boolean') throw invalidOption('copy must be a boolean');
+  const pcm = normalizePcm(o['pcm']);
   return {
     level: uint(o, 'compressionLevel', 5, 8),
     blockSize: uint(o, 'blockSize', 0, 65535, 16),
@@ -182,5 +235,34 @@ export function normalizeOptions(opts: Options | undefined | null, streaming: bo
     padding: uint(o, 'padding', 8192),
     maxInputBytes: uint(o, 'maxInputBytes', -1, Number.MAX_SAFE_INTEGER),
     streaming,
+    ...pcm,
   };
+}
+
+/**
+ * Validates the `pcm` option's types.
+ * @param v The option value.
+ * @returns The PCM constructor arguments (all zero for WAV input).
+ * @throws {Wav2FlacError} `INVALID_OPTIONS` for a malformed `pcm` object.
+ */
+function normalizePcm(v: unknown): Pick<EncoderArgs, 'pcmFormat' | 'pcmChannels' | 'pcmRate' | 'pcmTotalBytes'> {
+  if (v === undefined) return { pcmFormat: 0, pcmChannels: 0, pcmRate: 0, pcmTotalBytes: -1 };
+  if (typeof v !== 'object' || v === null || !isPlainObject(v)) throw invalidOption('pcm must be a plain object');
+  const p = v as Record<string, unknown>;
+  for (const k of Object.keys(p)) {
+    if (k !== 'sampleRate' && k !== 'channels' && k !== 'format') throw invalidOption(`unknown pcm option "${k}"`);
+  }
+  for (const k of ['sampleRate', 'channels']) {
+    const n = p[k];
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 2 ** 32 - 1) {
+      throw invalidOption(`pcm.${k} must be a positive integer`);
+    }
+  }
+  const f = p['format'];
+  let pcmFormat = -1;
+  if (f !== undefined) {
+    pcmFormat = PCM_FORMATS.indexOf(f as PcmSampleFormat) + 1;
+    if (pcmFormat === 0) throw invalidOption(`pcm.format must be one of ${PCM_FORMATS.join(', ')}`);
+  }
+  return { pcmFormat, pcmChannels: p['channels'] as number, pcmRate: p['sampleRate'] as number, pcmTotalBytes: -1 };
 }

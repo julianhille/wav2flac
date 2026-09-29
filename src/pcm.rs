@@ -116,6 +116,75 @@ pub fn decode_f32(bytes: &[u8], out: &mut Vec<f64>) {
     );
 }
 
+/// Sample encoding of raw (headerless) PCM input: little-endian, interleaved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PcmFormat {
+    /// Unsigned 8-bit (silence = 128), as in 8-bit WAV.
+    U8,
+    /// Signed 16-bit.
+    S16,
+    /// Signed 24-bit, packed in 3 bytes.
+    S24,
+    /// Signed 32-bit.
+    S32,
+    /// IEEE 754 32-bit float, nominal range −1.0..=1.0. Needs a target `bits_per_sample`.
+    F32,
+}
+
+impl PcmFormat {
+    /// Bytes per sample of one channel.
+    #[must_use]
+    pub fn bytes(self) -> usize {
+        match self {
+            Self::U8 => 1,
+            Self::S16 => 2,
+            Self::S24 => 3,
+            Self::S32 | Self::F32 => 4,
+        }
+    }
+}
+
+/// Description of raw PCM input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PcmSpec {
+    /// Sample encoding.
+    pub format: PcmFormat,
+    /// Channel count (1..=8), interleaved in FLAC/WAV channel order.
+    pub channels: u16,
+    /// Sample rate in Hz.
+    pub sample_rate: u32,
+}
+
+impl PcmSpec {
+    /// Bytes per interleaved frame (one sample of every channel).
+    #[must_use]
+    pub fn frame_bytes(&self) -> usize {
+        self.format.bytes() * usize::from(self.channels)
+    }
+
+    /// The equivalent WAV header, as if the samples came from a plain WAV
+    /// file with `data_len` bytes of data.
+    #[must_use]
+    pub(crate) fn to_header(self, data_len: u32) -> WavHeader {
+        let (format, bytes) = match self.format {
+            PcmFormat::F32 => (SampleFormat::Float, 4),
+            f => (SampleFormat::Int, f.bytes() as u16),
+        };
+        WavHeader {
+            format,
+            channels: self.channels,
+            sample_rate: self.sample_rate,
+            valid_bits: bytes * 8,
+            container_bytes: bytes,
+            justify: Justify::Right,
+            channel_mask: None,
+            data_offset: 0,
+            data_len,
+            tags: Vec::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

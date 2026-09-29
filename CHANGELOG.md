@@ -48,11 +48,16 @@ links are collected at the bottom of this file.
   input, backpressured stream output, progress and `AbortSignal` support;
   `WorkerEncoderOptions` set the worker script and wasm source). Ships as
   ESM and CommonJS with `.d.ts`/`.d.cts` types. Needs Node ≥ 22.12.
+  Output is typed `Bytes` (`Uint8Array<ArrayBuffer>`), so it goes straight
+  into `new Blob([…])` and `new Response(…)`.
   Options are range-checked before the wasm runs (`compressionLevel` 0–8,
   `blockSize` 16–65535, `bitsPerSample` 4–32, `tags` a plain object) and
   fail with `INVALID_OPTIONS`. `encodeStream` never throws: every failure,
   including invalid options and aborts, errors the returned stream. In Node,
   `init()` accepts Windows drive paths such as `C:\\app\\wav2flac.wasm`.
+  PCM stream chunks are checked against `pcm.format`, and a source stream is
+  unlocked again once it ends. Detached input, also a buffer transferred by
+  a concurrent worker job, gives a `TypeError`.
 - Native `encode` example (used as the determinism reference and benchmark
   baseline).
 - Vitest suite with V8 coverage for the TypeScript sources, including

@@ -12,6 +12,10 @@ afterEach(() => {
 });
 
 /** A fresh copy of the loader and glue (no instance yet). */
+/** Reads a stream to the end. */
+const collectAll = async (s: ReadableStream<Uint8Array>): Promise<Uint8Array> =>
+  new Uint8Array(await new Response(s).arrayBuffer());
+
 const fresh = async (): Promise<typeof import('../../ts/lib/wasm.js')> => {
   vi.resetModules();
   return import('../../ts/lib/wasm.js');
@@ -146,6 +150,16 @@ describe('init', () => {
     const r = api.encodeStream(new Uint8Array(10)).getReader();
     // The default URL (ts/wav2flac.wasm) does not exist next to the sources.
     await expect(r.read()).rejects.toThrow(/ENOENT/);
+    // A stream input is cancelled when init fails, on both paths.
+    for (const run of [
+      (s: ReadableStream<Uint8Array>) => collectAll(api.encodeStream(s)),
+      (s: ReadableStream<Uint8Array>) => api.encode(s),
+    ]) {
+      let cancelled: unknown;
+      const s = new ReadableStream<Uint8Array>({ cancel: (why) => { cancelled = why; } });
+      await expect(run(s)).rejects.toThrow(/ENOENT/);
+      expect(String(cancelled)).toMatch(/ENOENT/);
+    }
     vi.resetModules();
     // Success path: serve the default file from a stubbed fs.
     const real = process;

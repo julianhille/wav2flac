@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use wav2flac::{Dither, Options, OutputMode, ResampleQuality};
+use wav2flac::{Dither, Encoder, Options, OutputMode, PcmFormat, PcmSpec, ResampleQuality};
 
 const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden.json");
 
@@ -79,6 +79,40 @@ fn cases() -> Vec<(String, Vec<u8>)> {
         ),
     ] {
         v.push((name.to_string(), encode(&w, o)));
+    }
+    // Raw PCM input: integer passthrough and float conversion.
+    let s16 = signal(Signal::Sine, 16, 2, 20_000, 1);
+    let raw16: Vec<u8> = s16.iter().flat_map(|v| (*v as i16).to_le_bytes()).collect();
+    let f32s = sine_f64(1000.0, 48000, 2, 20_000, 0.8);
+    let rawf: Vec<u8> = f32s
+        .iter()
+        .flat_map(|v| (*v as f32).to_le_bytes())
+        .collect();
+    for (name, raw, format, o) in [
+        ("pcm-s16", raw16, PcmFormat::S16, Options::default()),
+        (
+            "pcm-f32-dither16",
+            rawf,
+            PcmFormat::F32,
+            Options {
+                bits_per_sample: Some(16),
+                dither_seed: 42,
+                ..Options::default()
+            },
+        ),
+    ] {
+        let spec = PcmSpec {
+            format,
+            channels: 2,
+            sample_rate: 48000,
+        };
+        let mut enc = Encoder::new_pcm(o, spec, Some(raw.len() as u64)).expect("pcm encoder");
+        let mut body = enc.push(&raw).expect("push");
+        let fin = enc.finish().expect("finish");
+        let mut out = fin.header;
+        out.append(&mut body);
+        out.extend_from_slice(&fin.tail);
+        v.push((name.to_string(), out));
     }
     v
 }

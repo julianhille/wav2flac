@@ -6,7 +6,7 @@
  * temporary app, and loads the same page three ways: unbundled (import
  * map), built by Vite, built by webpack. In every browser given by
  * `WAV2FLAC_BROWSERS` (default `chromium`; also `firefox`, `webkit`) the page
- * runs `encode`, `encodeStream` and a worker, and each output must
+ * runs `encode`, `encodeStream`, a worker and raw PCM, and each output must
  * hash to the same bytes as in Node. Each page also runs with
  * `?wasm=/custom/…`, which calls `init(url)` first: then that must be the
  * only wasm the page fetches.
@@ -59,7 +59,7 @@ async function expected(): Promise<Record<string, string>> {
   const wav = testWav();
   const buffered = sha(lib.encodeSync(wav, OPTIONS));
   const stream = sha(new Uint8Array(await new Response(lib.encodeStream(wav, OPTIONS)).arrayBuffer()));
-  return { encode: buffered, stream, worker: buffered };
+  return { encode: buffered, stream, worker: buffered, pcm: buffered };
 }
 
 /** Packs the package and builds the app unbundled, with Vite and with webpack. */

@@ -10,16 +10,18 @@
  * ```
  * @module
  */
-import { runBuffered, runStream, runSync } from './lib/engine.js';
-import { toBytes, type Input } from './lib/input.js';
+import { runBuffered, runStream, runSync, type Bytes } from './lib/engine.js';
+import { BUFFER_INPUT, isStream, preparePcm, toBytes, type Input, type PcmBuffer, type PcmInput } from './lib/input.js';
 import { normalizeOptions, type Options } from './lib/options.js';
+import { ignore } from './lib/platform.js';
 import { probeBytes, type WavInfo } from './lib/probe.js';
 import { vendor } from '../build/bindgen/wav2flac.js';
 import { init, isReady, notReady } from './lib/wasm.js';
 
 export { Wav2FlacError, type ErrorCode } from './lib/errors.js';
-export type { Input } from './lib/input.js';
-export type { Options, Progress, ResampleQuality } from './lib/options.js';
+export type { Bytes } from './lib/engine.js';
+export type { Input, PcmBuffer, PcmInput, PcmSamples } from './lib/input.js';
+export type { Options, PcmFormat, PcmSampleFormat, Progress, ResampleQuality } from './lib/options.js';
 export type { WavInfo } from './lib/probe.js';
 export { init, initSync, wasmMemoryBytes, type WasmSource } from './lib/wasm.js';
 export { createWorkerEncoder, type WorkerEncoder, type WorkerEncoderOptions } from './lib/worker-client.js';
@@ -29,7 +31,11 @@ export { createWorkerEncoder, type WorkerEncoder, type WorkerEncoderOptions } fr
  * loop every few milliseconds. The result has an exact STREAMINFO (sample
  * count and MD5) and a seek table. Initializes the wasm on first use.
  *
- * @param input WAV bytes or a stream of them.
+ * With the `pcm` option the input is raw samples instead of a WAV file:
+ * a typed array (`Int16Array`, `Int32Array` and `Float32Array` imply the
+ * sample format), one array per channel, raw bytes, or a stream of them.
+ *
+ * @param input WAV bytes or a stream of them; raw PCM with `options.pcm`.
  * @param options Encoder options.
  * @returns The FLAC file.
  * @throws {Wav2FlacError} For invalid input or options.
@@ -39,11 +45,19 @@ export { createWorkerEncoder, type WorkerEncoder, type WorkerEncoderOptions } fr
  * const res = await fetch('/audio.wav');
  * const flac = await encode(res.body!, { onProgress: (p) => console.log(p.fraction) });
  * ```
+ * @example Raw PCM, e.g. 16 kHz mono float samples from an AudioWorklet:
+ * ```ts
+ * const flac = await encode(samples, { pcm: { sampleRate: 16000, channels: 1 }, bitsPerSample: 16 });
+ * ```
  */
-export async function encode(input: Input, options?: Options): Promise<Uint8Array> {
-  const args = normalizeOptions(options, false);
-  await init();
-  return runBuffered(input, args, { signal: options?.signal, onProgress: options?.onProgress });
+export async function encode(input: Input | PcmInput, options?: Options): Promise<Bytes> {
+  const p = preparePcm(input, normalizeOptions(options, false));
+  await init().catch((e: unknown) => {
+    // As for any failed encode, a stream input is cancelled.
+    if (isStream(p.input)) void p.input.cancel(e).catch(ignore);
+    throw e;
+  });
+  return runBuffered(p.input, p.args, { signal: options?.signal, onProgress: options?.onProgress });
 }
 
 /**
@@ -51,7 +65,7 @@ export async function encode(input: Input, options?: Options): Promise<Uint8Arra
  * sample count, MD5 or seek table, which are unknown until the end), then
  * frames as the consumer reads. Memory stays bounded for any input length.
  *
- * @param input WAV bytes or a stream of them.
+ * @param input WAV bytes or a stream of them; raw PCM with `options.pcm`.
  * @param options Encoder options (`seekPointInterval` does not apply).
  * @returns The FLAC stream. It never throws: every failure, including
  * invalid options, bad input and aborts, errors the stream instead.
@@ -61,21 +75,31 @@ export async function encode(input: Input, options?: Options): Promise<Uint8Arra
  * await flac.pipeTo(fileWritable);
  * ```
  */
-export function encodeStream(input: Input, options?: Omit<Options, 'seekPointInterval'>): ReadableStream<Uint8Array> {
+export function encodeStream(
+  input: Input | PcmInput,
+  options?: Omit<Options, 'seekPointInterval'>,
+): ReadableStream<Bytes> {
   // Every failure errors the returned stream, so consumers handle one path.
-  let args: ReturnType<typeof normalizeOptions>;
+  let prepared: ReturnType<typeof preparePcm>;
   try {
-    args = normalizeOptions(options, true);
+    prepared = preparePcm(input, normalizeOptions(options, true));
   } catch (e) {
-    return new ReadableStream<Uint8Array>({ start: (c) => c.error(e) });
+    return new ReadableStream<Bytes>({ start: (c) => c.error(e) });
   }
+  const { input: bytes, args } = prepared;
   const hooks = { signal: options?.signal, onProgress: options?.onProgress };
-  if (isReady()) return runStream(input, args, hooks);
-  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  if (isReady()) return runStream(bytes, args, hooks);
+  const { readable, writable } = new TransformStream<Bytes, Bytes>();
   init()
-    .then(() => runStream(input, args, hooks).pipeTo(writable))
-    .catch((e: unknown) => writable.abort(e))
-    .catch(() => undefined);
+    .then(
+      () => runStream(bytes, args, hooks).pipeTo(writable),
+      (e: unknown) => {
+        // The input is never read, so release it like a failed encode would.
+        if (isStream(bytes)) void bytes.cancel(e).catch(ignore);
+        return writable.abort(e);
+      },
+    )
+    .catch(ignore);
   return readable;
 }
 
@@ -83,7 +107,7 @@ export function encodeStream(input: Input, options?: Omit<Options, 'seekPointInt
  * Synchronous {@link encode} for in-memory input. Blocks the thread; prefer
  * {@link encode} or a worker for large files on a UI thread.
  *
- * @param input WAV bytes.
+ * @param input WAV bytes; raw PCM samples or bytes with `options.pcm`.
  * @param options Encoder options (`signal` is only checked before starting).
  * @returns The FLAC file.
  * @throws {Error} If {@link init} or {@link initSync} has not completed.
@@ -94,10 +118,10 @@ export function encodeStream(input: Input, options?: Omit<Options, 'seekPointInt
  * const flac = encodeSync(readFileSync('in.wav'));
  * ```
  */
-export function encodeSync(input: Uint8Array | ArrayBuffer, options?: Options): Uint8Array {
-  const args = normalizeOptions(options, false);
+export function encodeSync(input: Uint8Array | ArrayBuffer | PcmBuffer, options?: Options): Bytes {
+  const p = preparePcm(input, normalizeOptions(options, false));
   if (!isReady()) throw notReady();
-  return runSync(toBytes(input), args, { signal: options?.signal, onProgress: options?.onProgress });
+  return runSync(toBytes(p.input, 'input', BUFFER_INPUT), p.args, { signal: options?.signal, onProgress: options?.onProgress });
 }
 
 /**
@@ -113,7 +137,7 @@ export function encodeSync(input: Uint8Array | ArrayBuffer, options?: Options): 
  * ```
  */
 export async function probe(input: Uint8Array | ArrayBuffer): Promise<WavInfo> {
-  const bytes = toBytes(input);
+  const bytes = toBytes(input, 'input', BUFFER_INPUT);
   await init();
   return probeBytes(bytes);
 }

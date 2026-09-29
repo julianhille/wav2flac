@@ -33,6 +33,8 @@ async function run() {
   } finally {
     w.terminate();
   }
+  const pcm = new Int16Array(wav.buffer, 44);
+  out.pcm = await hash(await encode(pcm, { ...OPTIONS, pcm: { sampleRate: 44100, channels: 2 } }));
   window.result = out;
 }
 

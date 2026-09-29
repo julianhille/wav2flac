@@ -10,7 +10,7 @@ pub mod requantize;
 pub mod resample;
 
 use crate::error::{err, ErrorCode, Result};
-use crate::options::{Dither, Options, MAX_BITS, MIN_BITS};
+use crate::options::{Options, MAX_BITS, MIN_BITS};
 use crate::riff::SampleFormat;
 use requantize::Requantizer;
 use resample::Resample;
@@ -35,15 +35,13 @@ enum Mode {
     },
 }
 
-/// Parameters of the output stream decided by [`Transcoder::plan`].
+/// Parameters of the output stream (after resampling and requantizing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutputSpec {
     /// Output sample rate.
     pub sample_rate: u32,
     /// Output bits per sample (4..=32).
     pub bits: u32,
-    /// Whether the output is bit-exact with the input.
-    pub lossless: bool,
 }
 
 /// Converts decoded samples to the output format.
@@ -114,13 +112,11 @@ impl Transcoder {
                 scratch_out: Vec::new(),
             }
         };
-        let lossless = matches!(mode, Mode::Passthrough | Mode::Shift(_));
         Ok(Self {
             mode,
             spec: OutputSpec {
                 sample_rate: out_rate,
                 bits: out_bits,
-                lossless,
             },
         })
     }
@@ -196,11 +192,5 @@ impl Transcoder {
             requant.run(scratch_out, out);
         }
         Ok(())
-    }
-
-    /// Whether dithering is active (for reporting).
-    #[must_use]
-    pub fn dithered(&self, opts: &Options) -> bool {
-        matches!(self.mode, Mode::Convert { .. }) && opts.dither == Dither::Tpdf
     }
 }

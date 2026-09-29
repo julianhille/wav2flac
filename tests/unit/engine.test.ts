@@ -38,6 +38,21 @@ describe('engine internals', () => {
     expect(() => s.finish()).toThrow(/freed/);
   });
 
+  it.each([
+    ['blockSize', 2 ** 32 + 4096],
+    ['blockSize', 4096.5],
+    ['sampleRate', -1],
+    ['bits', Number.NaN],
+    ['seed', Infinity],
+    ['padding', 2 ** 32],
+    ['level', 256],
+    ['maxInputBytes', 2 ** 53],
+    ['pcmChannels', 1.5],
+  ])('rejects %s = %d at the wasm boundary instead of wrapping it', (key, value) => {
+    const base = normalizeOptions({ pcm: { sampleRate: 8000, channels: 1, format: 's16' } }, false);
+    expect(() => new Session({ ...base, [key]: value })).toThrow(expect.objectContaining({ code: 'INVALID_OPTIONS' }));
+  });
+
   it('reports ENCODER_STATE for push after finish', () => {
     const s = new Session(normalizeOptions({}, false));
     try {

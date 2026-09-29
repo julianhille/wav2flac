@@ -14,7 +14,7 @@ use crate::error::{err, Error, ErrorCode, Result};
 use crate::frame;
 use crate::metadata::{self, CHANNEL_MASK_TAG};
 use crate::options::{Options, OutputMode, Tags};
-use crate::pcm::{self, PcmLayout};
+use crate::pcm::{self, PcmLayout, PcmSpec};
 use crate::riff::{self, HeaderParser, HeaderState, SampleFormat, WavHeader};
 use crate::transcode::{Samples, Transcoder};
 use md5::{Digest, Md5};
@@ -106,8 +106,10 @@ struct Active {
     block_size: usize,
     channels: usize,
     bytes_per_out_sample: usize,
-    /// Data-chunk bytes still expected.
+    /// Data-chunk bytes still expected (`u64::MAX` when the length is unknown).
     data_remaining: u64,
+    /// Total data bytes, if known up front.
+    data_total: Option<u64>,
     /// Incomplete sample frame carried over between pushes.
     partial: Vec<u8>,
     /// Interleaved output samples waiting for a full block.
@@ -143,6 +145,11 @@ pub struct Encoder {
     active: Option<Box<Active>>,
     /// Progress frozen at a successful `finish`, after `active` is released.
     final_progress: Option<Progress>,
+    /// Output produced at construction (raw PCM, streaming header), emitted
+    /// with the next `push` or `finish`.
+    pending: Vec<u8>,
+    /// Raw PCM input (no container): bytes past the declared length are an error.
+    raw_pcm: bool,
 }
 
 impl Encoder {
@@ -167,15 +174,80 @@ impl Encoder {
             bytes_in: 0,
             active: None,
             final_progress: None,
+            pending: Vec::new(),
+            raw_pcm: false,
         })
+    }
+
+    /// Creates an encoder for raw, headerless PCM described by `spec`.
+    ///
+    /// Every pushed byte is sample data. `total_bytes` is the input length
+    /// if known; it only affects progress reporting and validation. The
+    /// output is byte-identical to encoding the same samples wrapped in a
+    /// plain WAV file.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidOptions` for invalid options, zero channels or sample rate, or
+    /// a `total_bytes` that is not a whole number of sample frames;
+    /// `TooManyChannels` above 8 channels; the same format errors as WAV
+    /// input (e.g. `F32` without a target `bits_per_sample`).
+    pub fn new_pcm(opts: Options, spec: PcmSpec, total_bytes: Option<u64>) -> Result<Self> {
+        let mut enc = Self::new(opts)?;
+        if spec.channels == 0 || spec.sample_rate == 0 {
+            return err(
+                ErrorCode::InvalidOptions,
+                "pcm: channels and sampleRate must be at least 1",
+            );
+        }
+        if spec.sample_rate > crate::options::MAX_SAMPLE_RATE && enc.opts.sample_rate.is_none() {
+            return err(
+                ErrorCode::InvalidOptions,
+                format!(
+                    "pcm: sampleRate {} Hz cannot be stored in FLAC (at most {} Hz); \
+                     set a target sampleRate to resample",
+                    spec.sample_rate,
+                    crate::options::MAX_SAMPLE_RATE
+                ),
+            );
+        }
+        if let Some(total) = total_bytes {
+            if total % spec.frame_bytes() as u64 != 0 {
+                return err(
+                    ErrorCode::InvalidOptions,
+                    format!(
+                        "pcm: {total} bytes is not a whole number of {}-byte sample frames",
+                        spec.frame_bytes()
+                    ),
+                );
+            }
+        }
+        let data_len = total_bytes.map_or(0, |t| u32::try_from(t).unwrap_or(u32::MAX));
+        let mut out = Vec::new();
+        enc.start(spec.to_header(data_len), &mut out)?;
+        let a = enc.active.as_mut().expect("just started");
+        a.data_total = total_bytes;
+        a.data_remaining = total_bytes.unwrap_or(u64::MAX);
+        if a.data_remaining == 0 {
+            enc.state = State::Trailing;
+        }
+        enc.pending = out;
+        enc.raw_pcm = true;
+        Ok(enc)
     }
 
     /// Information about the input, once its header has been parsed.
     #[must_use]
     pub fn info(&self) -> Option<WavInfo> {
-        self.active
-            .as_ref()
-            .map(|a| WavInfo::from_header(&a.header))
+        self.active.as_ref().map(|a| {
+            let mut info = WavInfo::from_header(&a.header);
+            // Raw PCM may declare more than the 32-bit WAV header field holds.
+            if let Some(total) = a.data_total {
+                info.frames = total / a.header.block_align() as u64;
+                info.duration_sec = info.frames as f64 / f64::from(a.header.sample_rate);
+            }
+            info
+        })
     }
 
     /// Output sample rate and bit depth, once known.
@@ -192,13 +264,14 @@ impl Encoder {
         }
         let (samples_out, fraction) = match &self.active {
             Some(a) => {
-                let total = u64::from(a.header.data_len);
-                let fraction = if total == 0 {
-                    1.0
-                } else {
-                    (total - a.data_remaining) as f64 / total as f64
-                };
-                (a.samples_out, Some(fraction))
+                let fraction = a.data_total.map(|total| {
+                    if total == 0 {
+                        1.0
+                    } else {
+                        (total - a.data_remaining) as f64 / total as f64
+                    }
+                });
+                (a.samples_out, fraction)
             }
             None => (0, None),
         };
@@ -291,7 +364,7 @@ impl Encoder {
                 );
             }
         }
-        let mut out = Vec::new();
+        let mut out = std::mem::take(&mut self.pending);
         match self.state {
             State::Header => {
                 self.buf.extend_from_slice(input);
@@ -344,6 +417,7 @@ impl Encoder {
         let active = Active {
             layout: PcmLayout::from_header(&header),
             data_remaining: u64::from(header.data_len),
+            data_total: Some(u64::from(header.data_len)),
             header,
             transcoder,
             flac,
@@ -395,6 +469,12 @@ impl Encoder {
             }
         }
         if matches!(self.state, State::Trailing) && !input.is_empty() {
+            if self.raw_pcm {
+                return err(
+                    ErrorCode::InvalidOptions,
+                    "pcm: more input than the declared total length",
+                );
+            }
             if let Some(t) = a.trailing.as_mut() {
                 t.push(input);
             }
@@ -438,13 +518,30 @@ impl Encoder {
                 }
             }
         }
-        self.finish_active()
+        let mut fin = self.finish_active()?;
+        if !self.pending.is_empty() {
+            let mut out = std::mem::take(&mut self.pending);
+            out.append(&mut fin.tail);
+            fin.tail = out;
+        }
+        Ok(fin)
     }
 
     fn finish_active(&mut self) -> Result<Finished> {
         let opts = &self.opts;
         let a = self.active.as_mut().expect("active after header");
-        if a.data_remaining > 0 {
+        if a.data_total.is_none() {
+            if !a.partial.is_empty() {
+                return err(
+                    ErrorCode::Truncated,
+                    format!(
+                        "input ended inside a sample frame ({} of {} bytes)",
+                        a.partial.len(),
+                        a.header.block_align()
+                    ),
+                );
+            }
+        } else if a.data_remaining > 0 {
             return err(
                 ErrorCode::Truncated,
                 format!(
@@ -670,5 +767,32 @@ pub fn probe(wav: &[u8]) -> Result<WavInfo> {
     match riff::parse_header(wav, true)? {
         HeaderState::Done(h) => Ok(WavInfo::from_header(&h)),
         HeaderState::NeedMore => err(ErrorCode::Truncated, "incomplete header"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pcm::{PcmFormat, PcmSpec};
+
+    #[test]
+    fn frame_numbers_stop_below_2_pow_31() {
+        let spec = PcmSpec {
+            format: PcmFormat::S16,
+            channels: 1,
+            sample_rate: 8000,
+        };
+        let opts = Options {
+            block_size: Some(16),
+            ..Options::default()
+        };
+        let mut enc = Encoder::new_pcm(opts, spec, None).unwrap();
+        let block = [0u8; 32]; // 16 samples: one frame per push
+        assert!(!enc.push(&block).unwrap().is_empty());
+        // Skip ahead instead of encoding 2^31 frames.
+        enc.active.as_mut().unwrap().frame_number = (1 << 31) - 1;
+        assert!(!enc.push(&block).unwrap().is_empty(), "last valid number");
+        let e = enc.push(&block).unwrap_err();
+        assert_eq!(e.code(), ErrorCode::LimitExceeded);
     }
 }

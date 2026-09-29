@@ -15,6 +15,12 @@ import { WasmEncoder } from '../../build/bindgen/wav2flac.js';
 /** Minimum time between two progress callbacks, in milliseconds. */
 export const PROGRESS_INTERVAL_MS = 50;
 
+/**
+ * FLAC output bytes. Always backed by a plain `ArrayBuffer`, so they can go
+ * straight into `new Blob([…])`, `new Response(…)` or `postMessage` transfers.
+ */
+export type Bytes = Uint8Array<ArrayBuffer>;
+
 /** Per-run hooks. */
 export interface RunHooks {
   signal?: AbortSignal | undefined;
@@ -76,6 +82,7 @@ export class Session {
       this.#enc = new WasmEncoder(
         a.level, a.blockSize, a.sampleRate, a.quality, a.bits, a.dither, a.seed, a.tagsEnabled,
         a.tagKeys, a.tagValues, a.seekPointInterval, a.padding, a.maxInputBytes, a.streaming,
+        Math.max(a.pcmFormat, 0), a.pcmChannels, a.pcmRate, a.pcmTotalBytes,
       );
     } catch (e) {
       throw fromWasmError(e);
@@ -98,9 +105,9 @@ export class Session {
    * @param bytes Input slice.
    * @returns FLAC bytes produced (possibly empty).
    */
-  push(bytes: Uint8Array): Uint8Array {
+  push(bytes: Uint8Array): Bytes {
     try {
-      return this.#live().push(bytes);
+      return this.#live().push(bytes) as Bytes;
     } catch (e) {
       throw fromWasmError(e);
     }
@@ -110,11 +117,11 @@ export class Session {
    * Ends the input.
    * @returns The remaining frames and, in buffered mode, the final header.
    */
-  finish(): { tail: Uint8Array; header: Uint8Array } {
+  finish(): { tail: Bytes; header: Bytes } {
     try {
       const enc = this.#live();
-      const tail = enc.finish();
-      return { tail, header: enc.takeHeader() };
+      const tail = enc.finish() as Bytes;
+      return { tail, header: enc.takeHeader() as Bytes };
     } catch (e) {
       throw fromWasmError(e);
     }
@@ -146,7 +153,7 @@ export class Session {
  * @param tail Trailing bytes.
  * @returns The joined bytes.
  */
-export function assemble(header: Uint8Array, parts: readonly Uint8Array[], tail: Uint8Array): Uint8Array {
+export function assemble(header: Uint8Array, parts: readonly Uint8Array[], tail: Uint8Array): Bytes {
   let n = header.length + tail.length;
   for (const p of parts) n += p.length;
   const out = new Uint8Array(n);
@@ -167,7 +174,7 @@ export function assemble(header: Uint8Array, parts: readonly Uint8Array[], tail:
  * @param hooks Progress and abort hooks.
  * @returns The complete FLAC file.
  */
-export function runSync(bytes: Uint8Array, args: EncoderArgs, hooks: RunHooks): Uint8Array {
+export function runSync(bytes: Uint8Array, args: EncoderArgs, hooks: RunHooks): Bytes {
   hooks.signal?.throwIfAborted();
   const s = new Session(args);
   const rep = new Reporter(hooks.onProgress);
@@ -193,7 +200,7 @@ export function runSync(bytes: Uint8Array, args: EncoderArgs, hooks: RunHooks): 
  * @param hooks Progress and abort hooks.
  * @returns The complete FLAC file.
  */
-export async function runBuffered(input: Input, args: EncoderArgs, hooks: RunHooks): Promise<Uint8Array> {
+export async function runBuffered(input: Input, args: EncoderArgs, hooks: RunHooks): Promise<Bytes> {
   let s: Session;
   try {
     hooks.signal?.throwIfAborted();
@@ -233,7 +240,7 @@ export async function runBuffered(input: Input, args: EncoderArgs, hooks: RunHoo
  * @param hooks Progress and abort hooks.
  * @returns The FLAC byte stream.
  */
-export function runStream(input: Input, args: EncoderArgs, hooks: RunHooks): ReadableStream<Uint8Array> {
+export function runStream(input: Input, args: EncoderArgs, hooks: RunHooks): ReadableStream<Bytes> {
   let s: Session | undefined;
   let it: AsyncGenerator<Uint8Array> | undefined;
   const rep = new Reporter(hooks.onProgress);
@@ -256,7 +263,7 @@ export function runStream(input: Input, args: EncoderArgs, hooks: RunHooks): Rea
     it = undefined;
     void i?.return(undefined).catch(ignore);
   };
-  return new ReadableStream<Uint8Array>({
+  return new ReadableStream<Bytes>({
     start(controller) {
       // Every failure errors the stream, including an already-aborted signal
       // and options the core rejects; nothing throws from the constructor.

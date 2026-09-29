@@ -204,12 +204,22 @@ describe('installed package', () => {
 
   it('type-checks for strict consumers without skipLibCheck', () => {
     const use = `
-      const o: Options = { compressionLevel: 5, bitsPerSample: 16 };
-      export const a: Promise<Uint8Array> = encode(new Uint8Array(0), o);
+      const o: Options = { compressionLevel: 5, pcm: { sampleRate: 16000, channels: 1 }, bitsPerSample: 16 };
+      export const a: Promise<Uint8Array> = encode(new Float32Array(8), o);
       export const b: ReadableStream<Uint8Array> = encodeStream(new Uint8Array(0));
       export const w: WorkerEncoder = createWorkerEncoder();
       export const e: ErrorCode = new Wav2FlacError('INVALID_OPTIONS', 'x').code;
       export const i: Promise<WavInfo> = probe(new Uint8Array(0));
+      // The README's patterns: outputs are ArrayBuffer-backed, so Blob,
+      // Response and transfer lists take them as they are.
+      export const blob = async (): Promise<Blob> => new Blob([await encode(new Uint8Array(0))]);
+      export const res = async (): Promise<Response> => new Response(await encode(new Uint8Array(0)));
+      export const buf = async (): Promise<ArrayBuffer> => (await encode(new Uint8Array(0))).buffer;
+      export const chunk = async (): Promise<Blob> => {
+        const r = await encodeStream(new Uint8Array(0)).getReader().read();
+        return new Blob(r.done ? [] : [r.value]);
+      };
+      export const bytes: Bytes = new Uint8Array(0);
       // Every option also takes undefined for "not set", as the code does.
       declare const maybe: { signal?: AbortSignal; level?: number; url?: string };
       export const unset = encode(new Uint8Array(0), {
@@ -218,7 +228,7 @@ describe('installed package', () => {
       export const unsetWorker: WorkerEncoder = createWorkerEncoder({ url: maybe.url, wasm: undefined });
     `;
     const names = '{ createWorkerEncoder, encode, encodeStream, probe, Wav2FlacError, '
-      + 'type ErrorCode, type Options, type WavInfo, type WorkerEncoder }';
+      + 'type Bytes, type ErrorCode, type Options, type WavInfo, type WorkerEncoder }';
     writeFileSync(join(consumer, 'esm.mts'), `import ${names} from 'wav2flac';\n${use}`);
     writeFileSync(join(consumer, 'cjs.cts'), `import ${names} from 'wav2flac';\n${use}`);
     for (const mode of ['node16', 'bundler']) {

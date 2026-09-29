@@ -31,6 +31,13 @@ describe('encode / encodeSync / encodeStream', () => {
     expect(flacTest(c) ?? '').toBe('');
   });
 
+  it('return bytes backed by a plain ArrayBuffer', async () => {
+    const tag = (x: Uint8Array): string => Object.prototype.toString.call(x.buffer);
+    expect(tag(await encode(wav))).toBe('[object ArrayBuffer]');
+    expect(tag(encodeSync(wav))).toBe('[object ArrayBuffer]');
+    for await (const chunk of encodeStream(wav)) expect(tag(chunk)).toBe('[object ArrayBuffer]');
+  });
+
   it('is byte-identical to the native build', async () => {
     const native = nativeEncode(wav, ['--level', '8']);
     if (native === null) return;

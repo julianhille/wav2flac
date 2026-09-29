@@ -9,6 +9,7 @@
  * @module
  * @internal
  */
+import type { Bytes } from './engine.js';
 import type { SerializedError } from './errors.js';
 import type { EncoderArgs, Progress } from './options.js';
 import type { WavInfo } from './probe.js';
@@ -28,8 +29,8 @@ export type ToWorker =
 export type FromWorker =
   | { t: 'progress'; id: number; p: Progress }
   | { t: 'need'; id: number }
-  | { t: 'out'; id: number; data: Uint8Array }
-  | { t: 'done'; id: number; data: Uint8Array | null }
+  | { t: 'out'; id: number; data: Bytes }
+  | { t: 'done'; id: number; data: Bytes | null }
   | { t: 'error'; id: number; error: SerializedError }
   | { t: 'probe'; id: number; info: WavInfo }
   | { t: 'stats'; id: number; wasmBytes: number };
@@ -57,5 +58,5 @@ export const OUTPUT_WINDOW = 4;
  */
 export function transferOf(data: Uint8Array): Transferable[] {
   const b = data.buffer;
-  return b instanceof ArrayBuffer && data.byteOffset === 0 && data.byteLength === b.byteLength ? [b] : [];
+  return Object.prototype.toString.call(b) === '[object ArrayBuffer]' && data.byteOffset === 0 && data.byteLength === b.byteLength ? [b] : [];
 }

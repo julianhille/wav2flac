@@ -68,4 +68,20 @@ describe('input', () => {
     const s = new ReadableStream<Uint8Array>({ pull(c) { c.error(new Error('boom')); } });
     await expect(all(chunks(s))).rejects.toThrow('boom');
   });
+
+  it('accepts buffers and views from another realm', async () => {
+    const { runInNewContext } = await import('node:vm');
+    const [buf, view, i16] = runInNewContext(
+      'const b = new ArrayBuffer(8); [b, new Uint8Array(b, 2, 4), new Int16Array(2)]',
+    ) as [ArrayBuffer, Uint8Array, Int16Array];
+    expect(buf instanceof ArrayBuffer).toBe(false);
+    expect(toBytes(buf).length).toBe(8);
+    expect(toBytes(view).length).toBe(4);
+    expect(() => toBytes(i16)).toThrow(TypeError);
+  });
+
+  it('names what the caller accepts in the type error', () => {
+    expect(() => toBytes(1, 'input', 'a Uint8Array or ArrayBuffer')).toThrow('input must be a Uint8Array or ArrayBuffer');
+  });
 });
+

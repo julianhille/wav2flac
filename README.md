@@ -53,9 +53,25 @@ Input is always `Uint8Array`, `ArrayBuffer` or `ReadableStream<Uint8Array>`;
 there is no file-system API, so the same code runs in browsers, Node ≥ 20,
 Deno and Bun.
 
+### Raw PCM
+
+No WAV header? Describe the samples with `pcm` and pass them straight in —
+e.g. 16 kHz mono `Float32Array` from an AudioWorklet or `AudioBuffer`:
+
+```js
+const flac = await encode(samples, {
+  pcm: { sampleRate: 16000, channels: 1 }, // Float32Array → format 'f32'
+  bitsPerSample: 16,                       // float needs a target depth
+});
+```
+
+Interleaved typed arrays, one array per channel, raw bytes (with
+`pcm.format`) and streams all work, on every API. See [docs/pcm.md](docs/pcm.md).
+
 ## Features
 
 - Lossless by default (8/16/24-bit PCM, 1–8 channels); bit-exact round trips.
+- WAV files or raw PCM (`Int16Array`, `Float32Array`, planar channel arrays, bytes, streams).
 - Promise API, `ReadableStream` API, sync API, and Web Worker / `worker_threads` API.
 - Resampling (rubato, sinc) and bit-depth reduction with deterministic TPDF dither.
 - Correct STREAMINFO (sample count + MD5), SEEKTABLE, Vorbis comments from WAV

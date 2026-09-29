@@ -32,12 +32,12 @@
 
 pub mod encoder;
 pub mod error;
-pub mod frame;
+mod frame;
 pub mod metadata;
 pub mod options;
-pub mod pcm;
-pub mod riff;
-pub mod transcode;
+mod pcm;
+mod riff;
+mod transcode;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -45,3 +45,6 @@ mod wasm;
 pub use encoder::{encode_all, probe, Encoder, Finished, Progress, WavInfo};
 pub use error::{Error, ErrorCode, Result};
 pub use options::{Dither, Options, OutputMode, ResampleQuality, Tags};
+pub use pcm::{PcmFormat, PcmSpec};
+pub use riff::SampleFormat;
+pub use transcode::OutputSpec;

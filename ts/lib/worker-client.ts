@@ -4,8 +4,9 @@
  * engine. Works with browser `Worker`s and Node `worker_threads`.
  * @module
  */
-import { abortError, reviveError } from './errors.js';
-import { isStream, toBytes, type Input } from './input.js';
+import type { Bytes } from './engine.js';
+import { abortError, reviveError, Wav2FlacError } from './errors.js';
+import { BUFFER_INPUT, isStream, preparePcm, toBytes, type Input, type PcmInput } from './input.js';
 import { normalizeOptions, type Options, type Progress } from './options.js';
 import { builtin, ignore, isNode } from './platform.js';
 import type { WavInfo } from './probe.js';
@@ -14,6 +15,9 @@ import { init, wasmModule, type WasmSource } from './wasm.js';
 
 /** The worker script next to this file, for Node (see `spawn`). */
 const NODE_WORKER = './worker.js';
+
+/** Size of the first header prefix sent to the worker by `probe`. */
+const PROBE_FIRST_TRY = 64 * 1024;
 
 /** An encoder running in a dedicated worker. */
 export interface WorkerEncoder {
@@ -24,10 +28,10 @@ export interface WorkerEncoder {
    * keep them. Views of a larger buffer are copied. A transferred input is
    * gone even when the job fails, so keep a copy if you plan to retry.
    */
-  encode(input: Input, options?: Options): Promise<Uint8Array>;
+  encode(input: Input | PcmInput, options?: Options): Promise<Bytes>;
   /** Like `encodeStream()`, but in the worker; with backpressure both ways. */
-  encodeStream(input: Input, options?: Omit<Options, 'seekPointInterval'>): ReadableStream<Uint8Array>;
-  /** Like `probe()`, but in the worker. The bytes are copied. */
+  encodeStream(input: Input | PcmInput, options?: Omit<Options, 'seekPointInterval'>): ReadableStream<Bytes>;
+  /** Like `probe()`, but in the worker. The header bytes are copied. */
   probe(input: Uint8Array | ArrayBuffer): Promise<WavInfo>;
   /** Size of the worker's wasm linear memory in bytes. */
   wasmMemoryBytes(): Promise<number>;
@@ -64,7 +68,7 @@ function browserPort(w: Worker): Port<FromWorker, ToWorker> {
       w.onmessage = (e: MessageEvent<FromWorker>) => onMessage(e.data);
       w.onerror = (e) => {
         e.preventDefault();
-        onError(new Error(`wav2flac worker failed: ${e.message}`));
+        onError(new Error(`wav2flac worker failed: ${e.message || 'the worker script could not be loaded'}`));
       };
       w.onmessageerror = () => onError(new Error('wav2flac worker: message could not be deserialized'));
     },
@@ -151,15 +155,15 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
   let dead: Error | undefined;
   port.ref(false);
 
-  const ready = init(wasm).then(() => {
-    port.post({ t: 'init', module: wasmModule() }, []);
-  });
-  // Avoid an unhandled rejection before the first call awaits it.
-  ready.catch(ignore);
-
   const post = (msg: ToWorker, data?: Uint8Array): void => {
     if (dead === undefined) port.post(msg, data === undefined ? [] : transferOf(data));
   };
+
+  const ready = init(wasm).then(() => {
+    post({ t: 'init', module: wasmModule() });
+  });
+  // Avoid an unhandled rejection before the first call awaits it.
+  ready.catch(ignore);
 
   const add = (id: number, job: ClientJob): void => {
     if (dead !== undefined) {
@@ -209,14 +213,24 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
    * @returns A function that cancels the job.
    */
   const start = (
-    input: Input,
+    rawInput: Input | PcmInput,
     opts: Options | undefined,
     streaming: boolean,
-    onOut: (data: Uint8Array) => void,
-    onDone: (data: Uint8Array | null) => void,
+    onOut: (data: Bytes) => void,
+    onDone: (data: Bytes | null) => void,
     onFail: (e: unknown) => void,
   ): (() => void) => {
-    const args = normalizeOptions(opts, streaming);
+    let prepared: ReturnType<typeof preparePcm>;
+    try {
+      // Check the signal before locking the input stream.
+      opts?.signal?.throwIfAborted();
+      prepared = preparePcm(rawInput, normalizeOptions(opts, streaming));
+    } catch (e) {
+      // Like the main thread: a failed encode cancels a stream input.
+      if (isStream(rawInput) && !rawInput.locked) void rawInput.cancel(e).catch(ignore);
+      throw e;
+    }
+    const { input, args } = prepared;
     const signal = opts?.signal;
     const onProgress = opts?.onProgress;
     const copy = opts?.copy ?? false;
@@ -224,33 +238,34 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let finished = false;
 
-    const end = (): void => {
+    const end = (reason?: unknown): void => {
       if (finished) return;
       finished = true;
       remove(id);
       if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
       if (reader !== undefined) {
-        void reader.cancel().catch(ignore);
+        void reader.cancel(reason).catch(ignore);
         reader.releaseLock();
       }
     };
     const fail = (e: unknown): void => {
       if (finished) return;
-      end();
+      end(e);
       onFail(e);
     };
-    const cancel = (): void => {
+    const cancel = (reason?: unknown): void => {
       if (finished) return;
-      end();
+      end(reason);
       post({ t: 'abort', id });
     };
-    const onAbort = signal === undefined ? undefined : (): void => {
-      cancel();
-      onFail(signal.reason);
+    /** Aborts the worker's job and reports `e`, unless the job already ended. */
+    const abortWith = (e: unknown): void => {
+      if (finished) return;
+      cancel(e);
+      onFail(e);
     };
+    const onAbort = signal === undefined ? undefined : (): void => abortWith(signal.reason);
 
-    // Check the signal before locking the input stream.
-    signal?.throwIfAborted();
     let bytes: Uint8Array | null = null;
     if (isStream(input)) reader = input.getReader();
     else bytes = outgoing(toBytes(input), copy);
@@ -266,8 +281,7 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
           post({ t: 'chunk', id, data }, data);
         }
       } catch (e) {
-        cancel();
-        onFail(e);
+        abortWith(e);
       }
     };
 
@@ -278,8 +292,7 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
             try {
               onProgress?.(m.p);
             } catch (e) {
-              cancel();
-              onFail(e);
+              abortWith(e);
             }
             return;
           case 'need':
@@ -341,14 +354,14 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
 
   return {
     encode(input, opts) {
-      return new Promise<Uint8Array>((resolve, reject) => {
+      return new Promise<Bytes>((resolve, reject) => {
         if (dead !== undefined) throw dead;
         start(input, opts, false, ignore, (d) => resolve(d!), reject);
       });
     },
 
     encodeStream(input, opts) {
-      const queue: Uint8Array[] = [];
+      const queue: Bytes[] = [];
       let wake: (() => void) | undefined;
       let state: 'open' | 'done' | 'failed' = 'open';
       let error: unknown;
@@ -359,7 +372,7 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
         w?.();
       };
       let id = 0;
-      return new ReadableStream<Uint8Array>({
+      return new ReadableStream<Bytes>({
         start(c) {
           // Like encodeStream() on the main thread: failures error the stream.
           try {
@@ -391,13 +404,24 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
         },
         cancel() {
           cancel?.();
+          // Settle a pull() still waiting for output.
+          state = 'done';
+          poke();
         },
       }, { highWaterMark: 0 });
     },
 
     async probe(input) {
-      const data = toBytes(input).slice();
-      return request((id) => ({ t: 'probe', id, data }), (m) => (m.t === 'probe' ? m.info : undefined));
+      const bytes = toBytes(input, 'input', BUFFER_INPUT);
+      // Only the header is read, so copy growing prefixes, not the whole file.
+      for (let n = Math.min(PROBE_FIRST_TRY, bytes.length); ; n = Math.min(n * 4, bytes.length)) {
+        const data = bytes.slice(0, n);
+        try {
+          return await request((id) => ({ t: 'probe', id, data }), (m) => (m.t === 'probe' ? m.info : undefined));
+        } catch (e) {
+          if (!(e instanceof Wav2FlacError && e.code === 'TRUNCATED' && n < bytes.length)) throw e;
+        }
+      }
     },
 
     async wasmMemoryBytes() {
