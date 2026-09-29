@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/wav2flac?logo=npm&label=npm)](https://www.npmjs.com/package/wav2flac)
 [![CI](https://github.com/julianhille/wav2flac/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/julianhille/wav2flac/actions/workflows/ci.yml)
+[![Docs](https://app.readthedocs.org/projects/wav2flac/badge/?version=latest)](https://wav2flac.readthedocs.io/)
 [![License: 0BSD](https://img.shields.io/badge/license-0BSD-blue.svg)](https://github.com/julianhille/wav2flac/blob/main/LICENSE)
 
 **Turn WAV files or raw audio samples into FLAC, in the browser or in
