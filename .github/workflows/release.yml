@@ -30,15 +30,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
       - name: Versions and changelog match the tag
         run: node scripts/release.ts check "$GITHUB_REF_NAME" notes.md
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload the release notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-notes
           path: notes.md
@@ -59,10 +62,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
       - name: Toolchain (rust-toolchain.toml)
@@ -71,11 +76,15 @@ jobs:
         run: scripts/ci-tools.sh
       - name: flac CLI (package tests decode the output)
         run: sudo apt-get update -q && sudo apt-get install -yq flac
-      - run: npm ci
-      - run: npm run build
-      - run: npm run lint:pkg
+      - name: Install dependencies
+        run: npm ci
+      - name: Build the package
+        run: npm run build
+      - name: Lint the package
+        run: npm run lint:pkg
       # The package tests run on exactly the build that gets packed and published.
-      - run: npm run test:pkg
+      - name: Test the built package
+        run: npm run test:pkg
         env:
           WAV2FLAC_REQUIRE_TOOLS: '1'
       - name: Pack
@@ -84,7 +93,8 @@ jobs:
           npm pack --pack-destination dist
           cp pkg/wav2flac.wasm pkg/THIRD_PARTY_LICENSES.txt dist/
           (cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload the release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-files
           path: dist/
@@ -100,27 +110,33 @@ jobs:
       contents: read
       id-token: write # npm trusted publishing and provenance
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Set up Node for the npm registry
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
       # Publishing with OIDC (no token secret) needs npm ≥ 11.5.1, which not
       # every Node 24 release bundles.
-      - run: npm install --global npm@11.20.0
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Install npm 11 (OIDC publishing)
+        run: npm install --global npm@11.20.0
+      - name: Download the release files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-files
           path: dist
       # Publish the tarball the pack job tested, byte for byte.
-      - run: (cd dist && sha256sum -c SHA256SUMS)
+      - name: Verify the tarball checksums
+        run: (cd dist && sha256sum -c SHA256SUMS)
       - name: Publish
         run: |
           tag=latest
           case "$GITHUB_REF_NAME" in *-*) tag=next ;; esac
-          npm publish dist/*.tgz --provenance --access public --tag "$tag"
+          # "./" matters: npm reads a bare "dist/x.tgz" as GitHub shorthand (user/repo).
+          npm publish ./dist/*.tgz --provenance --access public --tag "$tag"
 
   github-release:
     name: GitHub release
@@ -130,7 +146,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Download the release notes and files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: .
           pattern: release-*

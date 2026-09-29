@@ -10,6 +10,15 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-09-29
+
+### Added
+
+- Benchmark: `libav` and `libflac` modes (`--modes libav,libflac`) that run
+  libav.js (FFmpeg's FLAC encoder) and libflac.js (the reference libFLAC) on
+  the same integer PCM, in the Node and browser benchmarks. Both are
+  dev dependencies of the benchmark only.
+
 ## [1.0.0-rc.1] - 2026-09-29
 
 ### Added
@@ -105,5 +114,6 @@ links are collected at the bottom of this file.
 - Documentation site on Read the Docs (MkDocs): the README plus the raw PCM
   and benchmark guides, at <https://wav2flac.readthedocs.io/>.
 
-[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.1...HEAD
+[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.2...HEAD
+[1.0.0-rc.2]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.1...v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/julianhille/wav2flac/tree/v1.0.0-rc.1
