@@ -31,6 +31,8 @@ links are collected at the bottom of this file.
   and checked in CI.
 - Docs: a third-party components page listing every crate compiled into the
   wasm with its version, license and links, generated from `Cargo.lock`.
+- Docs: when you host the `.wasm` yourself, put `THIRD_PARTY_LICENSES.txt`
+  next to it (README and third-party page).
 
 ### Changed
 

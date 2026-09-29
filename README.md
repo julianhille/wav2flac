@@ -58,9 +58,10 @@ npm install wav2flac
 
 The wasm binary is found automatically: next to the JS in Node, and via
 `new URL(…, import.meta.url)` in browsers and in bundlers such as Vite and
-webpack. To host it yourself, call `init(urlOrBytes)` first. To give up on
-a download that stalls, pass a signal: `init(url, { signal:
-AbortSignal.timeout(10_000) })`. See the
+webpack. To host it yourself, call `init(urlOrBytes)` first, and put
+`THIRD_PARTY_LICENSES.txt` next to the `.wasm`: the binary itself carries no
+license notices. To give up on a download that stalls, pass a signal:
+`init(url, { signal: AbortSignal.timeout(10_000) })`. See the
 [loading guide](https://github.com/julianhille/wav2flac/blob/main/docs/loading.md).
 
 ## Usage

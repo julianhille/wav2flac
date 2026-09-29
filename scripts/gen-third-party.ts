@@ -83,6 +83,9 @@ Their full license notices ship in the package as
 \`THIRD_PARTY_LICENSES.txt\`, and each JS file of the package starts with a
 \`/*! @license */\` comment that lists them.
 
+The \`.wasm\` file itself carries no notices. If you host it yourself, for
+example on a CDN, put \`THIRD_PARTY_LICENSES.txt\` next to it.
+
 ## Compiled into wav2flac.wasm
 
 | Crate | Version | License | Source |
