@@ -12,5 +12,6 @@ exclude_docs: requirements.txt
 
 nav:
   - Home: index.md
+  - Loading the wasm: loading.md
   - Raw PCM input: pcm.md
   - Benchmark: benchmark.md

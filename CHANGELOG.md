@@ -14,6 +14,15 @@ links are collected at the bottom of this file.
 
 - README: a badge with the status of the docs build on Read the Docs. It links
   to the docs site.
+- `init(source, { signal })`: give up waiting for the wasm, e.g. with
+  `AbortSignal.timeout(ms)`. Once every caller waiting on a load has given
+  up, the download or file read is cancelled and the next `init()` starts
+  over. Before, a stalled download kept `init()` pending forever, and every
+  retry got the same pending promise.
+- `encode()` and `encodeStream()` pass their `signal` to `init()`, so an
+  abort also ends the wait for the wasm to load.
+- Docs: a guide to loading the wasm (where it comes from, self-hosting,
+  timeouts and retries).
 
 ## [1.0.0-rc.2] - 2026-09-29
 
