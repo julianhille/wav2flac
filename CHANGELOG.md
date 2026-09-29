@@ -17,6 +17,9 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- `init()` retries a failed or abandoned load from the URL, path, bytes or
+  module it was given. Before, after `init(url, { signal })` gave up, the
+  `init()` inside `encode()` loaded from the default location instead.
 - Docs: the worker pool sample replaces a worker that crashed. Before, the
   pool kept handing jobs to it, and each of them failed. It also rejects a
   size below 1, which made every job wait forever, and its batch example

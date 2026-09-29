@@ -143,6 +143,56 @@ describe('init', () => {
     expect(w.isReady()).toBe(true);
   });
 
+  it('retries an abandoned load from its custom source', async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn((url: URL, opts: RequestInit) => {
+      urls.push(url.href);
+      if (urls.length === 1) {
+        return new Promise<Response>((_, reject) => {
+          opts.signal!.addEventListener('abort', () => reject(opts.signal!.reason));
+        });
+      }
+      return Promise.resolve(new Response(bytes));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const w = await fresh();
+    const url = 'https://cdn.example/wav2flac.wasm';
+    await expect(w.init(url, { signal: AbortSignal.timeout(10) })).rejects.toMatchObject({ name: 'TimeoutError' });
+    // What encode() does: init() without a source.
+    await w.init(undefined, { signal: new AbortController().signal });
+    expect(urls).toEqual([url, url]);
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('retries a failed load from its custom source', async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn((url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(urls.length === 1 ? new Response(null, { status: 503 }) : new Response(bytes));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const w = await fresh();
+    const url = 'https://cdn.example/wav2flac.wasm';
+    await expect(w.init(url)).rejects.toThrow(/503/);
+    await w.init();
+    expect(urls).toEqual([url, url]);
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('retries from the source of the last load that had one', async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn((url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(urls.length < 3 ? new Response(null, { status: 404 }) : new Response(bytes));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const w = await fresh();
+    await expect(w.init('https://a.example/x.wasm')).rejects.toThrow(/404/);
+    await expect(w.init('https://b.example/x.wasm')).rejects.toThrow(/404/);
+    await w.init();
+    expect(urls).toEqual(['https://a.example/x.wasm', 'https://b.example/x.wasm', 'https://b.example/x.wasm']);
+  });
+
   it('keeps a load alive while another caller still waits', async () => {
     let answer!: (r: Response) => void;
     const w = await fresh();

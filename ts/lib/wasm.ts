@@ -37,6 +37,11 @@ interface Load {
 let compiled: WebAssembly.Module | undefined;
 let memory: WebAssembly.Memory | undefined;
 let pending: Load | undefined;
+/**
+ * The source of the last load that was given one that can be read again, for
+ * the loads that retry it after it failed or was abandoned.
+ */
+let configured: WasmSource | undefined;
 /** Whether init() is inside the glue's async instantiation. */
 let instantiating = false;
 
@@ -148,7 +153,11 @@ function startLoad(source: WasmSource): Load {
 function waitFor(load: Load, signal: AbortSignal): Promise<void> {
   load.waiters++;
   return new Promise<void>((resolve, reject) => {
+    let waiting = true;
+    // Runs once: on abort, or when the load settles, whichever comes first.
     const done = (): void => {
+      if (!waiting) return;
+      waiting = false;
       signal.removeEventListener('abort', onAbort);
       load.waiters--;
     };
@@ -181,8 +190,14 @@ function waitFor(load: Load, signal: AbortSignal): Promise<void> {
  * A load that never finishes (a stalled download, say) keeps `init()`
  * pending. Pass a `signal` to give up: `init()` then rejects with its reason,
  * and once every caller waiting on the load has given up, the download is
- * cancelled and the next `init()` starts over. A failed load is retried by
- * the next call, too.
+ * cancelled and the next `init()` starts over. A caller without a signal,
+ * such as `probe()`, keeps waiting, so the load goes on. A failed load is
+ * retried by the next call, too.
+ *
+ * A retry loads from the `source` of that call. Without one, it loads from
+ * the URL, path, bytes or module that started the last load, so the `init()`
+ * inside `encode()` retries your custom location. A `Response` can be read
+ * only once; after it failed, pass a new one.
  *
  * @param source Where to load the wasm from. Default: `wav2flac.wasm` next to
  *   the package's JS (read with `fs` in Node, `fetch`ed elsewhere).
@@ -207,12 +222,28 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
   }
   if (compiled !== undefined) return Promise.resolve();
   if (signal?.aborted === true) return Promise.reject(signal.reason);
-  const load = pending ??= startLoad(source ?? defaultWasmUrl());
+  if (pending === undefined) {
+    if (source !== undefined && isReusable(source)) configured = source;
+    pending = startLoad(source ?? configured ?? defaultWasmUrl());
+  }
+  const load = pending;
   if (signal === undefined) {
     load.pinned = true;
     return load.promise;
   }
   return waitFor(load, signal);
+}
+
+/**
+ * Whether a source can be loaded again: a URL, a path, bytes or a module, not
+ * a `Response`, which can be read only once.
+ * @param source The source.
+ * @returns `true` if a retry can use it.
+ */
+function isReusable(source: WasmSource): boolean {
+  return typeof source === 'string' || source instanceof URL || source instanceof WebAssembly.Module ||
+    ArrayBuffer.isView(source) || source instanceof ArrayBuffer ||
+    (typeof SharedArrayBuffer === 'function' && (source as unknown) instanceof SharedArrayBuffer);
 }
 
 /**
