@@ -120,7 +120,8 @@ jobs:
         run: |
           tag=latest
           case "$GITHUB_REF_NAME" in *-*) tag=next ;; esac
-          npm publish dist/*.tgz --provenance --access public --tag "$tag"
+          # "./" matters: npm reads a bare "dist/x.tgz" as GitHub shorthand (user/repo).
+          npm publish ./dist/*.tgz --provenance --access public --tag "$tag"
 
   github-release:
     name: GitHub release
