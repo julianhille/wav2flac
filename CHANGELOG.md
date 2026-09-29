@@ -23,7 +23,10 @@ links are collected at the bottom of this file.
 - Docs: the worker pool sample replaces a worker that crashed. Before, the
   pool kept handing jobs to it, and each of them failed. It also rejects a
   size below 1, which made every job wait forever, and its batch example
-  keeps the results of the other files when one fails.
+  keeps the results of the other files when one fails. Before, one bad file
+  made the batch terminate the pool, which failed every job still running or
+  waiting. A failed job rejects at once, and a worker that stops answering
+  is replaced after 5 seconds.
 - Docs: the FIFO queue sample no longer keeps the last result alive, and a
   rejection that nobody handles is reported again.
 - Docs: buffered output is held in JS memory, not in wasm memory, and the

@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { encode } from '../../ts/index.js';
 import { asScript, jsBlocks, run } from '../helpers/samples.js';
 import { makeWav } from '../helpers/wav.js';
@@ -19,10 +19,18 @@ describe('parallel-encoding.md', () => {
     static all: StubWorker[] = [];
     readonly id = StubWorker.all.push(this);
     dead = false;
+    /** Stopped without an error event: nothing it was sent ever settles. */
+    gone = false;
     jobs = 0;
-    async encode(input: string): Promise<string> {
+    async encode(input: string, options?: { signal?: AbortSignal }): Promise<string> {
       if (this.dead) throw new Error('wav2flac worker exited with code 1');
       this.jobs++;
+      if (input === 'vanish') {
+        this.gone = true;
+        return new Promise((_, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
+        });
+      }
       await tick();
       if (input === 'crash') {
         this.dead = true;
@@ -32,6 +40,7 @@ describe('parallel-encoding.md', () => {
       return `flac(${input})@${this.id}`;
     }
     async wasmMemoryBytes(): Promise<number> {
+      if (this.gone) return new Promise(() => {});
       if (this.dead) throw new Error('wav2flac worker exited with code 1');
       return 1 << 20;
     }
@@ -40,7 +49,7 @@ describe('parallel-encoding.md', () => {
     }
   }
 
-  type Pool = { encode(input: string): Promise<string>; terminate(): void };
+  type Pool = { encode(input: string, options?: { signal?: AbortSignal }): Promise<string>; terminate(): void };
   const createEncoderPool = async (size?: unknown): Promise<Pool> => {
     StubWorker.all = [];
     const factory = (await run(`${poolCode}\nreturn createEncoderPool;`, {
@@ -69,6 +78,31 @@ describe('parallel-encoding.md', () => {
     expect(StubWorker.all.filter((w) => w.dead)).toHaveLength(1);
     pool.terminate();
     expect(StubWorker.all.every((w) => w.dead)).toBe(true);
+  });
+
+  it('fails a job on its signal at once, and replaces a worker that stopped answering', async () => {
+    vi.useFakeTimers();
+    try {
+      const pool = await createEncoderPool(1);
+      const timeout = new AbortController();
+      const job = pool.encode('vanish', { signal: timeout.signal });
+      const next = pool.encode('a');
+      await vi.advanceTimersByTimeAsync(0);
+      timeout.abort(new Error('timed out'));
+      await expect(job).rejects.toThrow('timed out');
+      // The check gets no answer; the worker is replaced after 5 seconds.
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(StubWorker.all).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(StubWorker.all).toHaveLength(2);
+      expect(StubWorker.all[0]!.dead).toBe(true);
+      const done = expect(next).resolves.toBe('flac(a)@2');
+      await vi.advanceTimersByTimeAsync(10);
+      await done;
+      pool.terminate();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the other results of a batch when files fail', async () => {
