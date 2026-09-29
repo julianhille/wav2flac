@@ -10,6 +10,11 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+
+- README: a badge with the status of the docs build on Read the Docs. It links
+  to the docs site.
+
 ## [1.0.0-rc.2] - 2026-09-29
 
 ### Added
