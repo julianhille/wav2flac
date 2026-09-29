@@ -1,7 +1,7 @@
 {
   "name": "wav2flac",
-  "version": "0.1.0",
-  "description": "Fast, streaming WAV to FLAC encoder (Rust → WebAssembly) with resampling and bit-depth conversion. Browser, Node, workers.",
+  "version": "1.0.0-rc.1",
+  "description": "Fast, streaming WAV to FLAC encoder (Rust \u2192 WebAssembly) with resampling and bit-depth conversion. Browser, Node, workers.",
   "license": "0BSD",
   "author": "Julian Hille",
   "repository": {
