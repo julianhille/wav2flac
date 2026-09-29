@@ -13,6 +13,11 @@ edit_uri: blob/main/
 copyright: 0BSD licensed
 theme: readthedocs
 strict: true
+# Broken anchors and links are only logged at INFO by default; fail on them.
+validation:
+  anchors: warn
+  unrecognized_links: warn
+  absolute_links: warn
 exclude_docs: requirements.txt
 hooks:
   - scripts/mkdocs_hooks.py
