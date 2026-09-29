@@ -4,10 +4,11 @@
  *
  * `npm pack`s the built package, installs it with Vite and webpack into a
  * temporary app, and loads the same page three ways: unbundled (import
- * map), built by Vite, built by webpack. In every browser given by
- * `WAV2FLAC_BROWSERS` (default `chromium`; also `firefox`, `webkit`) the page
- * runs `encode`, `encodeStream`, a worker and raw PCM, and each output must
- * hash to the same bytes as in Node. Each page also runs with
+ * map), built by Vite, built by webpack; each once with `wav2flac` and once
+ * with the minified bundles (`index.min.js`, `wav2flac/min`). In every
+ * browser given by `WAV2FLAC_BROWSERS` (default `chromium`; also `firefox`,
+ * `webkit`) the page runs `encode`, `encodeStream`, a worker and raw PCM,
+ * and each output must hash to the same bytes as in Node. Each page also runs with
  * `?wasm=/custom/…`, which calls `init(url)` first: then that must be the
  * only wasm the page fetches. Each bundler must emit the package's `.wasm`
  * byte for byte, since its first section holds the license notices.
@@ -20,7 +21,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { extname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -87,23 +88,39 @@ function prepare(): void {
   sh('npm', ['install', '--silent', '--no-audit', '--no-fund', join(tmp, tgz),
     `vite@${VITE}`, `webpack@${WEBPACK}`], app);
 
-  sh('npx', ['vite', 'build', '--base', './', '--outDir', 'dist-vite', '--logLevel', 'warn'], app);
-  checkWasmCopied(join(app, 'dist-vite'));
+  // The same page importing 'wav2flac/min', for the bundlers.
+  const min = join(app, 'min');
+  mkdirSync(min);
+  cpSync(join(app, 'index.html'), join(min, 'index.html'));
+  cpSync(join(app, 'wav.js'), join(min, 'wav.js'));
+  const main = readFileSync(join(app, 'main.js'), 'utf8');
+  if (!main.includes("from 'wav2flac';")) throw new Error("main.js no longer imports from 'wav2flac'");
+  writeFileSync(join(min, 'main.js'), main.replace("from 'wav2flac';", "from 'wav2flac/min';"));
 
-  writeFileSync(join(app, 'webpack.mjs'), `
+  for (const [dir, out] of [[app, 'dist-vite'], [min, 'dist-vite-min']] as const) {
+    sh('npx', ['vite', 'build', '--base', './', '--outDir', join(app, out), '--emptyOutDir',
+      '--logLevel', 'warn'], dir);
+    checkWasmCopied(join(app, out));
+  }
+
+  for (const [entry, out] of [['./main.js', 'dist-webpack'], ['./min/main.js', 'dist-webpack-min']] as const) {
+    writeFileSync(join(app, 'webpack.mjs'), `
 import webpack from 'webpack';
 webpack({
-  mode: 'production', entry: './main.js', context: ${JSON.stringify(app)},
-  output: { path: ${JSON.stringify(join(app, 'dist-webpack'))}, publicPath: 'auto' },
+  mode: 'production', entry: ${JSON.stringify(entry)}, context: ${JSON.stringify(app)},
+  output: { path: ${JSON.stringify(join(app, out))}, publicPath: 'auto' },
   performance: { hints: false },
+  // Chunks named after their source, so the test can tell which worker went in.
+  optimization: { chunkIds: 'named' },
 }, (err, stats) => {
   if (err || stats.hasErrors()) { console.error(err ?? stats.toString('errors-only')); process.exit(1); }
 });
 `);
-  sh('node', ['webpack.mjs'], app);
-  checkWasmCopied(join(app, 'dist-webpack'));
-  writeFileSync(join(app, 'dist-webpack/index.html'),
-    '<!doctype html><meta charset="utf-8"><script src="./main.js"></script>\n');
+    sh('node', ['webpack.mjs'], app);
+    checkWasmCopied(join(app, out));
+    writeFileSync(join(app, out, 'index.html'),
+      '<!doctype html><meta charset="utf-8"><script src="./main.js"></script>\n');
+  }
 }
 
 const MIME: Record<string, string> = {
@@ -149,7 +166,14 @@ async function serve(log: string[]): Promise<{ origin: string; close: () => void
   return { origin: `http://127.0.0.1:${addr.port}`, close: () => server.close() };
 }
 
-const PAGES = { 'no bundler': '/importmap.html', vite: '/dist-vite/', webpack: '/dist-webpack/' };
+const PAGES = {
+  'no bundler': '/importmap.html',
+  'no bundler, minified': '/importmap-min.html',
+  vite: '/dist-vite/',
+  'vite, minified': '/dist-vite-min/',
+  webpack: '/dist-webpack/',
+  'webpack, minified': '/dist-webpack-min/',
+};
 const ENGINES = { chromium, firefox, webkit };
 
 try {
@@ -185,6 +209,16 @@ try {
               const wasm = log.filter((p) => p.endsWith('.wasm'));
               if (custom && !problem && (wasm.length === 0 || wasm.some((p) => p !== CUSTOM_WASM))) {
                 problem = `expected only ${CUSTOM_WASM}, fetched ${wasm.join(', ') || 'no wasm'}`;
+              }
+              // The minified index must load the minified worker, and nothing unminified.
+              // Bundlers name the worker file after its source: Vite worker.min-<hash>.js,
+              // webpack node_modules_wav2flac_pkg_esm_worker_min_js.js.
+              const js = log.filter((p) => p.endsWith('.js'));
+              const workers = js.filter((p) => p.slice(p.lastIndexOf('/')).includes('worker'));
+              const unminified = js.filter((p) => p.includes('/wav2flac/pkg/') && !p.endsWith('.min.js'));
+              if (label.endsWith('minified') && !problem && (workers.length === 0
+                || workers.some((p) => !/worker[._]min/.test(p)) || unminified.length > 0)) {
+                problem = `expected only minified bundles, fetched ${js.join(', ')}`;
               }
             } catch (e) {
               problem = String(e);
