@@ -64,7 +64,8 @@ links are collected at the bottom of this file.
   library, which it leaves out.
 - Third-party notices: the Rust version they name comes from
   `rust-toolchain.toml`, not from the `rustc` on the path, and the build
-  fails when the standard library's license texts are from another release.
+  fails when the standard library's license texts or the `rustc` that built
+  the wasm are from another release.
 - Third-party page: crates are sorted the same in every locale, and the page
   links the same notice files that `THIRD_PARTY_LICENSES.txt` reproduces.
 - API reference: `Wav2FlacError` no longer lists the static members that

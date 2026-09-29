@@ -93,7 +93,7 @@ export function rustVersion(): string {
   const file = join(import.meta.dirname, '..', 'rust-toolchain.toml');
   const channel = /^channel\s*=\s*"([^"]*)"/m.exec(readFileSync(file, 'utf8'))?.[1];
   if (channel === undefined || !/^\d+\.\d+\.\d+$/.test(channel)) {
-    throw new Error(`rust-toolchain.toml: the channel must be a release such as "1.98.1", not ${channel}`);
+    throw new Error(`rust-toolchain.toml: the channel must be a release such as "1.98.1", not ${channel ?? 'missing'}`);
   }
   if (channel !== STD_TEXTS_RELEASE) {
     throw new Error(`rust-toolchain.toml pins Rust ${channel}, but the texts in scripts/std-licenses/ ` +

@@ -11,13 +11,22 @@
 // THIRD_PARTY_LICENSES.txt for the Apache License and the notices it leaves
 // out. Run by scripts/build.sh after the cargo build, so every crate's
 // sources are in the local registry.
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { STD_PARTS, noticeFiles, shippedCrates, stdName, stdNoticeText } from './crates.ts';
+import { STD_PARTS, noticeFiles, rustVersion, shippedCrates, stdName, stdNoticeText } from './crates.ts';
 import { MIT_NOTICE, MIT_POINTER, bannerLines } from './notices.ts';
 
 const [out, bannerOut] = process.argv.slice(2);
 if (out === undefined) throw new Error('usage: gen-licenses.ts <output file> [banner file]');
+
+// The notices name the release of rust-toolchain.toml. A rustc that ignores
+// the file (one not managed by rustup) or an override may have built the wasm.
+const root = join(import.meta.dirname, '..');
+const rustc = /^rustc (\S+)/.exec(execFileSync('rustc', ['--version'], { cwd: root, encoding: 'utf8' }))?.[1];
+if (rustc !== rustVersion()) {
+  throw new Error(`rustc ${rustc} built the wasm, but rust-toolchain.toml pins Rust ${rustVersion()}`);
+}
 
 const crates = shippedCrates();
 const rule = '='.repeat(78);
