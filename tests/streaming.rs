@@ -80,3 +80,24 @@ fn internal_buffer_is_bounded() {
         assert!(max < 128 * 1024, "{mode:?}: buffered {max} bytes");
     }
 }
+
+#[test]
+fn seek_index_does_not_grow_per_frame() {
+    // Tiny blocks: one frame per 16 samples. Only the chosen seek points are
+    // kept, not an index entry per frame.
+    let s = signal(Signal::Sine, 16, 1, 1_000_000, 1);
+    let w = wav(1, 8000, 16, &s);
+    let mut e = Encoder::new(Options {
+        block_size: Some(16),
+        seek_point_interval: 10.0,
+        ..Options::default()
+    })
+    .unwrap();
+    let mut max = 0;
+    for c in w.chunks(65536) {
+        e.push(c).unwrap();
+        max = max.max(e.buffered_len());
+    }
+    e.finish().unwrap();
+    assert!(max < 64 * 1024, "buffered {max} bytes");
+}

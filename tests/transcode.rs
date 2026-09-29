@@ -66,7 +66,8 @@ fn output_length_is_exact() {
         (192000, 44100),
         (22050, 8000),
     ] {
-        for frames in [0usize, 1, 999, 48000] {
+        // 44100 frames at 44.1k -> 48k is exactly 48000; float math gave 48001.
+        for frames in [0usize, 1, 999, 44100, 48000] {
             let s = signal(Signal::Sine, 16, 2, frames, 1);
             let d = decode(&encode(
                 &wav(2, from, 16, &s),
@@ -75,7 +76,7 @@ fn output_length_is_exact() {
                     ..Options::default()
                 },
             ));
-            let expected = (frames as f64 * f64::from(to) / f64::from(from)).ceil() as u64;
+            let expected = (frames as u64 * u64::from(to)).div_ceil(u64::from(from));
             assert_eq!(d.sample_rate, to);
             assert_eq!(
                 d.total_samples.unwrap_or(0),
@@ -161,7 +162,7 @@ fn full_scale_does_not_wrap_and_dc_is_kept() {
         let t = j as f64 * 48000.0 / 44100.0;
         let edge = (t / 100.0).round() * 100.0;
         if (t - edge).abs() > 10.0 && t < 47_900.0 {
-            let positive = (t as usize / 100) % 2 == 0;
+            let positive = (t as usize / 100).is_multiple_of(2);
             assert_eq!(*v > 0, positive, "wraparound at output sample {j}: {v}");
         }
     }
@@ -334,5 +335,50 @@ fn all_rate_pairs() {
             ));
             assert_eq!(d.sample_rate, to);
         }
+    }
+}
+
+#[test]
+fn extreme_upsampling_is_rejected() {
+    let s = signal(Signal::Sine, 16, 1, 16, 1);
+    let opts = |rate| Options {
+        sample_rate: Some(rate),
+        ..Options::default()
+    };
+    let e = encode_all(&wav(1, 1, 16, &s), opts(48000)).unwrap_err();
+    assert_eq!(e.code(), ErrorCode::InvalidOptions);
+    assert!(encode_all(&wav(1, 1000, 16, &s), opts(256_000)).is_ok());
+    let e = encode_all(&wav(1, 1000, 16, &s), opts(256_001)).unwrap_err();
+    assert_eq!(e.code(), ErrorCode::InvalidOptions);
+    // Downsampling is allowed up to 65536x.
+    assert!(encode_all(&wav(1, 384_000, 16, &s), opts(6)).is_ok());
+    let e = encode_all(&wav(1, 384_000, 16, &s), opts(5)).unwrap_err();
+    assert_eq!(e.code(), ErrorCode::InvalidOptions);
+    let e = encode_all(&wav(1, 1_048_575, 16, &s), opts(1)).unwrap_err();
+    assert_eq!(e.code(), ErrorCode::InvalidOptions);
+}
+
+#[test]
+fn large_downsampling_ratio_keeps_stop_band() {
+    // 192 kHz → 16 kHz: a 12 kHz tone would alias to 4 kHz. The filter is
+    // lengthened for large ratios, so the stop band holds like at 2:1.
+    let x = sine_f64(12_000.0, 192_000, 1, 192_000, 0.9);
+    for (q, min_db) in [
+        (ResampleQuality::Fast, 60.0),
+        (ResampleQuality::Balanced, 90.0),
+        (ResampleQuality::Best, 110.0),
+    ] {
+        let o = Options {
+            sample_rate: Some(16000),
+            bits_per_sample: Some(24),
+            resample_quality: q,
+            dither: Dither::None,
+            ..Options::default()
+        };
+        let y = channel0(&decode(&encode(&float_wav(&x, 1, 192_000), o)));
+        let mid = &y[y.len() / 4..3 * y.len() / 4];
+        let alias = tone_amplitude(mid, 4000.0, 16000.0);
+        let db = -20.0 * (alias / 0.9).max(1e-12).log10();
+        assert!(db >= min_db, "{q:?}: alias only {db:.1} dB down");
     }
 }

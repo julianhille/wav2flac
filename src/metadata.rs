@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: 0BSD
-//! FLAC metadata blocks: STREAMINFO, VORBIS_COMMENT,
+//! FLAC metadata blocks: STREAMINFO, `VORBIS_COMMENT`,
 //! SEEKTABLE and PADDING.
 
 use crate::error::{err, ErrorCode, Result};
@@ -119,7 +119,7 @@ impl StreamInfo {
     }
 }
 
-/// Serializes a VORBIS_COMMENT body.
+/// Serializes a `VORBIS_COMMENT` body.
 #[must_use]
 pub fn vorbis_comment_body(vendor: &str, comments: &[(String, String)]) -> Vec<u8> {
     let mut v = Vec::new();
@@ -152,33 +152,86 @@ pub fn seektable_body(points: &[SeekPoint]) -> Vec<u8> {
 /// (`(first_sample, offset, frame_samples)` per frame, in order).
 #[must_use]
 pub fn choose_seek_points(frames: &[(u64, u64, u16)], interval_samples: u64) -> Vec<SeekPoint> {
-    let mut out: Vec<SeekPoint> = Vec::new();
-    if interval_samples == 0 || frames.is_empty() {
-        return out;
+    let mut picker = SeekPicker::new(interval_samples);
+    for &(sample, offset, n) in frames {
+        picker.push(sample, offset, n);
     }
-    let max_points = MAX_BLOCK_LEN / 18;
-    // Frame `i` holds the point for every multiple of the interval in
-    // `[start, next frame's start)`; one pass over the frames, however small
-    // the interval.
-    for (i, &(sample, offset, n)) in frames.iter().enumerate() {
-        let start = if i == 0 { 0 } else { sample };
-        let end = frames.get(i + 1).map_or(sample.saturating_add(1), |f| f.0);
-        let hit = start
-            .div_ceil(interval_samples)
-            .checked_mul(interval_samples)
-            .is_some_and(|t| t < end);
-        if hit {
-            out.push(SeekPoint {
-                sample,
-                offset,
-                frame_samples: n,
-            });
-            if out.len() == max_points {
-                break;
-            }
+    picker.finish()
+}
+
+/// Picks seek points while frames are encoded, holding only the chosen
+/// points and the latest frame instead of an index of every frame.
+#[derive(Debug, Clone)]
+pub struct SeekPicker {
+    interval: u64,
+    points: Vec<SeekPoint>,
+    /// The latest frame, not yet decided: its range ends where the next starts.
+    last: Option<SeekPoint>,
+    first: bool,
+}
+
+impl SeekPicker {
+    /// A picker for a point every `interval_samples`; 0 picks none.
+    #[must_use]
+    pub fn new(interval_samples: u64) -> Self {
+        Self {
+            interval: interval_samples,
+            points: Vec::new(),
+            last: None,
+            first: true,
         }
     }
-    out
+
+    /// Adds the next frame, which starts at `sample` and `offset`.
+    pub fn push(&mut self, sample: u64, offset: u64, frame_samples: u16) {
+        if self.interval == 0 || self.points.len() >= MAX_BLOCK_LEN / 18 {
+            return;
+        }
+        self.decide(sample);
+        self.last = Some(SeekPoint {
+            sample,
+            offset,
+            frame_samples,
+        });
+    }
+
+    /// The chosen points, once all frames have been pushed.
+    #[must_use]
+    pub fn finish(mut self) -> Vec<SeekPoint> {
+        if let Some(p) = self.last {
+            self.decide(p.sample.saturating_add(1));
+        }
+        self.points
+    }
+
+    /// Number of points held so far.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.points.len()
+    }
+
+    /// Whether no point has been chosen yet.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.points.is_empty()
+    }
+
+    /// Frame `last` holds the point for every multiple of the interval in
+    /// `[its start, end)`; the first frame's range starts at 0.
+    fn decide(&mut self, end: u64) {
+        let Some(p) = self.last.take() else {
+            return;
+        };
+        let start = if self.first { 0 } else { p.sample };
+        self.first = false;
+        let hit = start
+            .div_ceil(self.interval)
+            .checked_mul(self.interval)
+            .is_some_and(|t| t < end);
+        if hit && self.points.len() < MAX_BLOCK_LEN / 18 {
+            self.points.push(p);
+        }
+    }
 }
 
 /// Assembles `fLaC` plus all metadata blocks, setting the last-block flag

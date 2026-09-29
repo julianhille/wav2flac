@@ -170,8 +170,11 @@ fn golden_hashes() {
             diffs.push(k.clone());
         }
     }
-    assert!(diffs.is_empty() && expected.len() == actual.len(),
-        "encoder output changed for {diffs:?}; if intended, rerun with UPDATE_GOLDEN=1 and note it in CHANGELOG");
+    assert!(
+        diffs.is_empty() && expected.len() == actual.len(),
+        "encoder output changed for {diffs:?}; \
+         if intended, rerun with UPDATE_GOLDEN=1 and note it in CHANGELOG"
+    );
 }
 
 #[test]

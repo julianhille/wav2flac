@@ -38,14 +38,21 @@ pub enum OutputMode {
 }
 
 /// Quality preset for the resampler.
+///
+/// The passband is measured against the lower of the two Nyquist rates
+/// (22.05 kHz for 44.1 kHz ↔ 48 kHz). Downsampling lengthens the filter, so
+/// all presets are flat to about 90 % of it. Upsampling uses the preset's
+/// base length: `Fast` and `Balanced` are flat to about 80 % and roll off
+/// above (at 20 kHz, 44.1 → 48 kHz: −4 dB and −10 dB), `Best` is flat to 90 %.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ResampleQuality {
-    /// Short filter; fastest, still transparent for most material.
+    /// Short filter (64 taps); fastest; stop band at least 60 dB down.
     Fast,
-    /// Default trade-off.
+    /// Default trade-off (128 taps); stop band at least 90 dB down.
     #[default]
     Balanced,
-    /// Long filter; highest stop-band attenuation.
+    /// Long filter (256 taps); flattest passband; stop band at least
+    /// 110 dB down.
     Best,
 }
 

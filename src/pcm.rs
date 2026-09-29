@@ -76,7 +76,9 @@ pub fn decode_int(layout: &PcmLayout, bytes: &[u8], out: &mut Vec<i32>) -> Resul
                     return err(
                         ErrorCode::InvalidWav,
                         format!(
-                            "sample has non-zero padding bits ({} valid bits in a {}-bit container); refusing lossy truncation",
+                            "sample has non-zero padding bits \
+                             ({} valid bits in a {}-bit container); \
+                             refusing lossy truncation",
                             layout.valid_bits,
                             cb * 8
                         ),
@@ -180,6 +182,7 @@ impl PcmSpec {
             channel_mask: None,
             data_offset: 0,
             data_len,
+            riff_end: u64::MAX,
             tags: Vec::new(),
         }
     }

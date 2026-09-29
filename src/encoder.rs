@@ -2,7 +2,8 @@
 //! The push-based streaming encoder.
 //!
 //! ```text
-//! push(bytes) ──► header detection ──► PCM decode ──► transcode ──► block ──► libFLAC frame ──► bytes
+//! push(bytes) ──► header detection ──► PCM decode ──► transcode
+//!             ──► block ──► libFLAC frame ──► bytes
 //! finish()    ──► flush last block + resampler tail, build the FLAC header
 //! ```
 //!
@@ -123,16 +124,18 @@ struct Active {
     frame_bytes_out: u64,
     min_frame: usize,
     max_frame: usize,
-    /// `(first_sample, byte_offset, samples)` per frame, for the seek table.
-    frame_index: Vec<(u64, u64, u16)>,
-    /// Whether `frame_index` is needed (buffered output with a seek table);
-    /// otherwise it would grow by one entry per frame for nothing.
-    index_frames: bool,
+    /// Seek points chosen so far (buffered output with a seek table only).
+    seek: Option<metadata::SeekPicker>,
     /// Tag scanner for the chunks after the data (buffered output only).
     trailing: Option<riff::TrailingScanner>,
     /// First bytes after the data chunk, for the streaming-header check.
     lead: Vec<u8>,
 }
+
+/// Smallest slice of input fed to the header parser at a time.
+const HEADER_STEP: usize = 64 * 1024;
+/// Largest slice of audio data decoded at a time.
+const DATA_STEP: usize = 1 << 20;
 
 /// Streaming WAV → FLAC encoder.
 pub struct Encoder {
@@ -290,6 +293,7 @@ impl Encoder {
                 a.partial.len()
                     + a.block.len() * 4
                     + a.lead.len()
+                    + a.seek.as_ref().map_or(0, |s| s.len() * 18)
                     + a.trailing
                         .as_ref()
                         .map_or(0, riff::TrailingScanner::buffered_len)
@@ -367,12 +371,22 @@ impl Encoder {
         let mut out = std::mem::take(&mut self.pending);
         match self.state {
             State::Header => {
-                self.buf.extend_from_slice(input);
-                if let HeaderState::Done(h) = self.header_parser.parse(&self.buf, false)? {
-                    self.start(h, &mut out)?;
-                    let rest = std::mem::take(&mut self.buf);
-                    let data_offset = self.active.as_ref().map_or(0, |a| a.header.data_offset);
-                    self.consume(&rest[data_offset..], &mut out)?;
+                // Only buffer what the header needs: feed the input in slices
+                // that double with the buffer (so re-parsing stays linear) and
+                // hand the rest straight to `consume`.
+                let mut input = input;
+                while !input.is_empty() {
+                    let step = input.len().min(self.buf.len().max(HEADER_STEP));
+                    self.buf.extend_from_slice(&input[..step]);
+                    input = &input[step..];
+                    if let HeaderState::Done(h) = self.header_parser.parse(&self.buf, false)? {
+                        self.start(h, &mut out)?;
+                        let rest = std::mem::take(&mut self.buf);
+                        let off = self.active.as_ref().map_or(0, |a| a.header.data_offset);
+                        self.consume(&rest[off.min(rest.len())..], &mut out)?;
+                        self.consume(input, &mut out)?;
+                        break;
+                    }
                 }
             }
             State::Data | State::Trailing => self.consume(input, &mut out)?,
@@ -435,9 +449,14 @@ impl Encoder {
             frame_bytes_out: 0,
             min_frame: usize::MAX,
             max_frame: 0,
-            frame_index: Vec::new(),
-            index_frames: self.opts.mode != OutputMode::Streaming
-                && self.opts.seek_point_interval > 0.0,
+            seek: (self.opts.mode != OutputMode::Streaming && self.opts.seek_point_interval > 0.0)
+                .then(|| {
+                    // A tiny but non-zero interval still asks for a seek table
+                    // (every frame), not for none.
+                    let rate = f64::from(spec.sample_rate);
+                    let interval = (self.opts.seek_point_interval * rate).round() as u64;
+                    metadata::SeekPicker::new(interval.max(1))
+                }),
             trailing: (self.opts.mode != OutputMode::Streaming)
                 .then(|| riff::TrailingScanner::new(header_data_len)),
             lead: Vec::new(),
@@ -462,7 +481,17 @@ impl Encoder {
                 .len()
                 .min(usize::try_from(a.data_remaining).unwrap_or(usize::MAX));
             a.data_remaining -= take as u64;
-            a.data(&input[..take], out)?;
+            // Bounded slices keep the decode scratch small for huge pushes;
+            // upsampling multiplies the samples, so the slice shrinks with it.
+            let up = a
+                .transcoder
+                .spec
+                .sample_rate
+                .div_ceil(a.header.sample_rate.max(1));
+            let step = (DATA_STEP / up.max(1) as usize).max(4096);
+            for part in input[..take].chunks(step) {
+                a.data(part, out)?;
+            }
             input = &input[take..];
             if a.data_remaining == 0 {
                 self.state = State::Trailing;
@@ -480,19 +509,24 @@ impl Encoder {
             }
             let seen = a.lead.len();
             a.lead
-                .extend_from_slice(&input[..input.len().min(4 - seen)]);
+                .extend_from_slice(&input[..input.len().min(8 - seen)]);
             // Streaming writers leave the data size at 0 and append the audio;
             // encoding that as an empty file would silently drop everything.
-            if a.header.data_len == 0
-                && seen < 4
-                && a.lead.len() == 4
-                && !riff::is_chunk_id(&a.lead)
-            {
-                return err(
-                    ErrorCode::UnsupportedFormat,
-                    "data chunk size is 0 but audio follows \
-                     (streaming WAV header); fix the header sizes first",
-                );
+            // What follows an empty data chunk must look like a chunk that
+            // fits in the RIFF size; audio rarely does, even when its first
+            // bytes happen to be printable.
+            if a.header.data_len == 0 && seen < 8 && a.lead.len() == 8 {
+                let len = u64::from(u32::from_le_bytes([
+                    a.lead[4], a.lead[5], a.lead[6], a.lead[7],
+                ]));
+                let end = a.header.data_offset as u64 + 8 + len;
+                if !riff::is_chunk_id(&a.lead[..4]) || end > a.header.riff_end {
+                    return err(
+                        ErrorCode::UnsupportedFormat,
+                        "data chunk size is 0 but audio follows \
+                         (streaming WAV header); fix the header sizes first",
+                    );
+                }
             }
         }
         Ok(())
@@ -530,6 +564,15 @@ impl Encoder {
     fn finish_active(&mut self) -> Result<Finished> {
         let opts = &self.opts;
         let a = self.active.as_mut().expect("active after header");
+        // A few bytes after an empty data chunk are too short to be a chunk:
+        // it is audio behind a streaming WAV header, as in `consume`.
+        if a.header.data_len == 0 && !a.lead.is_empty() && a.lead.len() < 8 {
+            return err(
+                ErrorCode::UnsupportedFormat,
+                "data chunk size is 0 but audio follows \
+                 (streaming WAV header); fix the header sizes first",
+            );
+        }
         if a.data_total.is_none() {
             if !a.partial.is_empty() {
                 return err(
@@ -571,12 +614,11 @@ impl Encoder {
         }
         let si = a.flac_info(true);
         let vorbis = build_vorbis(opts, &a.header, &tags);
-        // A tiny but non-zero interval still asks for a seek table (every
-        // frame), not for none. `frame_index` is empty when it is disabled.
-        let interval = ((opts.seek_point_interval * f64::from(a.transcoder.spec.sample_rate))
-            .round() as u64)
-            .max(1);
-        let points = metadata::choose_seek_points(&a.frame_index, interval);
+        let points = a
+            .seek
+            .take()
+            .map(metadata::SeekPicker::finish)
+            .unwrap_or_default();
         let seektable = (!points.is_empty()).then(|| metadata::seektable_body(&points));
         let header =
             metadata::write_header(&si, vorbis.as_deref(), seektable.as_deref(), opts.padding)?;
@@ -612,7 +654,7 @@ fn vorbis_len(comments: &[(String, String)]) -> usize {
     4 + VENDOR.len() + 4 + entries
 }
 
-/// Builds the VORBIS_COMMENT body, or `None` when no block should be written.
+/// Builds the `VORBIS_COMMENT` body, or `None` when no block should be written.
 fn build_vorbis(
     opts: &Options,
     header: &WavHeader,
@@ -724,12 +766,9 @@ impl Active {
             .filter(|n| *n < 1 << 31)
             .ok_or_else(|| Error::new(ErrorCode::LimitExceeded, "more than 2^31 frames"))?;
         let len = frame::renumber(&raw, number, out)?;
-        if self.index_frames {
-            self.frame_index.push((
-                self.samples_out,
-                self.frame_bytes_out,
-                u16::try_from(samples).unwrap_or(u16::MAX),
-            ));
+        if let Some(seek) = &mut self.seek {
+            let n = u16::try_from(samples).unwrap_or(u16::MAX);
+            seek.push(self.samples_out, self.frame_bytes_out, n);
         }
         self.min_frame = self.min_frame.min(len);
         self.max_frame = self.max_frame.max(len);

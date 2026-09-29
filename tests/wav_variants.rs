@@ -115,20 +115,64 @@ fn missing_pad_byte_is_tolerated() {
 
 #[test]
 fn garbage_pad_byte_is_skipped() {
-    // A writer that filled the pad byte after an odd chunk with a non-zero value.
+    // Writers that filled the pad byte after an odd chunk with a non-zero
+    // value, also a printable one, so pad plus the next three bytes look like
+    // a chunk id (" fmt", "Xdat"). The next chunk may be unknown too.
     let s = signal(Signal::Noise, 16, 1, 100, 6);
-    let good = WavBuilder::pcm(1, 8000, 16);
-    let data = good.pack_int(&s);
-    let mut f = b"RIFF\0\0\0\0WAVE".to_vec();
-    f.extend_from_slice(b"odd \x03\0\0\0abc\xFF"); // garbage pad byte
-    f.extend_from_slice(b"fmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0");
-    f.extend_from_slice(b"data");
-    f.extend_from_slice(&(data.len() as u32).to_le_bytes());
-    f.extend_from_slice(&data);
+    let data = WavBuilder::pcm(1, 8000, 16).pack_int(&s);
+    for pad in [0xFF, b' ', b'X', b'a', b'0'] {
+        for next in [&b"fmt "[..], b"data", b"zzzz"] {
+            let mut f = b"RIFF\0\0\0\0WAVE".to_vec();
+            f.extend_from_slice(b"odd \x03\0\0\0abc");
+            f.push(pad);
+            if next == b"zzzz" {
+                f.extend_from_slice(b"zzzz\x01\0\0\0!\0");
+            }
+            f.extend_from_slice(b"fmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0");
+            if next == b"data" {
+                // An odd chunk right before the data chunk.
+                f.extend_from_slice(b"odd2\x01\0\0\0!");
+                f.push(pad);
+            }
+            f.extend_from_slice(b"data");
+            f.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            f.extend_from_slice(&data);
+            let n = (f.len() - 8) as u32;
+            f[4..8].copy_from_slice(&n.to_le_bytes());
+            let what = format!("pad {pad:#x} before {}", String::from_utf8_lossy(next));
+            for chunks in [&[usize::MAX][..], &[1][..]] {
+                let flac = encode_chunked(&f, Options::default(), chunks).expect(&what);
+                assert_eq!(decode(&flac).samples, s, "{what}");
+            }
+        }
+    }
+}
+
+#[test]
+fn printable_pad_after_odd_data_keeps_trailing_tags() {
+    // 8-bit mono with an odd sample count: the data chunk is padded with a
+    // space, and a LIST follows.
+    let s = signal(Signal::Noise, 8, 1, 1001, 5);
+    let b = WavBuilder::pcm(1, 8000, 8);
+    let mut f = b.build(&s);
+    let list = info_list(&[(b"INAM", b"after")]);
+    *f.last_mut().unwrap() = b' '; // the builder's zero pad
+    f.extend_from_slice(b"LIST");
+    f.extend_from_slice(&(list.len() as u32).to_le_bytes());
+    f.extend_from_slice(&list);
     let n = (f.len() - 8) as u32;
     f[4..8].copy_from_slice(&n.to_le_bytes());
-    let d = decode(&encode(&f, Options::default()));
-    assert_eq!(d.samples, s);
+    for chunks in [&[usize::MAX][..], &[1][..], &[7][..]] {
+        let flac = encode_chunked(&f, Options::default(), chunks).unwrap();
+        let (blocks, _) = metadata_blocks(&flac);
+        let vc = blocks.iter().find(|b| b.0 == 4).expect("vorbis comment");
+        let (_, tags) = parse_vorbis(&vc.2);
+        assert!(
+            tags.contains(&("TITLE".into(), "after".into())),
+            "{chunks:?}: {tags:?}"
+        );
+        assert_eq!(decode(&flac).samples, s);
+    }
 }
 
 #[test]

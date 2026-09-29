@@ -4,7 +4,7 @@
 
 use crate::options::Dither;
 
-/// SplitMix64: tiny, fast, deterministic and good enough for dither noise.
+/// `SplitMix64`: tiny, fast, deterministic and good enough for dither noise.
 #[derive(Debug, Clone)]
 pub struct Rng(u64);
 

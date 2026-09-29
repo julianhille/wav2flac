@@ -29,7 +29,13 @@ export interface Progress {
   fraction: number | null;
 }
 
-/** Resampler filter quality. */
+/**
+ * Resampler filter quality. Stop band: `'fast'` ≥ 60 dB, `'balanced'` ≥ 90 dB,
+ * `'best'` ≥ 110 dB. Downsampling is flat to about 90 % of the new Nyquist on
+ * every preset. When upsampling, `'fast'` and `'balanced'` roll off above
+ * about 80 % of the input's Nyquist (44.1 → 48 kHz: −4 / −10 dB at 20 kHz);
+ * use `'best'` for a flat top octave.
+ */
 export type ResampleQuality = 'fast' | 'balanced' | 'best';
 
 /**

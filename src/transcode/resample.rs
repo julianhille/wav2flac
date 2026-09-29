@@ -32,18 +32,30 @@ fn map_err(e: impl std::fmt::Display) -> Error {
     Error::new(ErrorCode::Internal, format!("resampler: {e}"))
 }
 
-/// Filter parameters for a quality preset.
-/// Sinc length (taps) of each preset.
-fn sinc_len(q: ResampleQuality) -> usize {
-    match q {
+/// Largest factor by which downsampling lengthens the sinc filter.
+const MAX_DOWNSAMPLE_STRETCH: usize = 4;
+
+/// Sinc length (taps, in input samples) of each preset at `ratio` (output
+/// rate / input rate). Downsampling lowers the cutoff by `ratio`, which
+/// widens the transition band by the same factor for a fixed length; the
+/// filter is lengthened to keep it (up to [`MAX_DOWNSAMPLE_STRETCH`]x).
+fn sinc_len(q: ResampleQuality, ratio: f64) -> usize {
+    let base = match q {
         ResampleQuality::Fast => 64,
         ResampleQuality::Balanced => 128,
         ResampleQuality::Best => 256,
-    }
+    };
+    let stretch = if ratio < 1.0 {
+        ((1.0 / ratio).ceil() as usize).clamp(1, MAX_DOWNSAMPLE_STRETCH)
+    } else {
+        1
+    };
+    base * stretch
 }
 
-fn parameters(q: ResampleQuality) -> SincInterpolationParameters {
-    let len = sinc_len(q);
+/// Filter parameters for a quality preset.
+fn parameters(q: ResampleQuality, ratio: f64) -> SincInterpolationParameters {
+    let len = sinc_len(q, ratio);
     match q {
         ResampleQuality::Fast => SincInterpolationParameters::new(len, WindowFunction::Hann2)
             .oversampling_factor(64)
@@ -116,7 +128,7 @@ impl Resample {
         let inner = Async::<f64>::new_sinc(
             ratio,
             1.0,
-            &parameters(quality),
+            &parameters(quality, ratio),
             CHUNK_FRAMES,
             channels,
             FixedAsync::Input,
@@ -125,7 +137,7 @@ impl Resample {
         // The filter's group delay in output frames. rubato's `output_delay()`
         // truncates `len * ratio / 2`, which is about one frame too late; trim
         // the true delay rounded to the nearest frame.
-        let delay = sinc_len(quality) as f64 * ratio / 2.0 - 1.0;
+        let delay = sinc_len(quality, ratio) as f64 * ratio / 2.0 - 1.0;
         let to_trim = delay.round().max(0.0) as usize;
         Ok(Self {
             inner,

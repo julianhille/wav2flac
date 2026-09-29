@@ -501,11 +501,10 @@ pub fn ffmpeg(bin: &str, input: &[u8], ext: &str, args: &[&str]) -> Option<Vec<u
     if !have_tool(bin) {
         return None;
     }
-    let id = format!(
-        "{}-{:x}",
-        std::process::id(),
-        Rng(input.len() as u64 ^ u64::from(crc32ish(input))).next_u64()
-    );
+    // Unique per call: parallel tests may decode identical inputs.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let id = format!("{}-{n}", std::process::id());
     let inp = std::env::temp_dir().join(format!("w2f-{id}.{ext}"));
     std::fs::write(&inp, input).unwrap();
     let mut cmd = std::process::Command::new(bin);
@@ -540,12 +539,6 @@ pub fn ffmpeg_pcm(flac: &[u8], bits: u32) -> Option<Vec<i32>> {
             .map(|c| i32::from_le_bytes(c.try_into().unwrap()) >> (32 - bits))
             .collect(),
     )
-}
-
-fn crc32ish(d: &[u8]) -> u32 {
-    d.iter().fold(0x811C_9DC5u32, |h, b| {
-        (h ^ u32::from(*b)).wrapping_mul(0x0100_0193)
-    })
 }
 
 /// Parses a VORBIS_COMMENT body into (vendor, [(key, value)]).

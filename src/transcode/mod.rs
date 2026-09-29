@@ -23,6 +23,9 @@ pub enum Samples<'a> {
     Float(&'a [f64]),
 }
 
+// One `Mode` lives per encoder, inside its boxed state, so the size gap
+// between the variants costs nothing worth an extra allocation.
+#[allow(clippy::large_enum_variant)]
 enum Mode {
     Passthrough,
     Shift(u32),
@@ -72,7 +75,8 @@ impl Transcoder {
             (SampleFormat::Float, None) => {
                 return err(
                     ErrorCode::UnsupportedFormat,
-                    "float WAV cannot be stored losslessly in FLAC; set bitsPerSample (e.g. 24 or 32) to convert",
+                    "float WAV cannot be stored losslessly in FLAC; \
+                     set bitsPerSample (e.g. 24 or 32) to convert",
                 )
             }
             (SampleFormat::Int, None) if (MIN_BITS..=MAX_BITS).contains(&in_bits) => in_bits,

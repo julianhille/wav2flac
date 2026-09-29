@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: 0BSD
-//! Native reference CLI: `encode <in.wav|-> <out.flac|-> [--level N] [--stream] [--bits N] [--rate N] [--time]`.
+//! Native reference CLI:
+//! `encode <in.wav|-> <out.flac|-> [--level N] [--stream] [--bits N] [--rate N] [--time]`.
 //!
 //! Used by the JS tests (wasm output must be byte-identical) and as the native
 //! baseline in the benchmark. With `--time` it prints `{"ms":…,"maxRssKb":…}`
@@ -31,7 +32,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let [input, output] = pos.as_slice() else {
-        return Err("usage: encode <in.wav|-> <out.flac|-> [--level N] [--stream] [--bits N] [--rate N] [--time]".into());
+        return Err(
+            "usage: encode <in.wav|-> <out.flac|-> [--level N] [--stream] \
+                    [--bits N] [--rate N] [--time]"
+                .into(),
+        );
     };
     let mut wav = Vec::new();
     if input == "-" {

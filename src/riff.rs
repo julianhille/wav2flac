@@ -55,6 +55,9 @@ pub struct WavHeader {
     pub data_offset: usize,
     /// Length of the `data` chunk in bytes.
     pub data_len: u32,
+    /// Offset just past the RIFF chunk (8 + the RIFF size); `u64::MAX` for
+    /// raw PCM.
+    pub riff_end: u64,
     /// Tags found in `LIST/INFO` chunks before the data, mapped to Vorbis names.
     pub tags: Vec<(String, String)>,
 }
@@ -171,13 +174,11 @@ impl HeaderParser {
 
     fn parse_inner(&mut self, buf: &[u8], eof: bool) -> Result<HeaderState> {
         if !self.riff_ok {
-            match check_riff(buf, eof)? {
-                Some(state) => return Ok(state),
-                None => {
-                    self.riff_ok = true;
-                    self.pos = 12;
-                }
+            if let Some(state) = check_riff(buf, eof)? {
+                return Ok(state);
             }
+            self.riff_ok = true;
+            self.pos = 12;
         }
         loop {
             let pos = self.pos;
@@ -205,7 +206,8 @@ impl HeaderParser {
                     );
                 }
                 let tags = std::mem::take(&mut self.tags);
-                let header = finalize(&info, body, len, tags)?;
+                let riff_end = u64::from(le_u32(buf, 4)) + 8;
+                let header = finalize(&info, body, len, riff_end, tags)?;
                 return Ok(HeaderState::Done(header));
             }
             let len_usize = len as usize;
@@ -226,8 +228,8 @@ impl HeaderParser {
             // this chunk, which must not be processed twice.
             let mut next = end;
             if len % 2 == 1 {
-                if buf.len() < end + 4 {
-                    return self.need_more(end + 4, eof, "chunk padding");
+                if buf.len() < end + 5 {
+                    return self.need_more(end + 5, eof, "chunk padding");
                 }
                 next = after_pad(buf, end);
             }
@@ -383,11 +385,7 @@ fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
     let spec = reader.spec();
     let channels = le_u16(raw, 2);
     let block_align = le_u16(raw, 12);
-    let bytes_per_sample = if channels == 0 {
-        0
-    } else {
-        block_align / channels
-    };
+    let bytes_per_sample = block_align.checked_div(channels).unwrap_or(0);
 
     let extensible = tag == 0xFFFE;
     let channel_mask = if extensible && raw.len() >= 24 {
@@ -402,10 +400,7 @@ fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
     if bytes_per_sample == 0 || bytes_per_sample > 4 {
         return err(
             ErrorCode::UnsupportedBitDepth,
-            format!(
-                "sample container of {} bytes is not supported",
-                bytes_per_sample
-            ),
+            format!("sample container of {bytes_per_sample} bytes is not supported"),
         );
     }
     if spec.bits_per_sample == 0
@@ -440,6 +435,7 @@ fn finalize(
     f: &FmtInfo,
     data_offset: usize,
     data_len: u32,
+    riff_end: u64,
     tags: Vec<(String, String)>,
 ) -> Result<WavHeader> {
     let mut header = WavHeader {
@@ -456,6 +452,7 @@ fn finalize(
         channel_mask: f.channel_mask,
         data_offset,
         data_len,
+        riff_end,
         tags,
     };
     if header.channels == 0 {
@@ -479,8 +476,8 @@ fn finalize(
 }
 
 /// Maps a RIFF INFO id to a Vorbis comment field name.
-fn info_to_vorbis(id: &[u8; 4]) -> Option<&'static str> {
-    Some(match id {
+fn info_to_vorbis(id: [u8; 4]) -> Option<&'static str> {
+    Some(match &id {
         b"INAM" => "TITLE",
         b"IART" => "ARTIST",
         b"IPRD" => "ALBUM",
@@ -527,7 +524,7 @@ pub(crate) fn parse_list(body: &[u8], tags: &mut Vec<(String, String)>) {
         let Some(end) = start.checked_add(len).filter(|e| *e <= body.len()) else {
             return;
         };
-        if let Some(key) = info_to_vorbis(&id) {
+        if let Some(key) = info_to_vorbis(id) {
             let used: usize = tags.iter().map(|(k, v)| k.len() + v.len()).sum();
             if tags.len() >= MAX_TAGS || used + len > MAX_TAG_BYTES {
                 return; // tags are best-effort; don't let a file blow up memory
@@ -553,15 +550,26 @@ pub(crate) fn is_chunk_id(id: &[u8]) -> bool {
 /// Where the next chunk starts after an odd-sized chunk ending at `end`.
 ///
 /// RIFF requires a pad byte after odd-sized chunks. Some writers omit it,
-/// and some fill it with garbage. Skip it unless the bytes at `end` already
-/// look like the next chunk id. With fewer than four bytes left there is no
-/// next chunk either way.
+/// and some fill it with garbage, even printable garbage such as a space.
+/// Both positions are looked at: a zero byte is always a pad; otherwise the
+/// position whose four bytes look like a chunk id wins, and if both do, a
+/// well-known id at `end` means the pad is missing. Needs five bytes after
+/// `end` to decide; with fewer there is no next chunk either way.
 fn after_pad(buf: &[u8], end: usize) -> usize {
-    match buf.get(end..end + 4) {
-        Some(id) if is_chunk_id(id) => end,
-        _ => end + 1,
+    let id = |at: usize| buf.get(at..at + 4).filter(|id| is_chunk_id(id));
+    match (buf.get(end), id(end), id(end + 1)) {
+        (Some(0), _, _) | (_, None, _) => end + 1,
+        (_, Some(here), Some(_)) if !KNOWN_IDS.contains(&here) => end + 1,
+        _ => end,
     }
 }
+
+/// Chunk ids common enough to beat a spec-conforming pad byte in
+/// [`after_pad`].
+const KNOWN_IDS: [&[u8]; 12] = [
+    b"fmt ", b"data", b"LIST", b"fact", b"JUNK", b"junk", b"PAD ", b"bext", b"iXML", b"cue ",
+    b"smpl", b"id3 ",
+];
 
 /// Largest `LIST` chunk after the data whose tags are read; larger ones are
 /// skipped.
@@ -617,8 +625,8 @@ impl TrailingScanner {
             }
             let want = match self.list {
                 Some(total) => total,
-                // A possible pad byte is decided on the first four bytes.
-                None if self.pad => 4,
+                // A possible pad byte is decided on the first five bytes.
+                None if self.pad => 5,
                 None => 8,
             };
             let n = (want - self.buf.len()).min(input.len());

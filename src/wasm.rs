@@ -12,6 +12,7 @@ use crate::error::{Error, ErrorCode};
 use crate::options::{Dither, Options, OutputMode, ResampleQuality, Tags};
 use crate::pcm::{PcmFormat, PcmSpec};
 use crate::riff::SampleFormat;
+use std::fmt::Write;
 use wasm_bindgen::prelude::*;
 
 fn invalid(message: String) -> JsError {
@@ -214,7 +215,10 @@ fn json_str(s: &str, out: &mut String) {
         match c {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            // Writing to a String cannot fail.
+            c if (c as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
             c => out.push(c),
         }
     }
@@ -223,7 +227,8 @@ fn json_str(s: &str, out: &mut String) {
 
 fn info_to_json(i: &WavInfo) -> String {
     let mut s = format!(
-        "{{\"sampleRate\":{},\"channels\":{},\"bitsPerSample\":{},\"format\":\"{}\",\"frames\":{},\"durationSec\":{},\"channelMask\":{},\"tags\":{{",
+        "{{\"sampleRate\":{},\"channels\":{},\"bitsPerSample\":{},\"format\":\"{}\",\
+         \"frames\":{},\"durationSec\":{},\"channelMask\":{},\"tags\":{{",
         i.sample_rate,
         i.channels,
         i.bits_per_sample,
@@ -233,7 +238,8 @@ fn info_to_json(i: &WavInfo) -> String {
         },
         i.frames,
         i.duration_sec,
-        i.channel_mask.map_or_else(|| "null".to_owned(), |m| m.to_string()),
+        i.channel_mask
+            .map_or_else(|| "null".to_owned(), |m| m.to_string()),
     );
     for (n, (k, v)) in i.tags.iter().enumerate() {
         if n > 0 {

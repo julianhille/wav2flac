@@ -44,13 +44,23 @@ fn streaming_headers_unknown_length() {
 
 #[test]
 fn missing_or_misordered_chunks() {
-    let data_first = fixup_riff(b"RIFF\0\0\0\0WAVEdata\x02\0\0\0\0\0fmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0".to_vec());
+    let data_first = fixup_riff(
+        b"RIFF\0\0\0\0WAVEdata\x02\0\0\0\0\0\
+        fmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0"
+            .to_vec(),
+    );
     assert_eq!(code(&data_first), ErrorCode::InvalidWav);
     let no_data = fixup_riff(
         b"RIFF\0\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0".to_vec(),
     );
     assert_eq!(code(&no_data), ErrorCode::Truncated);
-    let dup = fixup_riff(b"RIFF\0\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0fmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\0\0\0\0".to_vec());
+    let dup = fixup_riff(
+        b"RIFF\0\0\0\0\
+        WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0\
+        fmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0\
+        data\0\0\0\0"
+            .to_vec(),
+    );
     assert_eq!(code(&dup), ErrorCode::InvalidWav);
 }
 
@@ -215,6 +225,29 @@ fn zero_data_size_followed_by_audio() {
     b.data_len_override = Some(0);
     b.riff_len_override = Some(36);
     assert_eq!(code(&b.build(&s)), ErrorCode::UnsupportedFormat);
+    // Audio that starts like a chunk id ("abcd") is still audio: the length
+    // that would follow doesn't fit in the RIFF size, patched or not.
+    let mut printable = vec![0x6261, 0x6463, 0x1234, 0x0567];
+    printable.extend_from_slice(&s);
+    for riff in [None, Some(36)] {
+        let mut b = WavBuilder::pcm(2, 44100, 16);
+        b.data_len_override = Some(0);
+        b.riff_len_override = riff;
+        let f = b.build(&printable);
+        assert_eq!(&f[44..48], b"abcd");
+        assert_eq!(code(&f), ErrorCode::UnsupportedFormat, "{riff:?}");
+        let e = encode_chunked(&f, Options::default(), &[1]).unwrap_err();
+        assert_eq!(e.code(), ErrorCode::UnsupportedFormat, "{riff:?}");
+    }
+    // Fewer bytes than a chunk header after an empty data chunk are audio too.
+    for n in 1..8 {
+        let mut b = WavBuilder::pcm(1, 44100, 16);
+        b.data_len_override = Some(0);
+        b.riff_len_override = Some(36);
+        let mut f = b.build(&[]);
+        f.extend(std::iter::repeat_n(7u8, n));
+        assert_eq!(code(&f), ErrorCode::UnsupportedFormat, "{n}");
+    }
     // An empty data chunk followed by a real chunk is fine.
     let mut b = WavBuilder::pcm(2, 44100, 16);
     b.chunks_after = vec![(*b"LIST", info_list(&[(b"INAM", b"empty")]))];
