@@ -24,6 +24,8 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- A worker job whose output could not be posted back, because the port had
+  closed, no longer keeps its wasm encoder alive.
 - The docs no longer promise that resampled output is byte-identical to a
   native build of the Rust crate. The wasm gives the same bytes on every host,
   but natively rubato uses the CPU's SIMD and the platform's libm, so a

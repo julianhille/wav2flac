@@ -584,6 +584,32 @@ describe('worker protocol', () => {
     await expect(w.wasmMemoryBytes()).rejects.toThrow('lost');
   });
 
+  it('frees the encoder when the host cannot post a stream chunk', async () => {
+    const ch = new MessageChannel();
+    const inner = wrap<ToWorker, FromWorker>(ch.port2);
+    const sent: FromWorker['t'][] = [];
+    serve({
+      ...inner,
+      // As a closed port does: every message from the first chunk on fails.
+      post: (m, t) => {
+        sent.push(m.t);
+        if (m.t === 'out' || m.t === 'error') throw new Error('port closed');
+        inner.post(m, t);
+      },
+    });
+    ch.port1.postMessage({
+      t: 'job',
+      id: 1,
+      args: normalizeOptions(undefined, true),
+      input: wav.slice(),
+      progress: false,
+      window: OUTPUT_WINDOW,
+    });
+    await vi.waitFor(() => expect(sent).toEqual(['out', 'error']));
+    await vi.waitFor(() => expect(liveSessions()).toBe(0));
+    ch.port1.close();
+  });
+
   it('refuses jobs after a message to the worker is lost', async () => {
     const ch = new MessageChannel();
     serve(wrap<ToWorker, FromWorker>(ch.port2));

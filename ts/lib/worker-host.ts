@@ -6,6 +6,7 @@
  */
 import { serializeError } from './errors.js';
 import { runBuffered, runStream } from './engine.js';
+import { ignore } from './platform.js';
 import type { Progress } from './options.js';
 import { probeBytes } from './probe.js';
 import type { FromWorker, Port, ToWorker } from './protocol.js';
@@ -130,12 +131,20 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
           job.credits--;
           send({ t: 'out', id: m.id, data: r.value }, r.value);
         }
+      } catch (e) {
+        // Frees the encoder, e.g. when `send()` throws because the port closed.
+        await reader.cancel(e).catch(ignore);
+        throw e;
       } finally {
         reader.releaseLock();
       }
       send({ t: 'done', id: m.id, data: null });
     } catch (e) {
-      send({ t: 'error', id: m.id, error: serializeError(e) });
+      try {
+        send({ t: 'error', id: m.id, error: serializeError(e) });
+      } catch {
+        // The port is closed: nobody is left to tell.
+      }
     } finally {
       jobs.delete(m.id);
     }
