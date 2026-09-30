@@ -109,12 +109,6 @@ export interface StdNotice {
   title: string;
   /** The copy of it in scripts/std-licenses/. */
   file: string;
-  /**
-   * Whether the JS banner reproduces it. The banner shortens the texts of the
-   * Apache License and the MIT permission notice to pointers, and names a
-   * notice it leaves out.
-   */
-  banner: boolean;
 }
 /** A part of the Rust standard library that is linked into the wasm. */
 export interface StdPart {
@@ -143,8 +137,8 @@ export const STD_PARTS: StdPart[] = [
     chosen: 'MIT',
     repository: 'https://github.com/rust-lang/rust',
     notices: [
-      { title: 'LICENSE-MIT', file: 'rust-LICENSE-MIT', banner: true },
-      { title: 'LICENSES/Unicode-3.0.txt', file: 'Unicode-3.0.txt', banner: false },
+      { title: 'LICENSE-MIT', file: 'rust-LICENSE-MIT' },
+      { title: 'LICENSES/Unicode-3.0.txt', file: 'Unicode-3.0.txt' },
     ],
   },
   {
@@ -152,7 +146,7 @@ export const STD_PARTS: StdPart[] = [
     license: 'MIT OR Apache-2.0',
     chosen: 'MIT',
     repository: 'https://github.com/alexcrichton/dlmalloc-rs',
-    notices: [{ title: 'LICENSE-MIT', file: 'dlmalloc-LICENSE-MIT', banner: true }],
+    notices: [{ title: 'LICENSE-MIT', file: 'dlmalloc-LICENSE-MIT' }],
   },
   {
     // Integer and float helpers, and the math functions of its libm.
@@ -160,8 +154,8 @@ export const STD_PARTS: StdPart[] = [
     license: 'MIT AND Apache-2.0 WITH LLVM-exception AND (MIT OR Apache-2.0)',
     repository: 'https://github.com/rust-lang/compiler-builtins',
     notices: [
-      { title: 'LICENSE.txt', file: 'compiler-builtins-LICENSE.txt', banner: true },
-      { title: 'libm/LICENSE.txt', file: 'libm-LICENSE.txt', banner: true },
+      { title: 'LICENSE.txt', file: 'compiler-builtins-LICENSE.txt' },
+      { title: 'libm/LICENSE.txt', file: 'libm-LICENSE.txt' },
     ],
   },
 ];

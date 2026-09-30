@@ -4,7 +4,7 @@
 The wasm links parts of the Rust standard library. cargo does not list them,
 so `scripts/crates.ts` names them (`STD_PARTS`), and this folder holds their
 license texts. `scripts/gen-licenses.ts` copies the texts into
-`THIRD_PARTY_LICENSES.txt` and the banner of the JS bundles.
+`THIRD_PARTY_LICENSES.txt`, which the build also puts into the wasm.
 
 The files are third-party texts and are kept as published. They come from
 Rust 1.98.1, the release in `rust-toolchain.toml`:

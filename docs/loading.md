@@ -97,5 +97,6 @@ first.
 
 ## Self-hosting and licenses
 
-If you host the `.wasm` yourself, keep its license notices. See
-[License](index.md#license) for where the package has them.
+The `.wasm` carries the license notices of the code in it, as its first
+section. Host it as it is, without tools that strip custom sections. See
+[Bundling and license notices](bundling.md).

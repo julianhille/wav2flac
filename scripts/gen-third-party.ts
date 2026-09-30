@@ -75,13 +75,10 @@ const page = `<!-- SPDX-License-Identifier: 0BSD -->
 
 wav2flac itself is licensed 0BSD. The WebAssembly module also contains the
 Rust crates below, and the parts of the Rust standard library that they use.
-Their full license notices ship in the package as
-\`pkg/THIRD_PARTY_LICENSES.txt\` (\`wav2flac/THIRD_PARTY_LICENSES.txt\`), and
-each JS file of the package starts with a \`/*! @license */\` comment that
-lists them.
-
-The \`.wasm\` file itself carries no notices. If you host it yourself, for
-example on a CDN, you can put \`THIRD_PARTY_LICENSES.txt\` next to it.
+Their full license notices are in \`wav2flac.wasm\` itself, as its first
+section, and in the package as \`pkg/THIRD_PARTY_LICENSES.txt\`
+(\`wav2flac/THIRD_PARTY_LICENSES.txt\`). See
+[Bundling and license notices](bundling.md).
 
 ## Compiled into wav2flac.wasm
 

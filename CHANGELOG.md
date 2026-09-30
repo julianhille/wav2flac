@@ -12,8 +12,24 @@ links are collected at the bottom of this file.
 
 ### Added
 
+- `wav2flac.wasm` carries the license notices of the Rust crates in it: the
+  text of `THIRD_PARTY_LICENSES.txt`, as a custom section named `license` at
+  the start of the file. It is plain text, so `head` or `strings` shows it as
+  the first lines of the file, and
+  `WebAssembly.Module.customSections(module, 'license')` returns it. Engines
+  ignore the section. Vite and webpack copy the wasm as it is, so the
+  notices go wherever the wasm goes, with nothing to configure. The wasm
+  grows from 165 KB to 426 KB, or from 72 KB to 87 KB gzipped.
 - `wav2flac/THIRD_PARTY_LICENSES.txt` resolves to the notices file in the
-  package, for tools that copy it next to a bundle or a self-hosted `.wasm`.
+  package, for tools and docs that want the text.
+- Docs: a page on the license notices when bundling or hosting the wasm
+  yourself.
+
+### Changed
+
+- The JS bundles no longer start with a `/*! @license */` comment. The
+  notices it listed are in the wasm now, which has them in full. Before,
+  bundlers such as Vite dropped the comment, and the notices with it.
 
 ### Fixed
 
@@ -57,12 +73,6 @@ links are collected at the bottom of this file.
   the third-party page, and is gone from the generated API reference, where
   it led to a 404.
 - Docs site: every Python package of the build is pinned, not only MkDocs.
-- License banner: a crate's MIT permission notice is shortened to the pointer
-  whatever its line breaks, including the common break before "THE
-  SOFTWARE.", and every copy of it is. The banner prints a fixed copy of the
-  notice instead of the first one it found.
-- License banner: it points to the Unicode-3.0 notice of the Rust standard
-  library, which it leaves out.
 - Third-party notices: the Rust version they name comes from
   `rust-toolchain.toml`, not from the `rustc` on the path, and the build
   fails when the standard library's license texts or the `rustc` that built
@@ -74,9 +84,9 @@ links are collected at the bottom of this file.
   `prepareStackTrace`, `stackTraceLimit`). A `@throws` tag with a union type
   or without text renders cleanly, and the docs build fails when an
   exported type would be published as `any`.
-- README: shipping `THIRD_PARTY_LICENSES.txt` is optional, and the README
-  says where it is. The license section names the licenses of the Rust
-  standard library parts (Unicode-3.0, LLVM exception).
+- README: the license section names the licenses of the Rust standard
+  library parts (Unicode-3.0, LLVM exception), and says where the notices
+  are.
 
 ## [1.0.0-rc.3] - 2026-09-29
 

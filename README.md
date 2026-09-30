@@ -59,8 +59,8 @@ npm install wav2flac
 The wasm binary is found automatically: next to the JS in Node, and via
 `new URL(…, import.meta.url)` in browsers and in bundlers such as Vite and
 webpack. To host it yourself, call `init(urlOrBytes)` first. The binary
-itself carries no license notices; you can put the package's
-`THIRD_PARTY_LICENSES.txt` next to it (see [License](#license)). To give up
+carries the license notices of the code in it (see [License](#license)), so
+host it as it is. To give up
 on a download that stalls, pass a signal:
 `init(url, { signal: AbortSignal.timeout(10_000) })`. See the
 [loading guide](https://github.com/julianhille/wav2flac/blob/main/docs/loading.md).
@@ -231,6 +231,7 @@ clear message. Nothing is ever converted lossily unless you ask for it.
 
 - [Raw PCM input](https://github.com/julianhille/wav2flac/blob/main/docs/pcm.md)
 - [Concurrent encodes](https://github.com/julianhille/wav2flac/blob/main/docs/concurrency.md): what happens when you start several at once
+- [Bundling and license notices](https://github.com/julianhille/wav2flac/blob/main/docs/bundling.md): what your build must keep
 - How-to guides ([all](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/index.md)):
   - [Encode in parallel with a worker pool](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/parallel-encoding.md)
   - [Encode one at a time with a FIFO queue](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/fifo-queue.md)
@@ -252,13 +253,14 @@ they use: MIT or Apache-2.0, Unicode-3.0 for the Unicode tables in `core`,
 and Apache-2.0 with the LLVM exception for `compiler_builtins`. If you
 redistribute the `.wasm`, keep their notices.
 
-Every JS file of the package starts with a `/*! @license */` comment that
-lists the crates and reproduces the BSD-3-Clause and MIT notices. Not every
-bundler keeps such comments (Vite, for one, drops them from its output
-chunks). The package also has every notice in full, in
-`pkg/THIRD_PARTY_LICENSES.txt`, which resolves as
-`wav2flac/THIRD_PARTY_LICENSES.txt`. You don't have to ship that file, but
-you can, for example next to a bundle or a self-hosted `.wasm`.
+`wav2flac.wasm` carries their notices in full: its first section, which
+engines ignore, holds the text of `THIRD_PARTY_LICENSES.txt` as plain text,
+so `head -c 3000 wav2flac.wasm` shows it as the first lines of the file.
+`WebAssembly.Module.customSections(module, 'license')` returns it. Bundlers
+copy the wasm as it is, so the notices go wherever the wasm goes. The package also has
+the text as a file, `pkg/THIRD_PARTY_LICENSES.txt` (`wav2flac/THIRD_PARTY_LICENSES.txt`). See
+[Bundling and license
+notices](https://github.com/julianhille/wav2flac/blob/main/docs/bundling.md).
 
 The [third-party components](https://github.com/julianhille/wav2flac/blob/main/docs/third-party.md)
 page lists every crate with its version, license and source.

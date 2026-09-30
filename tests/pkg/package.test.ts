@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { NOTICES_SECTION, readLeb128 } from '../../scripts/wasm-section.js';
 import { collect, makeWav } from '../helpers/wav.js';
 
 type Api = typeof import('../../ts/index.js');
@@ -18,13 +19,6 @@ const wav = makeWav({ frames: 44100, channels: 2, bits: 16, seed: 7 });
 
 /** The Rust release in rust-toolchain.toml, which the notices name. */
 const rustRelease = /^channel = "([^"]+)"/m.exec(readFileSync(join(root, 'rust-toolchain.toml'), 'utf8'))?.[1];
-
-/**
- * The words of a text, whatever its line breaks and indentation.
- * @param t The text.
- * @returns The text with every run of whitespace as one space.
- */
-const words = (t: string): string => t.replace(/\s+/g, ' ').trim();
 
 /**
  * Splits THIRD_PARTY_LICENSES.txt into its sections, one per component.
@@ -37,32 +31,6 @@ function noticeSections(text: string): (heading: string) => string {
     const found = sections.filter((s) => s.split('\n')[0] === heading || s.startsWith(`${heading} `));
     expect(found.map((s) => s.split('\n')[0]), heading).toHaveLength(1);
     return found[0] ?? '';
-  };
-}
-
-/**
- * Splits the license banner into its notices, each under a heading line such
- * as ` * libflac-rs 0.143.1 (BSD-3-Clause):`.
- * @param head The banner.
- * @param file For messages.
- * @returns A lookup by heading, without the license in parentheses.
- */
-function bannerBlocks(head: string, file: string): (heading: string) => string {
-  const blocks = new Map<string, string[]>();
-  let current: string[] = [];
-  for (const line of head.split('\n').map((l) => l.replace(/^ \*(?: |$)/, ''))) {
-    const heading = /^(\S.*?) \(.+\):$|^(MIT License, the permission notice):$/.exec(line);
-    if (heading === null) {
-      current.push(line);
-      continue;
-    }
-    const key = heading[1] ?? heading[2] ?? '';
-    expect(blocks.has(key), `${file}: ${key} twice`).toBe(false);
-    blocks.set(key, (current = []));
-  }
-  return (heading) => {
-    expect(blocks.has(heading), `${file}: no notice for ${heading}`).toBe(true);
-    return (blocks.get(heading) ?? []).join('\n');
   };
 }
 
@@ -140,55 +108,27 @@ describe('installed package', () => {
     expect(section(`${std} compiler_builtins, libm`)).toContain('Copyright © 2005-2020 Rich Felker, et al.');
   });
 
-  it('puts the BSD and MIT notices at the head of every bundle', () => {
-    const notices = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
-    const mit = /Permission is hereby granted, free of charge,[\s\S]*?SOFTWARE\./.exec(
-      noticeSections(notices)(`Rust standard library ${rustRelease}: dlmalloc`),
-    )?.[0];
-    expect(mit).toBeDefined();
-    const mitPointer = '[The permission notice of the MIT License is at the end of this comment.]';
+  it('puts the notices first in the wasm, as THIRD_PARTY_LICENSES.txt has them', () => {
+    const notices = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'));
+    const wasm = readFileSync(join(installed, 'pkg/wav2flac.wasm'));
+    // The header, then a custom section (id 0), its size and its name.
+    expect([...wasm.subarray(0, 9)]).toEqual([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 0]);
+    const size = readLeb128(wasm, 9);
+    const name = Buffer.from(NOTICES_SECTION);
+    const start = size.next + 1 + name.length;
+    expect(wasm.subarray(size.next, start)).toEqual(Buffer.concat([Uint8Array.of(name.length), name]));
+    expect(size.next + size.value - start).toBe(notices.length);
+    expect(wasm.subarray(start, start + notices.length)).toEqual(notices);
+    expect(String(wasm.subarray(start, start + 48))).toBe('Third-party software compiled into wav2flac.wasm');
+    const sections = WebAssembly.Module.customSections(new WebAssembly.Module(wasm), NOTICES_SECTION);
+    expect(sections.map((b) => Buffer.from(b))).toEqual([notices]);
+  });
+
+  it('keeps license comments out of the bundles', () => {
     for (const f of ['esm/index.js', 'esm/worker.js', 'cjs/index.cjs', 'cjs/worker.cjs']) {
-      const head = readFileSync(join(installed, 'pkg', f), 'utf8').split('*/')[0] as string;
-      expect(head, f).toMatch(/^\/\/ SPDX-License-Identifier: 0BSD\n\/\*!\n \* @license\n/);
-      const block = bannerBlocks(head, f);
-
-      // Every crate licensed only under a BSD or MIT license has its notice there.
-      const listed = [...head.matchAll(/^ \* {3}(\S+) (\S+) \(([^)]*)\)$/gm)];
-      expect(listed.length, f).toBeGreaterThan(10);
-      for (const [, name, version, license] of listed) {
-        if (/^(BSD-[23]-Clause|MIT)$/.test(license ?? '')) expect(block(`${name} ${version}`), f).toMatch(/Copyright/);
-      }
-      const flac = block(listed.find((m) => m[1] === 'libflac-rs')?.slice(1, 3).join(' ') ?? 'libflac-rs');
-      expect(flac, f).toContain('Copyright (c) 2026, Dani Sarfati');
-      expect(flac, f).toContain('Copyright (C) 2000-2009 Josh Coalson, Copyright (C) 2011-2023 Xiph.Org');
-      expect(flac, f).toContain('2. Redistributions in binary form must reproduce the above copyright notice,');
-      expect(flac, f).toContain('THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"');
-      for (const m of listed.filter((l) => l[3] === 'MIT')) {
-        expect(block(`${m[1]} ${m[2]}`), f).toContain(mitPointer);
-      }
-
-      // The parts of the Rust standard library, with pointers for the long texts.
-      const std = `Rust standard library ${rustRelease}:`;
-      const core = block(`${std} core, alloc, std`);
-      expect(core, f).toContain('Copyright (c) The Rust Project Contributors');
-      expect(core, f).toContain(mitPointer);
-      expect(core, f).toContain('[The notice LICENSES/Unicode-3.0.txt is in THIRD_PARTY_LICENSES.txt.]');
-      expect(block(`${std} dlmalloc`), f).toContain('Copyright (c) 2014 Alex Crichton');
-      expect(block(`${std} dlmalloc`), f).toContain(mitPointer);
-      const builtins = block(`${std} compiler_builtins, libm: LICENSE.txt`);
-      expect(builtins, f).toContain('      Copyright (c) 2009-2016 by the contributors listed in CREDITS.TXT');
-      expect(builtins, f).toContain(mitPointer);
-      expect(words(builtins), f).toContain(
-        '[The text of the Apache License, Version 2.0 and of the LLVM exceptions to it is in THIRD_PARTY_LICENSES.txt.]',
-      );
-      const libm = block(`${std} compiler_builtins, libm: libm/LICENSE.txt`);
-      expect(libm, f).toContain('    Copyright (c) 2018 Jorge Aparicio');
-      expect(words(libm), f).toContain('[The text of the Apache License, Version 2.0 is in THIRD_PARTY_LICENSES.txt.]');
-      expect(head, f).not.toContain('TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION');
-
-      // One copy of the MIT permission notice, at the end, serves every notice that points to it.
-      expect(head.split('Permission is hereby granted, free of charge').length - 1, f).toBe(1);
-      expect(words(block('MIT License, the permission notice')), f).toBe(words(mit ?? ''));
+      const text = readFileSync(join(installed, 'pkg', f), 'utf8');
+      expect(text, f).toMatch(/^\/\/ SPDX-License-Identifier: 0BSD\n/);
+      expect(text, f).not.toMatch(/@license|@preserve|\/\*!/);
     }
   });
 

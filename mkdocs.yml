@@ -25,6 +25,7 @@ hooks:
 nav:
   - Home: index.md
   - Loading the wasm: loading.md
+  - Bundling and license notices: bundling.md
   - Raw PCM input: pcm.md
   - Concurrent encodes: concurrency.md
   - How-to:
