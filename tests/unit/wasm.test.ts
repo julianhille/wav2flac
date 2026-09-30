@@ -117,7 +117,7 @@ describe('init', () => {
   it('allows a retry after a failed init', async () => {
     const w = await fresh();
     await expect(w.init(new Response('nope', { status: 404, statusText: 'Not Found' }))).rejects.toThrow(/404/);
-    await expect(w.init(new Uint8Array([1, 2, 3]))).rejects.toThrow();
+    await expect(w.init(new Uint8Array([1, 2, 3]))).rejects.toThrow(WebAssembly.CompileError);
     await expect(w.init(42 as never)).rejects.toThrow(/needs wasm bytes/);
     await w.init(bytes);
     expect(w.isReady()).toBe(true);
@@ -371,8 +371,8 @@ describe('init', () => {
     const w = await fresh();
     const a = w.init(new Uint8Array([1, 2, 3]), { signal: new AbortController().signal });
     const b = w.init(undefined, { signal: new AbortController().signal });
-    await expect(a).rejects.toThrow();
-    await expect(b).rejects.toThrow();
+    await expect(a).rejects.toThrow(WebAssembly.CompileError);
+    await expect(b).rejects.toThrow(WebAssembly.CompileError);
   });
 
   it('encode and encodeStream stop waiting for a stalled load on abort', async () => {

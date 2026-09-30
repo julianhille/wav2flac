@@ -226,7 +226,7 @@ describe('fuzz: hostile input', () => {
     await fc.assert(fc.asyncProperty(fc.constantFrom(base, baseExt), fc.nat(), async (src, n) => {
       const cut = src.subarray(0, n % src.length);
       const r = await outcome(() => encodeSync(cut));
-      if ('code' in r) expect(['TRUNCATED', 'INVALID_WAV']).toContain(r.code);
+      expect('code' in r ? r.code : 'ok').toBeOneOf(['ok', 'TRUNCATED', 'INVALID_WAV']);
     }), params(100));
   });
 

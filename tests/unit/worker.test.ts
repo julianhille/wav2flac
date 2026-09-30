@@ -344,7 +344,7 @@ describe('worker protocol', () => {
   it('spawns a real worker by URL', async () => {
     const w = createWorkerEncoder({ url: new URL('../pkg-worker-missing.js', import.meta.url), wasm });
     open.push(w);
-    await expect(w.encode(wav.slice())).rejects.toThrow();
+    await expect(w.encode(wav.slice())).rejects.toThrow(/Cannot find module/);
   });
 
   it('fails pending jobs when a real worker exits unexpectedly', async () => {

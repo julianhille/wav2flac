@@ -222,7 +222,7 @@ describe('encode / encodeSync / encodeStream', () => {
         await encode(streamOf(wav, 4096), { signal: ac.signal, onProgress: () => ac.abort(reason) }).catch(() => 0);
       }],
       ['encodeSync', async () => encodeSync(wav)],
-      ['encodeSync, throws', async () => { expect(() => encodeSync(wav.subarray(0, 5001))).toThrow(); }],
+      ['encodeSync, throws', async () => { expect(() => encodeSync(wav.subarray(0, 5001))).toThrow(/input ended/); }],
       ['encodeSync, callback throws', async () => {
         expect(() => encodeSync(wav, { onProgress: () => { throw reason; } })).toThrow(reason);
       }],

@@ -54,10 +54,13 @@ describe('platform', () => {
     vi.useFakeTimers({ toFake: ['performance'] });
     try {
       const pacer = new p.Pacer();
+      let ticked = false;
+      setImmediate(() => { ticked = true; });
       await pacer.maybeYield();
+      expect(ticked).toBe(false);
       vi.advanceTimersByTime(p.YIELD_EVERY_MS);
-      vi.useRealTimers();
       await pacer.maybeYield();
+      expect(ticked).toBe(true);
     } finally {
       vi.useRealTimers();
     }
