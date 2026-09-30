@@ -9,7 +9,9 @@
 #   4. a GitHub release is created with the CHANGELOG section as its text and
 #      the tarball, the wasm and SHA256SUMS attached.
 # Releases are tagged on a release branch (e.g. `release/v1.0.0-rc.1`) whose
-# head bumps the versions and dates the CHANGELOG section.
+# head bumps the versions and dates the CHANGELOG section
+# (`node scripts/release.ts prepare X.Y.Z` makes that commit); the branch is
+# then merged into main with a merge commit.
 name: Release
 
 on:

@@ -4,8 +4,9 @@
 // `node scripts/release.ts prepare X.Y.Z` bumps the version in package.json,
 // package-lock.json, Cargo.toml and Cargo.lock, turns `## [Unreleased]` in
 // CHANGELOG.md into `## [X.Y.Z] - today` (with a fresh empty Unreleased
-// section and updated compare links) and commits. It never tags or pushes;
-// it prints the commands for that.
+// section and updated compare links) and commits. It runs on a fresh
+// `release/vX.Y.Z` branch at origin/main. It never tags or pushes; it prints
+// the commands for that.
 //
 // `node scripts/release.ts check vX.Y.Z [NOTES]` is run by the release
 // workflow: the tag must match every version, and CHANGELOG.md must have a
@@ -141,10 +142,15 @@ function prepare(v: string): void {
     fail('the working tree has uncommitted changes');
   }
   const git = (...args: string[]): string => execFileSync('git', args, { encoding: 'utf8' }).trim();
-  if (git('rev-parse', '--abbrev-ref', 'HEAD') !== 'main') fail('releases are cut from main');
+  // The release commit goes on its own branch, which is tagged and then
+  // merged into main (see .github/workflows/release.yml).
+  const branch = `release/v${v}`;
+  if (git('rev-parse', '--abbrev-ref', 'HEAD') !== branch) {
+    fail(`releases are prepared on ${branch}: git switch -c ${branch} origin/main`);
+  }
   git('fetch', '--quiet', 'origin', 'main');
   if (git('rev-parse', 'HEAD') !== git('rev-parse', 'origin/main')) {
-    fail('main is not at origin/main; pull or push first');
+    fail(`${branch} is not at origin/main; start it from there`);
   }
   const log = read('CHANGELOG.md');
   const prev = releasedVersions(log).reduce<string | undefined>(
@@ -199,8 +205,13 @@ function prepare(v: string): void {
     execFileSync('git', ['checkout', '--', ...EDITED], { stdio: 'inherit' });
     throw e;
   }
+  // A merge commit (not a squash) keeps the tag in main's history, so the next
+  // release's compare link starts at an ancestor.
   console.log(
-    `release: committed. Review, then:\n  git tag -a v${v} -m v${v}\n  git push origin main v${v}`,
+    `release: committed. Review, then:\n` +
+      `  git tag -a v${v} -m v${v}\n` +
+      `  git push origin release/v${v} v${v}\n` +
+      `and merge release/v${v} into main with a merge commit (not a squash).`,
   );
 }
 

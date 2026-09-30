@@ -10,6 +10,12 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `node scripts/release.ts prepare X.Y.Z` runs on a `release/vX.Y.Z` branch
+  started from `origin/main`, as the release workflow describes, and prints
+  the matching push command. It used to run only on `main`.
+
 ## [1.0.0-rc.4] - 2026-09-30
 
 ### Added
