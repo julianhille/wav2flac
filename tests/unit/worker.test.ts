@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Wav2FlacError } from '../../ts/lib/errors.js';
-import { encodeSync } from '../../ts/index.js';
+import { encodeStream, encodeSync } from '../../ts/index.js';
 import { liveSessions } from '../../ts/lib/engine.js';
 import type { FromWorker, ToWorker, WorkerPort } from '../../ts/lib/protocol.js';
 import { OUTPUT_WINDOW, transferOf } from '../../ts/lib/protocol.js';
@@ -494,6 +494,18 @@ describe('worker protocol', () => {
     // Nothing is pending, so the port no longer keeps the process alive.
     expect(held).toBe(false);
     await expect(w.probe(wav)).resolves.toMatchObject({ channels: 2 });
+  });
+
+  it('validates seekPointInterval in a stream but writes no seek table', async () => {
+    const { w } = pair();
+    const ref = await collect(encodeStream(wav));
+    expect(await collect(encodeStream(wav, { seekPointInterval: 1 }))).toEqual(ref);
+    expect(await collect(w.encodeStream(wav.slice(), { seekPointInterval: 1 }))).toEqual(ref);
+    for (const s of [
+      encodeStream(wav, { seekPointInterval: -1 }),
+      w.encodeStream(wav.slice(), { seekPointInterval: -1 }),
+    ])
+      await expect(collect(s)).rejects.toMatchObject({ code: 'INVALID_OPTIONS' });
   });
 
   it('does not lock a stream when the signal is already aborted', async () => {

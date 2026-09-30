@@ -91,7 +91,8 @@ export async function encode(input: Input | PcmInput, options?: Options): Promis
  * frames as the consumer reads. Memory stays bounded for any input length.
  *
  * @param input WAV bytes or a stream of them; raw PCM with `options.pcm`.
- * @param options Encoder options (`seekPointInterval` does not apply).
+ * @param options Encoder options. `seekPointInterval` is validated but has no
+ * effect: a stream has no seek table.
  * @returns The FLAC stream. It never throws: every failure, including
  * invalid options, bad input and aborts, errors the stream instead.
  * @example
@@ -100,10 +101,7 @@ export async function encode(input: Input | PcmInput, options?: Options): Promis
  * await flac.pipeTo(fileWritable);
  * ```
  */
-export function encodeStream(
-  input: Input | PcmInput,
-  options?: Omit<Options, 'seekPointInterval'>,
-): ReadableStream<Bytes> {
+export function encodeStream(input: Input | PcmInput, options?: Options): ReadableStream<Bytes> {
   // Every failure errors the returned stream, so consumers handle one path.
   let prepared: ReturnType<typeof preparePcm>;
   try {

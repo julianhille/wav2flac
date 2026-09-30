@@ -36,10 +36,7 @@ export interface WorkerEncoder {
    */
   encode(input: Input | PcmInput, options?: Options): Promise<Bytes>;
   /** Like `encodeStream()`, but in the worker; with backpressure both ways. */
-  encodeStream(
-    input: Input | PcmInput,
-    options?: Omit<Options, 'seekPointInterval'>,
-  ): ReadableStream<Bytes>;
+  encodeStream(input: Input | PcmInput, options?: Options): ReadableStream<Bytes>;
   /** Like `probe()`, but in the worker. The header bytes are copied. */
   probe(input: Uint8Array | ArrayBuffer): Promise<WavInfo>;
   /**

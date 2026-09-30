@@ -92,7 +92,10 @@ export interface Options {
   ditherSeed?: number | undefined;
   /** Extra/overriding Vorbis comments (an empty string removes a field), or `false` to write no tags. */
   tags?: Record<string, string> | false | undefined;
-  /** Seconds between seek points; 0 = no seek table. Default 10. Buffered output only. */
+  /**
+   * Seconds between seek points; 0 = no seek table. Default 10. Buffered output
+   * only: `encodeStream()` validates it but writes no seek table.
+   */
   seekPointInterval?: number | undefined;
   /** Bytes of PADDING for later tag edits; 0 = none. Default 8192. */
   padding?: number | undefined;

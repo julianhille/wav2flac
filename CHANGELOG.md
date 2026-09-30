@@ -20,6 +20,10 @@ links are collected at the bottom of this file.
   the wasm that is already loaded, and rejects with an error if `init()` or
   `initSync()` hasn't finished yet, without starting or waiting for a load.
   Call `await init()` first.
+- `encodeStream()` and the worker encoder's `encodeStream()` take the full
+  `Options` type. `seekPointInterval` was already accepted at runtime (and
+  through any variable typed `Options`); it is validated but has no effect,
+  because a stream has no seek table.
 - Errors from a `createWorkerEncoder()` worker keep the worker's `stack` and
   their `cause`, and keep their type: a `RangeError`, `SyntaxError`,
   `WebAssembly.CompileError`, `LinkError` or `RuntimeError` is no longer
