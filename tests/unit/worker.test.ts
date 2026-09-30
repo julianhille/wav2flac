@@ -576,7 +576,10 @@ describe('worker protocol', () => {
     const lost = new Error('lost');
     hostPort.emit('messageerror', lost);
     await expect(running).rejects.toThrow('lost');
-    expect(toClient).toContainEqual({ t: 'fatal', error: { name: 'Error', message: 'lost' } });
+    expect(toClient).toContainEqual({
+      t: 'fatal',
+      error: expect.objectContaining({ name: 'Error', message: 'lost' }),
+    });
     await vi.waitFor(() => expect(cancels).toHaveLength(1));
     expect(cancels[0]).toMatchObject({ message: 'lost' });
     await vi.waitFor(() => expect(liveSessions()).toBe(0));
@@ -629,7 +632,7 @@ describe('worker protocol', () => {
     });
     ch.port1.postMessage({ t: 'stats', id: 3 });
     await vi.waitFor(() => expect(inbox).toHaveLength(4));
-    expect(inbox[0]).toEqual({ t: 'fatal', error: { name: 'Error', message: 'no module' } });
+    expect(inbox[0]).toMatchObject({ t: 'fatal', error: { name: 'Error', message: 'no module' } });
     for (const m of inbox.slice(1))
       expect(m).toMatchObject({ t: 'error', error: { message: 'no module' } });
     ch.port1.close();

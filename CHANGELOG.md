@@ -20,6 +20,11 @@ links are collected at the bottom of this file.
   the wasm that is already loaded, and rejects with an error if `init()` or
   `initSync()` hasn't finished yet, without starting or waiting for a load.
   Call `await init()` first.
+- Errors from a `createWorkerEncoder()` worker keep the worker's `stack` and
+  their `cause`, and keep their type: a `RangeError`, `SyntaxError`,
+  `WebAssembly.CompileError`, `LinkError` or `RuntimeError` is no longer
+  turned into a plain `Error`, any `DOMException` stays one, and another
+  error keeps its `name`.
 - The Rust crate's `Error::new` is `#[must_use]`.
 
 ### Fixed
