@@ -35,6 +35,12 @@ links are collected at the bottom of this file.
 - `probe()` on the worker encoder posts a copy of the header prefix of a Node
   `Buffer`. Before, it posted a view, which cloned the whole backing buffer
   on every try.
+- After a load from a `Response` (or a promise of one) failed or was given
+  up, `encode()` and the other calls that retry the load no longer load the
+  wasm from the default location next to the package, which you never
+  configured. The retry now rejects with an error asking for a new
+  `Response`, unless an earlier `init()` gave a URL, path, bytes or module,
+  which it then loads from as before.
 
 ## [1.0.0-rc.4] - 2026-09-30
 

@@ -72,7 +72,9 @@ directory, so the retry loads the same file after a single-page app navigated
 or the process changed directory. `init()` loads from its own
 copy of bytes, so you can reuse or transfer your buffer right after the call.
 A `Response` can be read only once, so after a load from a `Response` failed,
-pass a new one.
+pass a new one. Until you do, a retry without a source loads from the URL,
+path, bytes or module of an earlier load, or, if there was none, rejects
+with an error that asks for a new `Response`.
 
 A worker encoder loads the wasm once, when you create it. If that load fails,
 every job of that encoder rejects with its error; create a new encoder to try

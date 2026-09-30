@@ -258,6 +258,37 @@ describe('init', () => {
   });
 
   it.each([
+    ['a Response', () => new Response('busy', { status: 503, statusText: 'Unavailable' })],
+    ['a Response promise', () => Promise.resolve(new Response(null, { status: 503 }))],
+  ])('does not retry %s from the default location', async (_, make) => {
+    const real = process;
+    const readFile = vi.fn(async () => bytes);
+    vi.stubGlobal(
+      'process',
+      new Proxy(real, {
+        get: (t, k) =>
+          k === 'getBuiltinModule'
+            ? (id: string) => (id === 'fs' ? { promises: { readFile } } : real.getBuiltinModule(id))
+            : Reflect.get(t, k),
+      }),
+    );
+    const fetch = vi.fn(async () => new Response(bytes));
+    vi.stubGlobal('fetch', fetch);
+    const w = await fresh();
+    await expect(w.init(make())).rejects.toThrow(/503/);
+    // What encode() does: init() without a source.
+    await expect(w.init()).rejects.toThrow(/new Response/);
+    await expect(w.init(undefined, { signal: new AbortController().signal })).rejects.toThrow(
+      /new Response/,
+    );
+    expect(readFile).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(w.isReady()).toBe(false);
+    await w.init(new Response(bytes));
+    expect(w.isReady()).toBe(true);
+  });
+
+  it.each([
     // A view that doesn't start at the start of its buffer.
     [
       'a view',

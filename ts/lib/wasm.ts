@@ -40,11 +40,17 @@ let compiled: WebAssembly.Module | undefined;
 let memory: WebAssembly.Memory | undefined;
 let pending: Load | undefined;
 /**
+ * Stands in for {@link configured} when the only source given so far was a
+ * `Response`: a retry cannot read it again, and must not load from the
+ * default location instead.
+ */
+const RESPONSE_READ = Symbol('Response read');
+/**
  * The last source that started a load and can be read again, for the loads
  * that retry after it failed or was abandoned; bytes are a copy. Cleared once
  * the module is ready.
  */
-let configured: WasmSource | undefined;
+let configured: WasmSource | typeof RESPONSE_READ | undefined;
 /** Whether init() is inside the glue's async instantiation. */
 let instantiating = false;
 
@@ -99,6 +105,15 @@ function bufferSource(bytes: ArrayBufferView | ArrayBufferLike): BufferSource {
 }
 
 /**
+ * Whether `source` is a `Response` or a promise of one.
+ * @param source The source.
+ * @returns `true` for a `Response` or a thenable.
+ */
+function isResponse(source: WasmSource): source is Response | PromiseLike<Response> {
+  return typeof source === 'object' && source !== null && ('ok' in source || 'then' in source);
+}
+
+/**
  * Compiles a module from any {@link WasmSource}.
  * @param source The source.
  * @param signal Cancels a fetch or file read started here.
@@ -114,12 +129,8 @@ async function compile(source: WasmSource, signal: AbortSignal): Promise<WebAsse
     if (url.protocol === 'file:' && isNode())
       return WebAssembly.compile(await readFileUrl(url, signal));
     res = fetch(url, { signal });
-  } else if (
-    typeof source === 'object' &&
-    source !== null &&
-    ('ok' in source || 'then' in source)
-  ) {
-    res = source as Response | PromiseLike<Response>;
+  } else if (isResponse(source)) {
+    res = source;
   } else {
     throw new TypeError(
       'wav2flac: init() needs wasm bytes, a WebAssembly.Module, a URL, a path or a Response',
@@ -232,12 +243,14 @@ function waitFor(load: Load, signal: AbortSignal): Promise<void> {
  *
  * A retry loads from the `source` of that call. Without one, it loads from
  * the last URL, path, bytes or module that a load started with, so the
- * `init()` inside `encode()` retries your custom location. A relative URL or
- * path is resolved once, when its load starts, so the retry loads the same
- * file after the page navigated or the process changed directory. `init()`
- * loads from a copy of bytes, so you can reuse or transfer your buffer right
- * after the call. A `Response` can be read only once; after it failed, pass
- * a new one.
+ * `init()` inside `encode()` retries your custom location, never the default
+ * one. A relative URL or path is resolved once, when its load starts, so the
+ * retry loads the same file after the page navigated or the process changed
+ * directory. `init()` loads from a copy of bytes, so you can reuse or
+ * transfer your buffer right after the call. A `Response` can be read only
+ * once; after it failed, pass a new one. Until you do, a retry without a
+ * source rejects, unless an earlier load started from a URL, path, bytes or
+ * module.
  *
  * @param source Where to load the wasm from. Default: `wav2flac.wasm` next to
  *   the package's JS (read with `fs` in Node, `fetch`ed elsewhere).
@@ -270,7 +283,17 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
       return Promise.reject(e);
     }
     if (again !== undefined) configured = again;
-    pending = startLoad(again ?? source ?? configured ?? defaultWasmUrl());
+    else if (source !== undefined && isResponse(source)) configured ??= RESPONSE_READ;
+    const from = again ?? source ?? configured ?? defaultWasmUrl();
+    if (from === RESPONSE_READ) {
+      return Promise.reject(
+        new Error(
+          'wav2flac: the wasm Response passed to init() was read by a load that did not ' +
+            'finish; call init() with a new Response or a URL to retry',
+        ),
+      );
+    }
+    pending = startLoad(from);
   }
   const load = pending;
   if (signal === undefined) {
