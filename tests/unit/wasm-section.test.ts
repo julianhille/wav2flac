@@ -69,6 +69,12 @@ describe('withFirstSection', () => {
     expect(() => withFirstSection(wasm.subarray(0, 100), NOTICES_SECTION, new Uint8Array())).toThrow(
       /runs past the end/,
     );
+    // A custom section of 1 byte whose name claims 7, followed by more bytes.
+    const tooShort = Uint8Array.from([...wasm.subarray(0, 8), 0, 1, 7, 0, 8, 7,
+      ...new TextEncoder().encode(NOTICES_SECTION)]);
+    expect(() => withFirstSection(tooShort, NOTICES_SECTION, new Uint8Array())).toThrow(
+      /name runs past the section/,
+    );
   });
 
   it('refuses to add the section twice', () => {

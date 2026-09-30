@@ -48,7 +48,7 @@ export function readLeb128(bytes: Uint8Array, at: number): { value: number; next
  * The names of a module's custom sections, wherever they are.
  * @param wasm The module, starting with its header.
  * @returns The names, in order.
- * @throws {RangeError} If a section runs past the end.
+ * @throws {RangeError} If a section runs past the end, or its name past the section.
  */
 function customNames(wasm: Uint8Array): string[] {
   const names: string[] = [];
@@ -58,6 +58,7 @@ function customNames(wasm: Uint8Array): string[] {
     if (end > wasm.length) throw new RangeError('section runs past the end');
     if (wasm[at] === CUSTOM) {
       const name = readLeb128(wasm, size.next);
+      if (name.next + name.value > end) throw new RangeError('section name runs past the section');
       names.push(new TextDecoder().decode(wasm.subarray(name.next, name.next + name.value)));
     }
     at = end;
