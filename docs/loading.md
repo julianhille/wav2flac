@@ -24,6 +24,11 @@ import { init } from 'wav2flac';
 await init(new URL('/assets/wav2flac.wasm', location.href));
 ```
 
+In Node a string without a URL scheme (`https:`, `file:`, ...) is a file
+path, even where a global `location` exists (jsdom, Deno with `--location`);
+in a browser it is a URL relative to the page. Pass a `URL` to fetch over
+HTTP from Node.
+
 Only the call that starts a load chooses its source. Later calls share the
 load already in progress and ignore their argument. A retry after a failed or
 abandoned load (see [Retrying](#retrying)) loads from your source again.

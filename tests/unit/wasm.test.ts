@@ -402,6 +402,15 @@ describe('init', () => {
       );
     });
     vi.stubGlobal('location', { href: 'https://app.example/editor/' });
+    // A browser: no Node, so the string is a URL, not a file path.
+    const real = process;
+    vi.stubGlobal(
+      'process',
+      new Proxy(real, {
+        get: (t, k) =>
+          k === 'versions' ? { ...real.versions, node: undefined } : Reflect.get(t, k),
+      }),
+    );
     const w = await fresh();
     await expect(w.init('wav2flac.wasm')).rejects.toThrow(/503/);
     // A single-page app navigates (history.pushState) before encode() retries.
@@ -412,6 +421,19 @@ describe('init', () => {
       'https://app.example/editor/wav2flac.wasm',
       'https://app.example/editor/wav2flac.wasm',
     ]);
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('reads a path as a file in Node, also where a location exists', async () => {
+    // jsdom and Deno --location define a location; a path must not become a fetch.
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('location', { href: 'http://localhost:3000/' });
+    const w = await fresh();
+    await expect(w.init('nope/wav2flac.wasm')).rejects.toThrow(/ENOENT/);
+    await expect(w.init('/nope/wav2flac.wasm')).rejects.toThrow(/ENOENT/);
+    await w.init(WASM);
+    expect(fetch).not.toHaveBeenCalled();
     expect(w.isReady()).toBe(true);
   });
 

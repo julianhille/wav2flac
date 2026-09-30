@@ -19,6 +19,9 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- In Node, `init()` reads a string without a URL scheme as a file path also
+  where a global `location` exists, as in jsdom or Deno with `--location`. It
+  used to resolve the path against `location.href` and fetch it over HTTP.
 - A `WAVE_FORMAT_EXTENSIBLE` file whose `fmt ` chunk is longer than 40 bytes
   (extra bytes after the standard fields, a `cbSize` above 22, or an odd
   size) is encoded. It used to fail with `INVALID_WAV`.

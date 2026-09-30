@@ -106,8 +106,9 @@ async function readFileUrl(url: URL, signal: AbortSignal): Promise<Uint8Array<Ar
 }
 
 /**
- * Resolves a URL string: relative to the page in browsers, and in Node a
- * string that has no URL scheme (`file:`, `https:`, ...) is a file path.
+ * Resolves a URL string: in Node a string that has no URL scheme (`file:`,
+ * `https:`, ...) is a file path, also where a `location` exists (jsdom, Deno
+ * `--location`); elsewhere it is relative to the page.
  * @param source The URL or path.
  * @returns The URL.
  * @throws {TypeError} For strings that are neither.
@@ -115,12 +116,12 @@ async function readFileUrl(url: URL, signal: AbortSignal): Promise<Uint8Array<Ar
 function toUrl(source: string | URL): URL {
   // A URL of another realm is copied into this one; its string is its href.
   if (typeof source !== 'string') return source instanceof URL ? source : new URL(String(source));
-  if (typeof location === 'object' && location !== null) return new URL(source, location.href);
   // A Windows drive path ("C:\\x.wasm") parses as a URL with scheme "c"; only
   // schemes of two or more characters count as URLs in Node.
   if (isNode() && !/^[a-z][a-z0-9+.-]+:/i.test(source)) {
     return builtin<typeof import('node:url')>('url').pathToFileURL(source);
   }
+  if (typeof location === 'object' && location !== null) return new URL(source, location.href);
   if (URL.canParse(source)) return new URL(source);
   throw new TypeError(
     `wav2flac: cannot resolve wasm URL "${source}" (no page to resolve it against)`,
