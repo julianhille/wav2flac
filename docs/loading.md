@@ -66,7 +66,10 @@ next call.
 
 A retry loads from the source passed to that call. Without one, as in
 `encode()`, it loads from the last URL, path, bytes or module that a load
-started with, not from the default location. `init()` loads from its own
+started with, not from the default location. A relative URL or path is
+resolved once, when its load starts, against the page URL or the current
+directory, so the retry loads the same file after a single-page app navigated
+or the process changed directory. `init()` loads from its own
 copy of bytes, so you can reuse or transfer your buffer right after the call.
 A `Response` can be read only once, so after a load from a `Response` failed,
 pass a new one.

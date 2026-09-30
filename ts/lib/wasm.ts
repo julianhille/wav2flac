@@ -232,10 +232,12 @@ function waitFor(load: Load, signal: AbortSignal): Promise<void> {
  *
  * A retry loads from the `source` of that call. Without one, it loads from
  * the last URL, path, bytes or module that a load started with, so the
- * `init()` inside `encode()` retries your custom location. `init()` loads
- * from a copy of bytes, so you can reuse or transfer your buffer right after
- * the call. A `Response` can be read only once; after it failed, pass a new
- * one.
+ * `init()` inside `encode()` retries your custom location. A relative URL or
+ * path is resolved once, when its load starts, so the retry loads the same
+ * file after the page navigated or the process changed directory. `init()`
+ * loads from a copy of bytes, so you can reuse or transfer your buffer right
+ * after the call. A `Response` can be read only once; after it failed, pass
+ * a new one.
  *
  * @param source Where to load the wasm from. Default: `wav2flac.wasm` next to
  *   the package's JS (read with `fs` in Node, `fetch`ed elsewhere).
@@ -279,15 +281,18 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
 }
 
 /**
- * What a retry of a load from `source` loads from: a path or a module as it
- * is, and a copy of a `URL` or of bytes, which the caller may change or
- * transfer meanwhile. A `Response` can be read only once, so it has none.
+ * What a retry of a load from `source` loads from: a module as it is, a URL
+ * string or path resolved now, since the page location or the cwd may change
+ * before the retry, and a copy of a `URL` or of bytes, which the caller may
+ * change or transfer meanwhile. A `Response` can be read only once, so it has
+ * none.
  * @param source The source.
  * @returns The source for a retry, or `undefined`.
- * @throws {TypeError} For detached bytes.
+ * @throws {TypeError} For detached bytes, or a string that is no URL.
  */
 function retrySource(source: WasmSource): WasmSource | undefined {
-  if (typeof source === 'string' || source instanceof WebAssembly.Module) return source;
+  if (source instanceof WebAssembly.Module) return source;
+  if (typeof source === 'string') return toUrl(source);
   if (source instanceof URL) return new URL(source.href);
   if (!ArrayBuffer.isView(source) && !isBuffer(source)) return undefined;
   if (isDetached(source))

@@ -15,6 +15,12 @@ links are collected at the bottom of this file.
 - `node scripts/release.ts prepare X.Y.Z` runs on a `release/vX.Y.Z` branch
   started from `origin/main`, as the release workflow describes, and prints
   the matching push command. It used to run only on `main`.
+- A retry of `init('wav2flac.wasm')`, or of a relative path in Node, loads the
+  same file as the first attempt. Before, the retry resolved the string again,
+  against the page URL or the current directory at that time: after a
+  single-page app navigated, `encode()` fetched the wasm from the new route,
+  got the HTML page and failed with a `CompileError`. rc.3 did not have this
+  bug.
 
 ## [1.0.0-rc.4] - 2026-09-30
 

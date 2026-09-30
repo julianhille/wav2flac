@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: 0BSD
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
@@ -342,6 +344,63 @@ describe('init', () => {
       'https://cdn.example/wav2flac.wasm',
       'https://cdn.example/wav2flac.wasm',
     ]);
+  });
+
+  it('retries a relative URL resolved against the page it was given on', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', (url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(
+        urls.length === 1 ? new Response(null, { status: 503 }) : new Response(bytes),
+      );
+    });
+    vi.stubGlobal('location', { href: 'https://app.example/editor/' });
+    const w = await fresh();
+    await expect(w.init('wav2flac.wasm')).rejects.toThrow(/503/);
+    // A single-page app navigates (history.pushState) before encode() retries.
+    (globalThis as { location: { href: string } }).location.href =
+      'https://app.example/editor/project/42/';
+    await w.init();
+    expect(urls).toEqual([
+      'https://app.example/editor/wav2flac.wasm',
+      'https://app.example/editor/wav2flac.wasm',
+    ]);
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('retries a relative path resolved against the cwd it was given in', async () => {
+    const reads: string[] = [];
+    const readFile = async (p: URL): Promise<Uint8Array> => {
+      reads.push(p.href);
+      if (reads.length === 1) throw Object.assign(new Error('EIO: busy'), { code: 'EIO' });
+      return bytes;
+    };
+    const real = process;
+    vi.stubGlobal(
+      'process',
+      new Proxy(real, {
+        get: (t, k) =>
+          k === 'getBuiltinModule'
+            ? (id: string) => (id === 'fs' ? { promises: { readFile } } : real.getBuiltinModule(id))
+            : Reflect.get(t, k),
+      }),
+    );
+    const cwd = process.cwd();
+    const app = mkdtempSync(join(tmpdir(), 'wav2flac-'));
+    mkdirSync(join(app, 'sub'));
+    try {
+      process.chdir(app);
+      const w = await fresh();
+      await expect(w.init('w2f.wasm')).rejects.toThrow('EIO');
+      process.chdir(join(app, 'sub'));
+      await w.init();
+      const want = pathToFileURL(join(realpathSync(app), 'w2f.wasm')).href;
+      expect(reads).toEqual([want, want]);
+      expect(w.isReady()).toBe(true);
+    } finally {
+      process.chdir(cwd);
+      rmSync(app, { recursive: true });
+    }
   });
 
   it('lets the caller transfer its bytes right after the call', async () => {
