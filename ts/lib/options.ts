@@ -290,9 +290,13 @@ function normalizePcm(
     if (k !== 'sampleRate' && k !== 'channels' && k !== 'format')
       throw invalidOption(`unknown pcm option "${k}"`);
   }
-  for (const k of ['sampleRate', 'channels']) {
+  // Channel counts above 8 pass on to the core, which reports TOO_MANY_CHANNELS.
+  for (const [k, max] of [
+    ['sampleRate', 2 ** 32 - 1],
+    ['channels', Number.MAX_SAFE_INTEGER],
+  ] as const) {
     const n = p[k];
-    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 2 ** 32 - 1) {
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > max) {
       throw invalidOption(`pcm.${k} must be a positive integer`);
     }
   }

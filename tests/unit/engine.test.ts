@@ -61,11 +61,31 @@ describe('engine internals', () => {
     ['level', 256],
     ['maxInputBytes', 2 ** 53],
     ['pcmChannels', 1.5],
+    ['quality', 3],
+    ['quality', 256],
+    ['pcmFormat', 6],
+    ['pcmFormat', 256 + 5],
   ])('rejects %s = %d at the wasm boundary instead of wrapping it', (key, value) => {
     const base = normalizeOptions({ pcm: { sampleRate: 8000, channels: 1, format: 's16' } }, false);
     expect(() => new Session({ ...base, [key]: value })).toThrow(
       expect.objectContaining({ code: 'INVALID_OPTIONS' }),
     );
+  });
+
+  it.each([9, 65536, 2 ** 32])('reports TOO_MANY_CHANNELS for %d pcm channels', (channels) => {
+    const args = normalizeOptions({ pcm: { sampleRate: 8000, channels, format: 's16' } }, false);
+    expect(() => new Session(args)).toThrow(
+      expect.objectContaining({
+        code: 'TOO_MANY_CHANNELS',
+        message: expect.stringContaining(`${channels} channels`),
+      }),
+    );
+  });
+
+  it('refuses a pcm format that was never resolved', () => {
+    const args = normalizeOptions({ pcm: { sampleRate: 8000, channels: 1 } }, false);
+    expect(args.pcmFormat).toBe(-1);
+    expect(() => new Session(args)).toThrow(/pcm format not resolved/);
   });
 
   it('reports ENCODER_STATE for push after finish', () => {

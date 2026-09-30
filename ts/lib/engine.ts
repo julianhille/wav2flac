@@ -78,6 +78,8 @@ export class Session {
    * @throws {Wav2FlacError} `INVALID_OPTIONS` for out-of-range options.
    */
   constructor(a: EncoderArgs) {
+    // -1 (PCM, format not yet inferred) must be resolved by preparePcm first.
+    if (a.pcmFormat < 0) throw new Error('wav2flac: internal error: pcm format not resolved');
     try {
       this.#enc = new WasmEncoder(
         a.level,
@@ -94,7 +96,7 @@ export class Session {
         a.padding,
         a.maxInputBytes,
         a.streaming,
-        Math.max(a.pcmFormat, 0),
+        a.pcmFormat,
         a.pcmChannels,
         a.pcmRate,
         a.pcmTotalBytes,

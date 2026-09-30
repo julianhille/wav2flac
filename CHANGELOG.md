@@ -19,6 +19,9 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- `pcm.channels` above 65535 fails with `TOO_MANY_CHANNELS`, as 9 to 65535
+  channels already did. It used to fail with `INVALID_OPTIONS` and a message
+  naming an internal limit.
 - In Node, `init()` reads a string without a URL scheme as a file path also
   where a global `location` exists, as in jsdom or Deno with `--location`. It
   used to resolve the path against `location.href` and fetch it over HTTP.

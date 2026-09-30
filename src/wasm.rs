@@ -64,7 +64,7 @@ impl WasmEncoder {
         compression_level: f64,
         block_size: f64,
         sample_rate: f64,
-        resample_quality: u8,
+        resample_quality: f64,
         bits_per_sample: f64,
         dither: bool,
         dither_seed: f64,
@@ -75,7 +75,7 @@ impl WasmEncoder {
         padding: f64,
         max_input_bytes: f64,
         streaming: bool,
-        pcm_format: u8,
+        pcm_format: f64,
         pcm_channels: f64,
         pcm_rate: f64,
         pcm_total_bytes: f64,
@@ -101,10 +101,10 @@ impl WasmEncoder {
             compression_level: int("compressionLevel", compression_level, 255)? as u8,
             block_size: (block_size != 0).then_some(block_size as usize),
             sample_rate: (sample_rate != 0).then_some(sample_rate),
-            resample_quality: match resample_quality {
+            resample_quality: match int("resampleQuality", resample_quality, 2)? {
                 0 => ResampleQuality::Fast,
-                2 => ResampleQuality::Best,
-                _ => ResampleQuality::Balanced,
+                1 => ResampleQuality::Balanced,
+                _ => ResampleQuality::Best,
             },
             bits_per_sample: (bits_per_sample != 0).then_some(bits_per_sample),
             dither: if dither { Dither::Tpdf } else { Dither::None },
@@ -123,21 +123,28 @@ impl WasmEncoder {
                 OutputMode::Buffered
             },
         };
-        let format = match pcm_format {
+        let format = match int("pcm format code", pcm_format, 5)? {
             0 => None,
             1 => Some(PcmFormat::U8),
             2 => Some(PcmFormat::S16),
             3 => Some(PcmFormat::S24),
             4 => Some(PcmFormat::S32),
-            5 => Some(PcmFormat::F32),
-            n => return Err(invalid(format!("unknown pcm format code {n}"))),
+            _ => Some(PcmFormat::F32),
         };
         let inner = match format {
             None => Encoder::new(opts),
             Some(format) => {
+                let channels = int("pcm.channels", pcm_channels, MAX_SAFE_INTEGER)?;
+                // Past u16 the count is simply too many, as it is from 9 up.
+                let channels = u16::try_from(channels).map_err(|_| {
+                    js_err(&Error::new(
+                        ErrorCode::TooManyChannels,
+                        format!("{channels} channels (FLAC supports at most 8)"),
+                    ))
+                })?;
                 let spec = PcmSpec {
                     format,
-                    channels: int("pcm.channels", pcm_channels, u64::from(u16::MAX))? as u16,
+                    channels,
                     sample_rate: int32("pcm.sampleRate", pcm_rate)?,
                 };
                 let total = unset_or("pcm total length", pcm_total_bytes)?;
