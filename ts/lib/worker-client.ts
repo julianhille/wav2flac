@@ -184,6 +184,8 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
 
   const failAll = (e: Error): void => {
     dead ??= e;
+    // A copy: job.fail() runs the caller's code, which can add or end jobs.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const [id, job] of [...jobs]) {
       remove(id);
       job.fail(e);

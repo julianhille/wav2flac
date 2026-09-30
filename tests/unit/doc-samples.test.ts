@@ -111,6 +111,7 @@ describe('parallel-encoding.md', () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(StubWorker.all).toHaveLength(2);
       expect(StubWorker.all[0]!.dead).toBe(true);
+      // oxlint-disable-next-line vitest/valid-expect -- awaited after the timers advance
       const done = expect(next).resolves.toBe('flac(a)@2');
       await vi.advanceTimersByTimeAsync(10);
       await done;
@@ -205,6 +206,7 @@ describe('parallel-encoding.md', () => {
     vi.useFakeTimers();
     try {
       const pool = await createEncoderPool(1);
+      // oxlint-disable-next-line vitest/valid-expect -- awaited after the timers advance
       const job = expect(pool.encode('bad')).rejects.toThrow('not a WAV');
       await vi.advanceTimersByTimeAsync(0);
       await job;
