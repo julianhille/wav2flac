@@ -189,8 +189,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The build scripts are TypeScript run by Node ≥ 22.18; the package itself
-      # promises `engines.node`, so build on a current Node and test on the minimum.
+      # The build scripts are TypeScript run by Node ≥ 22.18 (`devEngines`); the
+      # package itself promises `engines.node`, so build on a current Node and
+      # test on the minimum.
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -215,8 +216,10 @@ jobs:
           node-version: ${{ steps.engines.outputs.version }}
       - name: Show the Node version
         run: node --version
+      # Not `npm run`: npm enforces devEngines (Node ≥ 22.18 to build) there and
+      # would refuse the minimum Node. `npx` doesn't check it.
       - name: Package tests (built ESM/CJS, worker, consumer types)
-        run: npm run test:pkg
+        run: npx vitest run --project pkg
 
   reproducible:
     name: Reproducible package build

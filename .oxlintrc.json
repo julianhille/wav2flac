@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: 0BSD
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "unicorn", "oxc", "import", "vitest", "promise", "node"],
