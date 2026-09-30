@@ -37,6 +37,16 @@
         "default": "./pkg/cjs/index.cjs"
       }
     },
+    "./min": {
+      "import": {
+        "types": "./pkg/esm/index.d.ts",
+        "default": "./pkg/esm/index.min.js"
+      },
+      "require": {
+        "types": "./pkg/cjs/index.d.cts",
+        "default": "./pkg/cjs/index.min.cjs"
+      }
+    },
     "./wasm": "./pkg/wav2flac.wasm",
     "./THIRD_PARTY_LICENSES.txt": "./pkg/THIRD_PARTY_LICENSES.txt",
     "./package.json": "./package.json"
@@ -48,7 +58,9 @@
   ],
   "sideEffects": [
     "./pkg/esm/worker.js",
-    "./pkg/cjs/worker.cjs"
+    "./pkg/esm/worker.min.js",
+    "./pkg/cjs/worker.cjs",
+    "./pkg/cjs/worker.min.cjs"
   ],
   "engines": {
     "node": ">=22.12"

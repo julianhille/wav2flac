@@ -8,6 +8,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { inspect } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
 import { NOTICES_SECTION, readLeb128 } from '../../scripts/wasm-section.js';
 import { collect, makeWav } from '../helpers/wav.js';
@@ -62,6 +64,14 @@ const installed = join(consumer, 'node_modules/wav2flac');
 
 const esm = (await import(join(installed, 'pkg/esm/index.js'))) as Api;
 const cjs = createRequire(join(consumer, 'index.js'))('wav2flac') as Api;
+// Through the package's exports, as a consumer resolves them.
+writeFileSync(join(consumer, 'min.mjs'), "export * from 'wav2flac/min';\n");
+const esmMin = (await import(join(consumer, 'min.mjs'))) as Api;
+const cjsMin = createRequire(join(consumer, 'index.js'))('wav2flac/min') as Api;
+
+/** Every published bundle, normal and minified. */
+const BUNDLES = ['esm/index.js', 'esm/worker.js', 'cjs/index.cjs', 'cjs/worker.cjs']
+  .flatMap((f) => [f, f.replace(/\.c?js$/, '.min$&')]);
 
 describe('installed package', () => {
   it('packs the license, the notices and the changelog, and nothing from the sources', () => {
@@ -72,8 +82,8 @@ describe('installed package', () => {
   });
 
   it('has no require() in the CommonJS build, so browser bundlers need no Node shims', () => {
-    for (const f of ['index.cjs', 'worker.cjs']) {
-      const src = readFileSync(join(installed, 'pkg/cjs', f), 'utf8');
+    for (const f of BUNDLES.filter((b) => b.startsWith('cjs/'))) {
+      const src = readFileSync(join(installed, 'pkg', f), 'utf8');
       expect(src, f).not.toMatch(/\brequire\s*\(/);
     }
   });
@@ -136,21 +146,63 @@ describe('installed package', () => {
     expect(text.match(/^```$/gm)?.length).toBe(text.match(/^```text$/gm)?.length);
   });
 
-  it.each([['ESM', esm], ['CJS', cjs]])('returns the notices from the wasm (%s)', async (_, api) => {
-    const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
-    await expect(api.thirdPartyLicenses()).resolves.toBe(text);
-  });
+  it.each([['ESM', esm], ['CJS', cjs], ['minified ESM', esmMin], ['minified CJS', cjsMin]])(
+    'returns the notices from the wasm (%s)', async (_, api) => {
+      const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
+      await expect(api.thirdPartyLicenses()).resolves.toBe(text);
+    },
+  );
 
   it('keeps license comments out of the bundles', () => {
-    for (const f of ['esm/index.js', 'esm/worker.js', 'cjs/index.cjs', 'cjs/worker.cjs']) {
+    for (const f of BUNDLES) {
       const text = readFileSync(join(installed, 'pkg', f), 'utf8');
       expect(text, f).toMatch(/^\/\/ SPDX-License-Identifier: 0BSD\n/);
       expect(text, f).not.toMatch(/@license|@preserve|\/\*!/);
     }
   });
 
+  it('ships smaller minified bundles that load the minified worker', () => {
+    for (const f of BUNDLES.filter((b) => b.includes('.min.'))) {
+      const size = (g: string): number => readFileSync(join(installed, 'pkg', g)).length;
+      expect(size(f), f).toBeLessThan(size(f.replace('.min', '')) * 0.7);
+      expect(packedFiles.has(`pkg/${f}.map`), `${f}.map`).toBe(true);
+    }
+    const workers = (f: string): string[] =>
+      [...readFileSync(join(installed, 'pkg', f), 'utf8').matchAll(/["'](\.{1,2}\/[^"']*worker[^"']*)["']/g)]
+        .map((m) => m[1] as string).sort();
+    expect(workers('esm/index.min.js')).toEqual(['./worker.min.js', './worker.min.js']);
+    expect(workers('cjs/index.min.cjs')).toEqual(['../esm/worker.min.js', './worker.min.cjs']);
+    expect(workers('esm/index.js')).toEqual(['./worker.js', './worker.js']);
+    expect(workers('cjs/index.cjs')).toEqual(['../esm/worker.js', './worker.cjs']);
+  });
+
+  it('resolves wav2flac/min to the minified bundles', () => {
+    const req = createRequire(join(consumer, 'index.js'));
+    expect(req.resolve('wav2flac/min')).toBe(join(installed, 'pkg/cjs/index.min.cjs'));
+    const esmUrl = spawnSync(process.execPath, ['--input-type=module', '-e', "console.log(import.meta.resolve('wav2flac/min'))"],
+      { cwd: consumer, encoding: 'utf8' }).stdout.trim();
+    expect(esmUrl).toBe(pathToFileURL(join(installed, 'pkg/esm/index.min.js')).href);
+  });
+
+  it('encodes identically from the minified ESM and CJS bundles', async () => {
+    await Promise.all([esm.init(), esmMin.init()]);
+    cjsMin.initSync();
+    const ref = esm.encodeSync(wav);
+    expect(await esmMin.encode(wav)).toEqual(ref);
+    expect(cjsMin.encodeSync(wav)).toEqual(ref);
+    expect(esmMin.version()).toBe(esm.version());
+  });
+
+  it('keeps the name of Wav2FlacError in the minified bundles', () => {
+    for (const [label, api] of [['ESM', esmMin], ['CJS', cjsMin]] as const) {
+      const e = new api.Wav2FlacError('INVALID_WAV', 'x');
+      expect(api.Wav2FlacError.name, label).toBe('Wav2FlacError');
+      expect(inspect(e).split('\n')[0], label).toBe('Wav2FlacError: x');
+    }
+  });
+
   it('starts the CJS bundles with the "use strict" directive', () => {
-    for (const f of ['cjs/index.cjs', 'cjs/worker.cjs']) {
+    for (const f of BUNDLES.filter((b) => b.startsWith('cjs/'))) {
       const text = readFileSync(join(installed, 'pkg', f), 'utf8');
       // Only comments may precede the directive, or it is a plain expression.
       const code = text.replace(/^(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/\n?)*/, '');
@@ -210,15 +262,17 @@ describe('installed package', () => {
     }
   });
 
-  it.each([['ESM', esm], ['CJS', cjs]])('runs the real worker script (%s)', async (_, api) => {
-    const w = api.createWorkerEncoder();
-    try {
-      expect(await w.encode(wav.slice())).toEqual(esm.encodeSync(wav));
-      expect(await w.probe(wav.slice())).toMatchObject({ channels: 2, sampleRate: 44100 });
-    } finally {
-      w.terminate();
-    }
-  });
+  it.each([['ESM', esm], ['CJS', cjs], ['minified ESM', esmMin], ['minified CJS', cjsMin]])(
+    'runs the real worker script (%s)', async (_, api) => {
+      const w = api.createWorkerEncoder();
+      try {
+        expect(await w.encode(wav.slice())).toEqual(esm.encodeSync(wav));
+        expect(await w.probe(wav.slice())).toMatchObject({ channels: 2, sampleRate: 44100 });
+      } finally {
+        w.terminate();
+      }
+    },
+  );
 
   it('keeps the JS heap and wasm memory flat over repeated runs', async () => {
     const rawGc = (globalThis as { gc?: () => void }).gc;
@@ -284,15 +338,19 @@ describe('installed package', () => {
     `;
     const names = '{ createWorkerEncoder, encode, encodeStream, probe, Wav2FlacError, '
       + 'type Bytes, type ErrorCode, type Options, type WavInfo, type WorkerEncoder }';
-    writeFileSync(join(consumer, 'esm.mts'), `import ${names} from 'wav2flac';\n${use}`);
-    writeFileSync(join(consumer, 'cjs.cts'), `import ${names} from 'wav2flac';\n${use}`);
+    for (const [suffix, spec] of [['', 'wav2flac'], ['-min', 'wav2flac/min']]) {
+      writeFileSync(join(consumer, `esm${suffix}.mts`), `import ${names} from '${spec}';\n${use}`);
+      writeFileSync(join(consumer, `cjs${suffix}.cts`), `import ${names} from '${spec}';\n${use}`);
+    }
     for (const mode of ['node16', 'bundler']) {
       writeFileSync(join(consumer, 'tsconfig.json'), JSON.stringify({
         compilerOptions: {
           strict: true, exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: false, types: [], lib: ['es2022', 'dom'],
           module: mode === 'node16' ? 'node16' : 'preserve', moduleResolution: mode,
         },
-        files: mode === 'node16' ? ['esm.mts', 'cjs.cts'] : ['esm.mts'],
+        files: mode === 'node16'
+          ? ['esm.mts', 'cjs.cts', 'esm-min.mts', 'cjs-min.cts']
+          : ['esm.mts', 'esm-min.mts'],
       }));
       const r = spawnSync(join(root, 'node_modules/.bin/tsc'), ['-p', consumer], { encoding: 'utf8' });
       expect(r.stdout + r.stderr, mode).toBe('');

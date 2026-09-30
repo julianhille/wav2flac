@@ -27,6 +27,11 @@ links are collected at the bottom of this file.
   package, for tools and docs that want the text.
 - Docs: a page on the license notices when bundling or hosting the wasm
   yourself.
+- Minified bundles next to the normal ones, for loading straight from a CDN
+  without a bundler: `pkg/esm/index.min.js` and `worker.min.js`,
+  `pkg/cjs/index.min.cjs` and `worker.min.cjs`, each with a source map, also
+  exported as `wav2flac/min`. About 6 KiB smaller gzipped (index + worker).
+  `wav2flac` still resolves to the normal bundles, which are unchanged.
 
 ### Changed
 
