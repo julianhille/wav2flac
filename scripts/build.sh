@@ -48,6 +48,7 @@ echo "» wasm-opt"
 rm -rf pkg && mkdir -p pkg
 wasm-opt -O3 --strip-debug --strip-producers \
   --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals \
+  --enable-reference-types --enable-multivalue \
   build/bindgen/wav2flac_bg.wasm -o pkg/wav2flac.wasm
 
 echo "» third-party licenses"
