@@ -277,12 +277,12 @@ describe('fuzz: hostile input', () => {
     expect(encodeSync(base).length).toBeGreaterThan(0);
   });
 
-  it('reports TRUNCATED (or success at frame boundaries) for every prefix', async () => {
+  it('reports TRUNCATED for every prefix', async () => {
     await fc.assert(
       fc.asyncProperty(fc.constantFrom(base, baseExt), fc.nat(), async (src, n) => {
         const cut = src.subarray(0, n % src.length);
         const r = await outcome(() => encodeSync(cut));
-        expect('code' in r ? r.code : 'ok').toBeOneOf(['ok', 'TRUNCATED', 'INVALID_WAV']);
+        expect('code' in r ? r.code : 'encoded').toBe('TRUNCATED');
       }),
       params(100),
     );
