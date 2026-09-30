@@ -587,8 +587,13 @@ fn after_pad(buf: &[u8], end: usize) -> usize {
     }
 }
 
+/// Whether `id` is one of the chunk ids common enough to trust on sight.
+pub(crate) fn is_known_chunk_id(id: &[u8]) -> bool {
+    KNOWN_IDS.contains(&id)
+}
+
 /// Chunk ids common enough to beat a spec-conforming pad byte in
-/// [`after_pad`].
+/// [`after_pad`], or a RIFF size too small to hold them.
 const KNOWN_IDS: [&[u8]; 12] = [
     b"fmt ", b"data", b"LIST", b"fact", b"JUNK", b"junk", b"PAD ", b"bext", b"iXML", b"cue ",
     b"smpl", b"id3 ",

@@ -23,6 +23,10 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- A WAV with an empty `data` chunk followed by a well-known chunk such as
+  `LIST` encodes to an empty FLAC also when its RIFF size is too small to
+  include that chunk. It used to fail with `UNSUPPORTED_FORMAT`, reporting a
+  streaming WAV header.
 - Plain PCM (`WAVE_FORMAT_PCM`) whose bits per sample are not a multiple of
   8, such as 20 bits in 3-byte samples, is encoded. The samples are read from
   the most significant bits, as the RIFF spec says. It used to fail with

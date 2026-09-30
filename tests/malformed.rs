@@ -252,6 +252,15 @@ fn zero_data_size_followed_by_audio() {
     let mut b = WavBuilder::pcm(2, 44100, 16);
     b.chunks_after = vec![(*b"LIST", info_list(&[(b"INAM", b"empty")]))];
     assert!(encode_all(&b.build(&[]), Options::default()).is_ok());
+    // Even when the RIFF size leaves that chunk out, as some writers do.
+    for riff in [36, 37, 40] {
+        b.riff_len_override = Some(riff);
+        let f = b.build(&[]);
+        let r = encode_all(&f, Options::default());
+        assert!(r.is_ok(), "{riff}: {r:?}");
+        let r = encode_chunked(&f, Options::default(), &[1]);
+        assert!(r.is_ok(), "{riff}: {r:?}");
+    }
 }
 
 #[test]
