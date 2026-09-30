@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: 0BSD
 [package]
 name = "wav2flac"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 edition = "2021"
 rust-version = "1.87"
 license = "0BSD"
