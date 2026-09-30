@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: 0BSD
 // Which branch `scripts/release.ts prepare` runs on: release/vX.Y.Z at
 // origin/main, as .github/workflows/release.yml describes, and that the
-// previous release's tag is in main's history for the compare link.
+// previous release's tag is in main's history for the compare link. And
+// `release.ts lint`: the changelog structure a `merge=union` merge can break.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,7 +54,7 @@ function repo(tag = true): string {
       'editing.\nversion = 4\n\n[[package]]\nname = "wav2flac"\nversion = "1.2.2"\n',
     'CHANGELOG.md':
       '# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- A thing.\n\n' +
-      '## [1.2.2] - 2026-01-01\n\n- Old.\n\n' +
+      '## [1.2.2] - 2026-01-01\n\n### Fixed\n\n- Old.\n\n' +
       `[Unreleased]: ${REPO}/compare/v1.2.2...HEAD\n[1.2.2]: ${REPO}/releases/tag/v1.2.2\n`,
   };
   for (const [name, text] of Object.entries(files)) writeFileSync(join(work, name), text);
@@ -79,14 +80,35 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 /**
+ * Runs `release.ts`.
+ * @param cwd The repository.
+ * @param args The subcommand and its arguments.
+ * @returns The exit status and output.
+ */
+function run(cwd: string, ...args: string[]): { status: number | null; out: string; err: string } {
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd, env, encoding: 'utf8' });
+  return { status: r.status, out: r.stdout, err: r.stderr };
+}
+
+/**
  * Runs `release.ts prepare`.
  * @param cwd The repository.
  * @param v The version.
  * @returns The exit status and output.
  */
 function prepare(cwd: string, v: string): { status: number | null; out: string; err: string } {
-  const r = spawnSync(process.execPath, [SCRIPT, 'prepare', v], { cwd, env, encoding: 'utf8' });
-  return { status: r.status, out: r.stdout, err: r.stderr };
+  return run(cwd, 'prepare', v);
+}
+
+/**
+ * A directory holding only a changelog.
+ * @param log Its CHANGELOG.md.
+ * @returns The directory.
+ */
+function changelog(log: string): string {
+  dir = mkdtempSync(join(tmpdir(), 'release-'));
+  writeFileSync(join(dir, 'CHANGELOG.md'), log);
+  return dir;
 }
 
 describe('release.ts prepare', () => {
@@ -157,5 +179,74 @@ describe('release.ts prepare', () => {
     expect(r.status).toBe(1);
     expect(r.err).toMatch(/^release: tag v1\.2\.2 is missing or not in main's history;/);
     expect(git(work, 'log', '-1', '--format=%s')).toBe('Release 1.2.2 (#1)');
+  });
+});
+
+describe('release.ts lint', () => {
+  const LOG =
+    '# Changelog\n\nProse with a - dash.\n\n## [Unreleased]\n\n### Added\n\n- New.\n\n' +
+    '### Fixed\n\n- A thing.\n  - a nested bullet, indented.\n\n' +
+    '## [1.2.2] - 2026-01-01\n\n### Changed\n\n- Old.\n\n' +
+    `[Unreleased]: ${REPO}/compare/v1.2.2...HEAD\n[1.2.2]: ${REPO}/releases/tag/v1.2.2\n`;
+
+  it("accepts the repository's changelog", () => {
+    const r = run(resolve('.'), 'lint');
+    expect(r.err).toBe('');
+    expect(r.status).toBe(0);
+  });
+
+  it('accepts a well-formed changelog', () => {
+    const r = run(changelog(LOG), 'lint');
+    expect(r.err).toBe('');
+    expect(r.status).toBe(0);
+  });
+
+  it.each([
+    [
+      'a heading twice',
+      LOG.replace('### Fixed\n\n- A thing.', '### Fixed\n\n- Mine.\n### Fixed\n\n- Theirs.'),
+      '14: [Unreleased] has "### Fixed" twice',
+    ],
+    [
+      'headings out of order',
+      LOG.replace('### Added\n\n- New.\n\n### Fixed', '### Fixed\n\n- New.\n\n### Added'),
+      '11: [Unreleased] has "### Added" after "### Fixed"',
+    ],
+    [
+      'an unknown heading',
+      LOG.replace('### Changed', '### Changes'),
+      '18: "### Changes" is not one of Added, Changed, Deprecated, Removed, Fixed, Security',
+    ],
+    [
+      'a bullet before the first heading',
+      LOG.replace('## [Unreleased]\n', '## [Unreleased]\n\n- Lost.\n'),
+      '7: [Unreleased] has a bullet before its first "### " heading',
+    ],
+  ])('reports %s', (_, log, message) => {
+    const r = run(changelog(log), 'lint');
+    expect(r.status).toBe(1);
+    expect(r.err).toBe(
+      `release: CHANGELOG.md:${message} (a merge=union artefact? see .gitattributes)\n`,
+    );
+  });
+
+  it('is run by prepare, which then leaves the tree alone', () => {
+    const work = repo();
+    writeFileSync(
+      join(work, 'CHANGELOG.md'),
+      git(work, 'show', 'HEAD:CHANGELOG.md').replace(
+        '### Fixed\n\n- A thing.',
+        '### Fixed\n\n- Mine.\n### Fixed\n\n- Theirs.',
+      ),
+    );
+    git(work, 'commit', '--quiet', '-am', 'union merge');
+    git(work, 'push', '--quiet', 'origin', 'main');
+    git(work, 'switch', '--quiet', '--create', 'release/v1.2.3');
+    const head = git(work, 'rev-parse', 'HEAD');
+    const r = prepare(work, '1.2.3');
+    expect(r.status).toBe(1);
+    expect(r.err).toMatch(/^release: CHANGELOG\.md:8: \[Unreleased\] has "### Fixed" twice/);
+    expect(git(work, 'rev-parse', 'HEAD')).toBe(head);
+    expect(git(work, 'status', '--porcelain')).toBe('');
   });
 });

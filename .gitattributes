@@ -2,4 +2,8 @@
 *.wasm binary
 *.wav binary
 *.flac binary
+# Both sides' additions are kept, so two branches adding to [Unreleased] never
+# conflict. What can go wrong (a "### " heading twice or out of order, a
+# bullet under no heading) `node scripts/release.ts lint` reports; CI runs it.
+# Bullets that land under the wrong heading it cannot see: check after merging.
 CHANGELOG.md merge=union

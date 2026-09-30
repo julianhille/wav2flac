@@ -155,6 +155,9 @@ jobs:
       - name: Lint (oxlint)
         if: matrix.node == 22
         run: npm run lint
+      - name: Changelog structure (merge=union can duplicate headings)
+        if: matrix.node == 22
+        run: npm run lint:changelog
       - name: Formatting (Prettier)
         if: matrix.node == 22
         run: npm run format:check
