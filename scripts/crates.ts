@@ -4,8 +4,8 @@
 // time), and the parts of the Rust standard library linked in with them.
 // Shared by gen-licenses.ts and gen-third-party.ts.
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, normalize } from 'node:path';
 
 /** A package as `cargo metadata` describes it. */
 export interface Package {
@@ -28,7 +28,8 @@ interface Metadata {
 }
 
 /**
- * The crates linked into the wasm, sorted by name.
+ * The crates linked into the wasm, sorted by name. The order is the same in
+ * every locale, so the generated files are too.
  * @returns The packages.
  */
 export function shippedCrates(): Package[] {
@@ -49,15 +50,57 @@ export function shippedCrates(): Package[] {
       todo.push(d.pkg);
     }
   }
-  return [...seen].map((id) => packages.get(id)!).sort((a, b) => a.name.localeCompare(b.name));
+  return [...seen].map((id) => packages.get(id)!).sort((a, b) => a.name.localeCompare(b.name, 'en'));
+}
+
+/** The files that hold a crate's license notices, by name. */
+const NOTICE_FILE = /^(licen[cs]e|copying|copyright|notice|authors)/i;
+
+/**
+ * The files in a crate's sources that carry its license notices: license
+ * texts, NOTICE and AUTHORS files, and the `license-file` of its manifest.
+ * @param c The crate.
+ * @returns File names relative to the crate's directory, sorted.
+ * @throws {Error} When the crate has none.
+ */
+export function noticeFiles(c: Package): string[] {
+  const dir = dirname(c.manifest_path);
+  const files = readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && NOTICE_FILE.test(e.name))
+    .map((e) => e.name)
+    .sort();
+  const own = c.license_file === null ? undefined : normalize(c.license_file);
+  if (own !== undefined && !files.includes(own)) files.push(own);
+  if (files.length === 0) throw new Error(`${c.name} ${c.version}: no license file found in ${dir}`);
+  return files;
 }
 
 /**
- * The rustc version the wasm is built with.
+ * The Rust release whose license texts are in scripts/std-licenses/. Change it
+ * only after comparing the texts with the new release (see the README.md there).
+ */
+export const STD_TEXTS_RELEASE = '1.98.1';
+
+let toolchain: string | undefined;
+/**
+ * The Rust release the wasm is built with: the channel in rust-toolchain.toml.
  * @returns E.g. `1.98.1`.
+ * @throws {Error} When the channel is not an exact release, or the texts in
+ *   scripts/std-licenses/ come from another one.
  */
 export function rustVersion(): string {
-  return /^rustc (\S+)/.exec(execFileSync('rustc', ['--version'], { encoding: 'utf8' }))?.[1] ?? 'unknown';
+  if (toolchain !== undefined) return toolchain;
+  const file = join(import.meta.dirname, '..', 'rust-toolchain.toml');
+  const channel = /^channel\s*=\s*"([^"]*)"/m.exec(readFileSync(file, 'utf8'))?.[1];
+  if (channel === undefined || !/^\d+\.\d+\.\d+$/.test(channel)) {
+    throw new Error(`rust-toolchain.toml: the channel must be a release such as "1.98.1", not ${channel ?? 'missing'}`);
+  }
+  if (channel !== STD_TEXTS_RELEASE) {
+    throw new Error(`rust-toolchain.toml pins Rust ${channel}, but the texts in scripts/std-licenses/ ` +
+      `are from ${STD_TEXTS_RELEASE}. Compare them with the new release, then update STD_TEXTS_RELEASE ` +
+      'in scripts/crates.ts.');
+  }
+  return (toolchain = channel);
 }
 
 /** A license text of a part of the Rust standard library. */
@@ -66,8 +109,6 @@ export interface StdNotice {
   title: string;
   /** The copy of it in scripts/std-licenses/. */
   file: string;
-  /** Whether the JS banner reproduces it (without the Apache-2.0 text). */
-  banner: boolean;
 }
 /** A part of the Rust standard library that is linked into the wasm. */
 export interface StdPart {
@@ -85,8 +126,8 @@ export interface StdPart {
  * cargo does not list them, so they are written down here. To check the list,
  * build with `CARGO_PROFILE_RELEASE_STRIP=false` and read the crate names in
  * the wasm's name section. The license texts in scripts/std-licenses/ come
- * from the Rust release in rust-toolchain.toml (see the README.md there);
- * compare them again when the toolchain changes.
+ * from the Rust release in STD_TEXTS_RELEASE (see the README.md there);
+ * rustVersion() fails until they are compared with a new toolchain.
  */
 export const STD_PARTS: StdPart[] = [
   {
@@ -96,8 +137,8 @@ export const STD_PARTS: StdPart[] = [
     chosen: 'MIT',
     repository: 'https://github.com/rust-lang/rust',
     notices: [
-      { title: 'LICENSE-MIT', file: 'rust-LICENSE-MIT', banner: true },
-      { title: 'LICENSES/Unicode-3.0.txt', file: 'Unicode-3.0.txt', banner: false },
+      { title: 'LICENSE-MIT', file: 'rust-LICENSE-MIT' },
+      { title: 'LICENSES/Unicode-3.0.txt', file: 'Unicode-3.0.txt' },
     ],
   },
   {
@@ -105,7 +146,7 @@ export const STD_PARTS: StdPart[] = [
     license: 'MIT OR Apache-2.0',
     chosen: 'MIT',
     repository: 'https://github.com/alexcrichton/dlmalloc-rs',
-    notices: [{ title: 'LICENSE-MIT', file: 'dlmalloc-LICENSE-MIT', banner: true }],
+    notices: [{ title: 'LICENSE-MIT', file: 'dlmalloc-LICENSE-MIT' }],
   },
   {
     // Integer and float helpers, and the math functions of its libm.
@@ -113,8 +154,8 @@ export const STD_PARTS: StdPart[] = [
     license: 'MIT AND Apache-2.0 WITH LLVM-exception AND (MIT OR Apache-2.0)',
     repository: 'https://github.com/rust-lang/compiler-builtins',
     notices: [
-      { title: 'LICENSE.txt', file: 'compiler-builtins-LICENSE.txt', banner: true },
-      { title: 'libm/LICENSE.txt', file: 'libm-LICENSE.txt', banner: true },
+      { title: 'LICENSE.txt', file: 'compiler-builtins-LICENSE.txt' },
+      { title: 'libm/LICENSE.txt', file: 'libm-LICENSE.txt' },
     ],
   },
 ];

@@ -1,24 +1,35 @@
 # SPDX-License-Identifier: 0BSD
 # Docs site for Read the Docs. Build locally with:
-#   pip install -r docs/requirements.txt && npm run docs:api && cp README.md docs/index.md \
-#     && mkdocs serve
+#   pip install -r docs/requirements.txt
+#   npm run docs:api
+#   cp README.md docs/index.md
+#   mkdocs serve
 # docs/reference/api/ is generated from the TSDoc in ts/ (scripts/api-docs/).
 site_name: wav2flac
 site_url: https://wav2flac.readthedocs.io/
 repo_url: https://github.com/julianhille/wav2flac
-edit_uri: blob/main/docs/
+# Relative to the repository root; scripts/mkdocs_hooks.py maps each page to its source.
+edit_uri: blob/main/
 copyright: 0BSD licensed
 theme: readthedocs
 strict: true
+# Broken anchors and links are only logged at INFO by default; fail on them.
+validation:
+  anchors: warn
+  unrecognized_links: warn
+  absolute_links: warn
 exclude_docs: requirements.txt
+hooks:
+  - scripts/mkdocs_hooks.py
 
 nav:
   - Home: index.md
   - Loading the wasm: loading.md
+  - Bundling and license notices: bundling.md
   - Raw PCM input: pcm.md
   - Concurrent encodes: concurrency.md
   - How-to:
-    - how-to/index.md
+    - Overview: how-to/index.md
     - Encode in parallel: how-to/parallel-encoding.md
     - FIFO queue: how-to/fifo-queue.md
   - API reference: reference/api/index.md

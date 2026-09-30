@@ -9,7 +9,8 @@
  * runs `encode`, `encodeStream`, a worker and raw PCM, and each output must
  * hash to the same bytes as in Node. Each page also runs with
  * `?wasm=/custom/…`, which calls `init(url)` first: then that must be the
- * only wasm the page fetches.
+ * only wasm the page fetches. Each bundler must emit the package's `.wasm`
+ * byte for byte, since its first section holds the license notices.
  *
  * `WAV2FLAC_CHROMIUM` (or `_FIREFOX`, `_WEBKIT`) points at another browser
  * executable.
@@ -62,6 +63,20 @@ async function expected(): Promise<Record<string, string>> {
   return { encode: buffered, stream, worker: buffered, pcm: buffered };
 }
 
+/**
+ * Checks that a bundler emitted the package's `.wasm` unchanged, with the
+ * license notices in it.
+ * @param dir The bundler's output directory.
+ */
+function checkWasmCopied(dir: string): void {
+  const want = readFileSync(join(root, 'pkg/wav2flac.wasm'));
+  const found = readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.wasm'));
+  if (found.length !== 1) throw new Error(`${dir}: expected one .wasm, found ${found.join(', ') || 'none'}`);
+  if (!readFileSync(join(dir, found[0]!)).equals(want)) {
+    throw new Error(`${dir}/${found[0]} differs from pkg/wav2flac.wasm`);
+  }
+}
+
 /** Packs the package and builds the app unbundled, with Vite and with webpack. */
 function prepare(): void {
   sh('npm', ['pack', '--silent', '--pack-destination', tmp], root);
@@ -73,6 +88,7 @@ function prepare(): void {
     `vite@${VITE}`, `webpack@${WEBPACK}`], app);
 
   sh('npx', ['vite', 'build', '--base', './', '--outDir', 'dist-vite', '--logLevel', 'warn'], app);
+  checkWasmCopied(join(app, 'dist-vite'));
 
   writeFileSync(join(app, 'webpack.mjs'), `
 import webpack from 'webpack';
@@ -85,6 +101,7 @@ webpack({
 });
 `);
   sh('node', ['webpack.mjs'], app);
+  checkWasmCopied(join(app, 'dist-webpack'));
   writeFileSync(join(app, 'dist-webpack/index.html'),
     '<!doctype html><meta charset="utf-8"><script src="./main.js"></script>\n');
 }

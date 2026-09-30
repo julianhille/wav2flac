@@ -13,33 +13,79 @@ import { createWorkerEncoder } from 'wav2flac';
 
 /**
  * A fixed set of workers. `encode()` runs on the next idle worker; jobs wait
- * in FIFO order while all workers are busy.
+ * in FIFO order while all workers are busy. A worker that crashed is replaced.
  */
 export function createEncoderPool(size = Math.max(1, (navigator.hardwareConcurrency ?? 4) - 1)) {
-  const workers = Array.from({ length: size }, () => createWorkerEncoder());
+  if (!Number.isInteger(size) || size < 1) {
+    throw new RangeError(`pool size must be a positive integer, got ${size}`);
+  }
+  const workers = new Set(Array.from({ length: size }, () => createWorkerEncoder()));
   const idle = [...workers];
   const waiting = []; // { resolve, reject } of jobs waiting for a worker
   let closed = false;
   const terminated = () => new DOMException('The pool was terminated.', 'AbortError');
 
-  const acquire = () => {
+  const acquire = (signal) => {
     if (closed) return Promise.reject(terminated());
-    const w = idle.pop();
-    return w !== undefined ? Promise.resolve(w) : new Promise((resolve, reject) => waiting.push({ resolve, reject }));
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    const w = idle.shift();
+    if (w !== undefined) return Promise.resolve(w);
+    return new Promise((resolve, reject) => {
+      // A job whose signal aborts stops waiting at once.
+      const onAbort = () => {
+        waiting.splice(waiting.indexOf(entry), 1);
+        reject(signal.reason);
+      };
+      const settle = (fn) => (value) => {
+        signal?.removeEventListener('abort', onAbort);
+        fn(value);
+      };
+      const entry = { resolve: settle(resolve), reject: settle(reject) };
+      waiting.push(entry);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   };
   const release = (w) => {
+    if (closed) return;
     const next = waiting.shift();
     if (next !== undefined) next.resolve(w);
     else idle.push(w);
   };
+  // After a failed job, check that the worker can still encode:
+  // wasmMemoryBytes() rejects once the worker has crashed or was terminated,
+  // or when its wasm failed to start. A worker that doesn't answer within
+  // 5 seconds counts as dead, too.
+  const check = async (w) => {
+    let timer;
+    try {
+      await Promise.race([
+        w.wasmMemoryBytes(),
+        new Promise((_, reject) => { timer = setTimeout(reject, 5000); }),
+      ]);
+      return w;
+    } catch {
+      w.terminate();
+      workers.delete(w);
+      if (closed) return w;
+      const fresh = createWorkerEncoder();
+      workers.add(fresh);
+      return fresh;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   return {
     async encode(input, options) {
-      const w = await acquire();
+      const w = await acquire(options?.signal);
       try {
-        return await w.encode(input, options);
-      } finally {
+        const flac = await w.encode(input, options);
         release(w);
+        return flac;
+      } catch (e) {
+        // Report the failure now; the worker rejoins the pool once checked.
+        void check(w).then(release);
+        throw e;
       }
     },
     terminate() {
@@ -51,14 +97,21 @@ export function createEncoderPool(size = Math.max(1, (navigator.hardwareConcurre
 }
 ```
 
-Encode a batch, and get the results back in input order:
+Encode a batch, and get the results back in input order. `Promise.allSettled`
+keeps the other results when a file fails; with `Promise.all`, one bad file
+would lose them all:
 
 ```js
 const pool = createEncoderPool();
+let results;
 try {
-  const flacs = await Promise.all(files.map((wav) => pool.encode(wav, { compressionLevel: 8 })));
+  results = await Promise.allSettled(files.map((wav) => pool.encode(wav, { compressionLevel: 8 })));
 } finally {
   pool.terminate();
+}
+// results[i] is the outcome for files[i].
+for (const [i, r] of results.entries()) {
+  if (r.status === 'rejected') console.error(`file ${i} failed`, r.reason);
 }
 ```
 
@@ -67,20 +120,36 @@ whenever a new recording comes in.
 
 ## Things to know
 
-- **Pool size.** Leaving one core for the UI thread is a good default.
-  More workers than cores doesn't make encoding faster. Each worker costs a
-  thread and its own wasm memory, which grows to fit its largest job and
-  never shrinks.
-- **Memory.** Up to `size` jobs run at once, so peak memory is roughly the
-  sum of the `size` largest jobs in flight.
+- **Pool size.** Leaving one core for the UI thread is a good default, and
+  never fewer than one worker. More workers than cores doesn't make encoding
+  faster. Each worker costs a thread and its own wasm memory: about 2 MiB,
+  or up to about 20 MiB with `blockSize: 65535` and 8 channels.
+- **Memory.** Up to `size` jobs run at once. Each running job holds its
+  input and its growing output in JS memory until it finishes, so peak memory
+  is roughly the sum of the `size` largest jobs in flight. The encoder's own
+  state in wasm memory is bounded: it depends on `blockSize`, the number of
+  channels, the bit depth and resampling, and doesn't grow with long jobs.
 - **Transfers.** In-memory input is transferred to the worker, which detaches
-  your copy, when the job *starts*, not when you call `pool.encode()`. Pass
-  `copy: true` to keep it.
+  your copy, when the job *starts*, not when you call `pool.encode()`. It is
+  gone even when the job fails, so pass `copy: true` to keep it, for example
+  to retry the files that failed.
 - **Cancelling.** `signal` works as usual. A job whose signal aborts while it
-  waits for a worker rejects as soon as it gets one.
-- **Crashes.** If a worker crashes, every later job sent to it rejects. For a
-  long-lived pool, replace a worker whose job failed with a plain `Error`
-  (not a `Wav2FlacError`) with a fresh `createWorkerEncoder()`.
+  waits for a worker rejects at once and gives up its place in the queue.
+  The time of an `AbortSignal.timeout()` counts from the `pool.encode()`
+  call, so it includes the wait for a worker; allow for the jobs queued
+  ahead.
+- **Crashes.** If a worker crashes, for example because it runs out of
+  memory, its job rejects and so would every later job sent to it. A job can
+  also fail while its worker is fine: the input is not a valid WAV, the
+  signal aborted, or `onProgress` threw. So after a failed job, the pool asks
+  the worker for `wasmMemoryBytes()`, which only fails once the worker is
+  dead or its wasm failed to start, and replaces such a worker with a fresh
+  one. A worker that stops responding, say in an endless loop, can't fail its
+  job, so the job stays pending. To bound a job, pass a `signal` such as
+  `AbortSignal.timeout()`. The worker then doesn't answer the check either,
+  and after 5 seconds it is replaced. A worker that fails every time, such as
+  one whose wasm can't load, is replaced after every job; the pool doesn't
+  back off.
 - **Node.** The same code works with `worker_threads`.
   `navigator.hardwareConcurrency` is available in Node ≥ 21, or use
   `os.availableParallelism()`.

@@ -24,8 +24,9 @@ import { init } from 'wav2flac';
 await init(new URL('/assets/wav2flac.wasm', location.href));
 ```
 
-Only the first call's source counts. Later calls share the load already in
-progress and ignore their argument.
+Only the call that starts a load chooses its source. Later calls share the
+load already in progress and ignore their argument. A retry after a failed or
+abandoned load (see [Retrying](#retrying)) loads from your source again.
 
 ## Timeouts and stalled downloads
 
@@ -59,6 +60,17 @@ or the next `encode()`, then starts a new download. A load that fails, such as
 a 404 or a network error, rejects every caller and is also retried by the
 next call.
 
+A retry loads from the source passed to that call. Without one, as in
+`encode()`, it loads from the last URL, path, bytes or module that a load
+started with, not from the default location. `init()` loads from its own
+copy of bytes, so you can reuse or transfer your buffer right after the call.
+A `Response` can be read only once, so after a load from a `Response` failed,
+pass a new one.
+
+A worker encoder loads the wasm once, when you create it. If that load fails,
+every job of that encoder rejects with its error; create a new encoder to try
+again.
+
 A caller that waits **without** a signal keeps the load going. Its wait is
 never cut short by another caller's timeout, and it waits as long as the load
 takes.
@@ -85,5 +97,6 @@ first.
 
 ## Self-hosting and licenses
 
-If you host the `.wasm` yourself, redistribute its license notices with it.
-See [License](index.md#license).
+The `.wasm` carries the license notices of the code in it, as its first
+section. Host it as it is, without tools that strip custom sections. See
+[Bundling and license notices](bundling.md).

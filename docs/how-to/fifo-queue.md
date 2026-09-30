@@ -9,6 +9,8 @@ chain each job onto the previous one:
 ```js
 import { encode } from 'wav2flac';
 
+const noop = () => {};
+
 /**
  * Wraps an encode function so calls run one at a time, in call order. A
  * failed job rejects its own promise and the queue moves on.
@@ -17,8 +19,11 @@ export function createQueue(run) {
   let tail = Promise.resolve();
   return (input, options) => {
     const job = tail.then(() => run(input, options));
-    tail = job.catch(() => {});
-    return job;
+    // The next job waits for this one, but the queue keeps neither its
+    // result nor its error.
+    tail = job.then(noop, noop);
+    // A promise of its own, so a rejection nobody handles is still reported.
+    return job.then((flac) => flac);
   };
 }
 
@@ -51,8 +56,10 @@ const enqueue = createQueue((input, options) => worker.encode(input, options));
 
 ## Why use a queue
 
-- **Bounded memory.** Only one encoder is alive at a time, so peak memory is
-  set by the largest job, not the sum of all jobs.
+- **Bounded memory.** Only one encoder is alive at a time, so the output in
+  progress is that of one job, not of all jobs. The inputs of waiting jobs
+  stay in memory until their turn comes, and the queue doesn't hold on to a
+  result once it has handed it to you.
 - **Ordered results.** Jobs start and finish in the order you submitted them.
 - **Same total time.** On one thread, interleaved jobs aren't faster anyway.
   A queue gives the first result sooner, because the first job doesn't share
@@ -63,8 +70,8 @@ const enqueue = createQueue((input, options) => worker.encode(input, options));
 ## Things to know
 
 - **Stream inputs wait too.** A `ReadableStream` isn't read until its job
-  starts. A live source, such as a `MediaRecorder` or a network response,
-  buffers in the meantime. Queue finished recordings, or use
+  starts. A live source, such as a network response or PCM from an
+  `AudioWorklet`, buffers in the meantime. Queue finished recordings, or use
   `encodeStream()` directly for live input.
 - **Cancelling.** A job whose `signal` aborts while it waits rejects with the
   abort reason when its turn comes, without encoding anything.

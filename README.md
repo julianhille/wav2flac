@@ -58,9 +58,10 @@ npm install wav2flac
 
 The wasm binary is found automatically: next to the JS in Node, and via
 `new URL(…, import.meta.url)` in browsers and in bundlers such as Vite and
-webpack. To host it yourself, call `init(urlOrBytes)` first, and put
-`THIRD_PARTY_LICENSES.txt` next to the `.wasm`: the binary itself carries no
-license notices. To give up on a download that stalls, pass a signal:
+webpack. To host it yourself, call `init(urlOrBytes)` first. The binary
+carries the license notices of the code in it (see [License](#license)), so
+host it as it is. To give up
+on a download that stalls, pass a signal:
 `init(url, { signal: AbortSignal.timeout(10_000) })`. See the
 [loading guide](https://github.com/julianhille/wav2flac/blob/main/docs/loading.md).
 
@@ -177,8 +178,9 @@ const info = await probe(wav);
 | `encodeSync(input, options?)` | → `Uint8Array`. Blocks the thread; needs `init()`/`initSync()` first. |
 | `createWorkerEncoder(opts?)` | → `{ encode, encodeStream, probe, wasmMemoryBytes, terminate }` running in a worker. `opts`: `{ url?, wasm? }`, the worker script and the wasm source. |
 | `probe(input)` | → `Promise<WavInfo>`. Reads the WAV header only. |
-| `init(source?, { signal? })` / `initSync(source?)` | Loads the wasm. `encode`, `encodeStream`, `probe` and the worker encoder do this for you. A `signal` (e.g. `AbortSignal.timeout(10_000)`) gives up on a stalled download; the next call retries. |
+| `init(source?, { signal? })` / `initSync(source?)` | Loads the wasm. `encode`, `encodeStream`, `probe` and the worker encoder do this for you. A `signal` (e.g. `AbortSignal.timeout(10_000)`) gives up on a stalled download. Once every caller waiting on the load has given up, or the load failed, the next call retries: from its own source, or else from the last one; a caller without a signal, such as `probe()`, keeps the load going. |
 | `version()` | The encoder's version string. |
+| `thirdPartyLicenses()` | → `Promise<string>`. The license notices of the crates in the wasm, as Markdown. |
 | `wasmMemoryBytes()` | Size of the wasm linear memory in bytes (for diagnostics and leak checks). |
 
 `input` is a `Uint8Array`, an `ArrayBuffer` or a `ReadableStream<Uint8Array>`
@@ -230,6 +232,7 @@ clear message. Nothing is ever converted lossily unless you ask for it.
 
 - [Raw PCM input](https://github.com/julianhille/wav2flac/blob/main/docs/pcm.md)
 - [Concurrent encodes](https://github.com/julianhille/wav2flac/blob/main/docs/concurrency.md): what happens when you start several at once
+- [Bundling and license notices](https://github.com/julianhille/wav2flac/blob/main/docs/bundling.md): what your build must keep
 - How-to guides ([all](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/index.md)):
   - [Encode in parallel with a worker pool](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/parallel-encoding.md)
   - [Encode one at a time with a FIFO queue](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/fifo-queue.md)
@@ -246,13 +249,20 @@ same in Node and adds the native Rust build to the comparison. See
 **0BSD**: use it for anything, with no conditions and no attribution. There
 is no warranty. The compiled `.wasm` also contains permissively licensed Rust
 crates: libflac-rs (BSD-3-Clause), hound (Apache-2.0), and rubato and others
-(MIT or Apache-2.0), and the parts of the Rust standard library they use. If
-you redistribute the `.wasm`, keep their notices.
-They ship in `THIRD_PARTY_LICENSES.txt`, and every JS file of the package
-starts with a `/*! @license */` comment that lists the crates and reproduces
-the BSD-3-Clause and MIT notices. Not every bundler keeps such comments (Vite,
-for one, drops them from its output chunks), so when you ship a bundle, ship
-`THIRD_PARTY_LICENSES.txt` with it.
+(MIT or Apache-2.0). It also contains the parts of the Rust standard library
+they use: MIT or Apache-2.0, Unicode-3.0 for the Unicode tables in `core`,
+and Apache-2.0 with the LLVM exception for `compiler_builtins`. If you
+redistribute the `.wasm`, keep their notices.
+
+`wav2flac.wasm` carries their notices in full: its first section, which
+engines ignore, holds the text of `THIRD_PARTY_LICENSES.txt` uncompressed,
+so `head -c 3000 wav2flac.wasm` shows it as the first lines of the file.
+`thirdPartyLicenses()` returns it, as does
+`WebAssembly.Module.customSections(module, 'license')`. Bundlers copy the
+wasm as it is, so the notices go wherever the wasm goes. The package also has
+the text as a file, `pkg/THIRD_PARTY_LICENSES.txt` (`wav2flac/THIRD_PARTY_LICENSES.txt`). See
+[Bundling and license
+notices](https://github.com/julianhille/wav2flac/blob/main/docs/bundling.md).
 
 The [third-party components](https://github.com/julianhille/wav2flac/blob/main/docs/third-party.md)
 page lists every crate with its version, license and source.

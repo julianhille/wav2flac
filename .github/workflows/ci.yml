@@ -314,8 +314,14 @@ jobs:
           cache-dependency-path: scripts/api-docs/package-lock.json
       - name: Toolchain (rust-toolchain.toml)
         run: rustup toolchain install
-      # The page is committed so Read the Docs needs no Rust; keep it in sync.
-      - name: Third-party page matches Cargo.lock
+      # cargo metadata downloads every crate's sources; nothing is compiled.
+      - name: Cache the crate registry
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-targets: false
+      # The page is committed so Read the Docs needs no Rust. It depends on
+      # Cargo.lock, the crates' license files and scripts/crates.ts.
+      - name: Third-party page is up to date
         run: |
           npm run docs:third-party
           git diff --exit-code docs/third-party.md \

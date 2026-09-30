@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: 0BSD
 // Bundles ts/ into pkg/esm (ESM) and pkg/cjs (CommonJS) and emits the type
-// declarations for both. Every bundle starts with the third-party license
-// banner written by scripts/gen-licenses.ts. Run by scripts/build.sh (Node ≥
-// 22.18 strips types).
+// declarations for both. The license notices of the Rust crates are in the
+// wasm, not in the bundles. Run by scripts/build.sh (Node ≥ 22.18 strips
+// types).
 import { build, type Plugin } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const licenses = readFileSync('build/license-banner.js', 'utf8').trimEnd();
-const banner = `// SPDX-License-Identifier: 0BSD\n${licenses}`;
+const banner = '// SPDX-License-Identifier: 0BSD';
 const common = {
   bundle: true,
   platform: 'neutral' as const,

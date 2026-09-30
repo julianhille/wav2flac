@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: 0BSD
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NOTICES_SECTION, withFirstSection } from '../../scripts/wasm-section.js';
 
 const WASM = 'build/bindgen/wav2flac_bg.wasm';
 const bytes = readFileSync(WASM);
@@ -53,6 +56,16 @@ describe('init', () => {
       const sab = new SharedArrayBuffer(bytes.length);
       new Uint8Array(sab).set(bytes);
       return sab;
+    }],
+    ['ArrayBuffer of another realm', () => {
+      const buffer = runInNewContext(`new ArrayBuffer(${bytes.length})`) as ArrayBuffer;
+      new Uint8Array(buffer).set(bytes);
+      return buffer;
+    }],
+    ['view of a SharedArrayBuffer', () => {
+      const view = new Uint8Array(new SharedArrayBuffer(bytes.length + 8), 8);
+      view.set(bytes);
+      return view;
     }],
     ['Response', () => new Response(bytes, { headers: { 'content-type': 'application/wasm' } })],
     ['Response promise (no wasm mime)', () => Promise.resolve(new Response(bytes))],
@@ -143,6 +156,184 @@ describe('init', () => {
     expect(w.isReady()).toBe(true);
   });
 
+  it('retries an abandoned load from its custom source', async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn((url: URL, opts: RequestInit) => {
+      urls.push(url.href);
+      if (urls.length === 1) {
+        return new Promise<Response>((_, reject) => {
+          opts.signal!.addEventListener('abort', () => reject(opts.signal!.reason));
+        });
+      }
+      return Promise.resolve(new Response(bytes));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const w = await fresh();
+    const url = 'https://cdn.example/wav2flac.wasm';
+    await expect(w.init(url, { signal: AbortSignal.timeout(10) })).rejects.toMatchObject({ name: 'TimeoutError' });
+    // What encode() does: init() without a source.
+    await w.init(undefined, { signal: new AbortController().signal });
+    expect(urls).toEqual([url, url]);
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('retries a failed load from its custom source', async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn((url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(urls.length === 1 ? new Response(null, { status: 503 }) : new Response(bytes));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const w = await fresh();
+    const url = 'https://cdn.example/wav2flac.wasm';
+    await expect(w.init(url)).rejects.toThrow(/503/);
+    await w.init();
+    expect(urls).toEqual([url, url]);
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('retries from the source of the last load that had one', async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn((url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(urls.length < 3 ? new Response(null, { status: 404 }) : new Response(bytes));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const w = await fresh();
+    await expect(w.init('https://a.example/x.wasm')).rejects.toThrow(/404/);
+    await expect(w.init('https://b.example/x.wasm')).rejects.toThrow(/404/);
+    await w.init();
+    expect(urls).toEqual(['https://a.example/x.wasm', 'https://b.example/x.wasm', 'https://b.example/x.wasm']);
+  });
+
+  it('skips a Response when it retries, and uses the source before it', async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn((url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(urls.length === 1 ? new Response(null, { status: 503 }) : new Response(bytes));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const w = await fresh();
+    const url = 'https://cdn.example/wav2flac.wasm';
+    await expect(w.init(url)).rejects.toThrow(/503/);
+    await expect(w.init(Promise.resolve(new Response(null, { status: 404 })))).rejects.toThrow(/404/);
+    await w.init();
+    expect(urls).toEqual([url, url]);
+  });
+
+  it.each([
+    // A view that doesn't start at the start of its buffer.
+    ['a view', () => {
+      const buffer = new ArrayBuffer(bytes.byteLength + 8);
+      new Uint8Array(buffer, 8).set(bytes);
+      return { buffer, source: new Uint8Array(buffer, 8) };
+    }],
+    ['an ArrayBuffer of another realm', () => {
+      const buffer = runInNewContext(`new ArrayBuffer(${bytes.length})`) as ArrayBuffer;
+      new Uint8Array(buffer).set(bytes);
+      return { buffer, source: buffer };
+    }],
+  ])('retries an abandoned load of %s from its own copy', async (_, make) => {
+    const w = await fresh();
+    const { buffer, source } = make();
+    const stop = new AbortController();
+    const first = w.init(source, { signal: stop.signal });
+    stop.abort(new Error('gave up'));
+    await expect(first).rejects.toThrow('gave up');
+    // The caller hands its buffer on, which detaches it.
+    structuredClone(buffer, { transfer: [buffer] });
+    expect(buffer.byteLength).toBe(0);
+    await w.init();
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('rejects detached bytes, and does not retry from them', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn((url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(urls.length === 1 ? new Response(null, { status: 503 }) : new Response(bytes));
+    }));
+    const w = await fresh();
+    const url = 'https://cdn.example/wav2flac.wasm';
+    await expect(w.init(url)).rejects.toThrow(/503/);
+    const buffer = new Uint8Array(bytes).buffer;
+    const view = new Uint8Array(buffer, 8);
+    structuredClone(buffer, { transfer: [buffer] });
+    await expect(w.init(buffer)).rejects.toThrow(/detached/);
+    await expect(w.init(view)).rejects.toThrow(/detached/);
+    // The retry loads from the last source that could be read.
+    await w.init();
+    expect(urls).toEqual([url, url]);
+  });
+
+  it('rejects a source it cannot inspect instead of throwing', async () => {
+    const w = await fresh();
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    await expect(w.init(proxy as never)).rejects.toThrow(TypeError);
+  });
+
+  it('retries from the URL it was given, not from a later change to it', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn((url: URL) => {
+      urls.push(url.href);
+      return new Promise<Response>(() => {});
+    }));
+    const w = await fresh();
+    const url = new URL('https://cdn.example/wav2flac.wasm');
+    const stop = new AbortController();
+    const first = w.init(url, { signal: stop.signal });
+    stop.abort(new Error('gave up'));
+    await expect(first).rejects.toThrow('gave up');
+    url.pathname = '/other.wasm';
+    const again = new AbortController();
+    const second = w.init(undefined, { signal: again.signal });
+    again.abort(new Error('gave up'));
+    await expect(second).rejects.toThrow('gave up');
+    expect(urls).toEqual(['https://cdn.example/wav2flac.wasm', 'https://cdn.example/wav2flac.wasm']);
+  });
+
+  it('lets the caller transfer its bytes right after the call', async () => {
+    const w = await fresh();
+    const buffer = new Uint8Array(bytes).buffer;
+    const done = w.init(buffer);
+    structuredClone(buffer, { transfer: [buffer] });
+    await done;
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('lets go of the bytes it loaded from, and of its copy', async () => {
+    setFlagsFromString('--expose-gc');
+    const gc = runInNewContext('gc') as () => void;
+    const w = await fresh();
+    const refs: WeakRef<ArrayBufferLike>[] = [];
+    // Records the copies of the wasm init() makes; a spy would keep them alive.
+    const proto = Object.getPrototypeOf(Uint8Array.prototype) as object;
+    const slice = Object.getOwnPropertyDescriptor(proto, 'slice')!;
+    Object.defineProperty(proto, 'slice', {
+      ...slice,
+      value(this: Uint8Array, ...args: [number?, number?]) {
+        const copy = (slice.value as Uint8Array['slice']).apply(this, args);
+        if (copy.byteLength === bytes.byteLength) refs.push(new WeakRef(copy.buffer));
+        return copy;
+      },
+    });
+    try {
+      await (async () => {
+        // A copy: slice() of a Node Buffer shares its memory.
+        const copy = new Uint8Array(bytes);
+        refs.push(new WeakRef(copy.buffer));
+        await w.init(copy);
+      })();
+    } finally {
+      Object.defineProperty(proto, 'slice', slice);
+    }
+    expect(refs).toHaveLength(2);
+    await new Promise((r) => setTimeout(r, 0));
+    gc();
+    expect(refs.map((r) => r.deref())).toEqual([undefined, undefined]);
+  });
+
   it('keeps a load alive while another caller still waits', async () => {
     let answer!: (r: Response) => void;
     const w = await fresh();
@@ -227,6 +418,11 @@ describe('init', () => {
     w.initSync(bytes);
     expect(w.isReady()).toBe(true);
     w = await fresh();
+    const sab = new SharedArrayBuffer(bytes.length);
+    new Uint8Array(sab).set(bytes);
+    w.initSync(sab as never);
+    expect(w.isReady()).toBe(true);
+    w = await fresh();
     w.initSync(new WebAssembly.Module(bytes));
     expect(w.wasmMemoryBytes()).toBeGreaterThan(0);
     await w.init();
@@ -254,6 +450,23 @@ describe('init', () => {
     const api = await import('../../ts/index.js');
     expect(() => api.encodeSync(new Uint8Array(1))).toThrow(/not initialized/);
     expect(() => api.version()).toThrow(/not initialized/);
+  });
+
+  it('thirdPartyLicenses returns the license section, initializing on first use', async () => {
+    vi.resetModules();
+    const api = await import('../../ts/index.js');
+    // The default URL (ts/wav2flac.wasm) does not exist next to the sources.
+    await expect(api.thirdPartyLicenses()).rejects.toThrow(/ENOENT/);
+    const text = '# Notices\n\n| a | b |\n| --- | --- |\n| ü | → |\n';
+    await api.init(withFirstSection(Uint8Array.from(bytes), NOTICES_SECTION, new TextEncoder().encode(text)));
+    await expect(api.thirdPartyLicenses()).resolves.toBe(text);
+  });
+
+  it('thirdPartyLicenses rejects a wasm without the license section', async () => {
+    vi.resetModules();
+    const api = await import('../../ts/index.js');
+    await api.init(bytes);
+    await expect(api.thirdPartyLicenses()).rejects.toThrow(/no "license" section/);
   });
 
   it('encodeStream initializes lazily and reports init failures', async () => {

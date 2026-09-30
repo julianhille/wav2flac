@@ -4,6 +4,7 @@
  * @module
  */
 import initGlue, { initSync as initGlueSync } from '../../build/bindgen/wav2flac.js';
+import { isBuffer, isDetached } from './input.js';
 import { isSignal } from './options.js';
 import { builtin, ignore, isNode } from './platform.js';
 
@@ -37,6 +38,12 @@ interface Load {
 let compiled: WebAssembly.Module | undefined;
 let memory: WebAssembly.Memory | undefined;
 let pending: Load | undefined;
+/**
+ * The last source that started a load and can be read again, for the loads
+ * that retry after it failed or was abandoned; bytes are a copy. Cleared once
+ * the module is ready.
+ */
+let configured: WasmSource | undefined;
 /** Whether init() is inside the glue's async instantiation. */
 let instantiating = false;
 
@@ -79,6 +86,16 @@ function toUrl(source: string | URL): URL {
 }
 
 /**
+ * Bytes as WebAssembly takes them: it rejects a bare `SharedArrayBuffer`, but
+ * not a view of one.
+ * @param bytes A buffer or a view.
+ * @returns A view, or `bytes` as it is.
+ */
+function bufferSource(bytes: ArrayBufferView | ArrayBufferLike): BufferSource {
+  return (isBuffer(bytes) ? new Uint8Array(bytes) : bytes) as BufferSource;
+}
+
+/**
  * Compiles a module from any {@link WasmSource}.
  * @param source The source.
  * @param signal Cancels a fetch or file read started here.
@@ -86,10 +103,7 @@ function toUrl(source: string | URL): URL {
  */
 async function compile(source: WasmSource, signal: AbortSignal): Promise<WebAssembly.Module> {
   if (source instanceof WebAssembly.Module) return source;
-  if (ArrayBuffer.isView(source) || source instanceof ArrayBuffer) return WebAssembly.compile(source as BufferSource);
-  if (typeof SharedArrayBuffer === 'function' && (source as unknown) instanceof SharedArrayBuffer) {
-    return WebAssembly.compile(new Uint8Array(source as unknown as SharedArrayBuffer).slice());
-  }
+  if (ArrayBuffer.isView(source) || isBuffer(source)) return WebAssembly.compile(bufferSource(source));
   let res: Response | PromiseLike<Response>;
   if (typeof source === 'string' || source instanceof URL) {
     const url = toUrl(source);
@@ -127,6 +141,8 @@ function startLoad(source: WasmSource): Load {
       const out = await initGlue({ module_or_path: mod });
       compiled = mod;
       memory = out.memory;
+      // Nothing retries any more; don't keep the bytes alive.
+      configured = undefined;
     } finally {
       instantiating = false;
     }
@@ -148,7 +164,11 @@ function startLoad(source: WasmSource): Load {
 function waitFor(load: Load, signal: AbortSignal): Promise<void> {
   load.waiters++;
   return new Promise<void>((resolve, reject) => {
+    let waiting = true;
+    // Runs once: on abort, or when the load settles, whichever comes first.
     const done = (): void => {
+      if (!waiting) return;
+      waiting = false;
       signal.removeEventListener('abort', onAbort);
       load.waiters--;
     };
@@ -181,8 +201,16 @@ function waitFor(load: Load, signal: AbortSignal): Promise<void> {
  * A load that never finishes (a stalled download, say) keeps `init()`
  * pending. Pass a `signal` to give up: `init()` then rejects with its reason,
  * and once every caller waiting on the load has given up, the download is
- * cancelled and the next `init()` starts over. A failed load is retried by
- * the next call, too.
+ * cancelled and the next `init()` starts over. A caller without a signal,
+ * such as `probe()`, keeps waiting, so the load goes on. A failed load is
+ * retried by the next call, too.
+ *
+ * A retry loads from the `source` of that call. Without one, it loads from
+ * the last URL, path, bytes or module that a load started with, so the
+ * `init()` inside `encode()` retries your custom location. `init()` loads
+ * from a copy of bytes, so you can reuse or transfer your buffer right after
+ * the call. A `Response` can be read only once; after it failed, pass a new
+ * one.
  *
  * @param source Where to load the wasm from. Default: `wav2flac.wasm` next to
  *   the package's JS (read with `fs` in Node, `fetch`ed elsewhere).
@@ -207,12 +235,39 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
   }
   if (compiled !== undefined) return Promise.resolve();
   if (signal?.aborted === true) return Promise.reject(signal.reason);
-  const load = pending ??= startLoad(source ?? defaultWasmUrl());
+  if (pending === undefined) {
+    let again: WasmSource | undefined;
+    try {
+      again = source === undefined ? undefined : retrySource(source);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    if (again !== undefined) configured = again;
+    pending = startLoad(again ?? source ?? configured ?? defaultWasmUrl());
+  }
+  const load = pending;
   if (signal === undefined) {
     load.pinned = true;
     return load.promise;
   }
   return waitFor(load, signal);
+}
+
+/**
+ * What a retry of a load from `source` loads from: a path or a module as it
+ * is, and a copy of a `URL` or of bytes, which the caller may change or
+ * transfer meanwhile. A `Response` can be read only once, so it has none.
+ * @param source The source.
+ * @returns The source for a retry, or `undefined`.
+ * @throws {TypeError} For detached bytes.
+ */
+function retrySource(source: WasmSource): WasmSource | undefined {
+  if (typeof source === 'string' || source instanceof WebAssembly.Module) return source;
+  if (source instanceof URL) return new URL(source.href);
+  if (!ArrayBuffer.isView(source) && !isBuffer(source)) return undefined;
+  if (isDetached(source)) throw new TypeError('wav2flac: init() got wasm bytes that were transferred (detached)');
+  if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength).slice();
+  return new Uint8Array(source).slice();
 }
 
 /**
@@ -234,10 +289,11 @@ export function initSync(source?: BufferSource | WebAssembly.Module): void {
     throw new Error('wav2flac: init() is instantiating the module; await it instead of calling initSync()');
   }
   const bytes = source ?? builtin<typeof import('node:fs')>('fs').readFileSync(defaultWasmUrl());
-  const mod = bytes instanceof WebAssembly.Module ? bytes : new WebAssembly.Module(bytes as BufferSource);
+  const mod = bytes instanceof WebAssembly.Module ? bytes : new WebAssembly.Module(bufferSource(bytes));
   const out = initGlueSync({ module: mod });
   compiled = mod;
   memory = out.memory;
+  configured = undefined;
 }
 
 /**

@@ -10,6 +10,91 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+
+- `wav2flac.wasm` carries the license notices of the Rust crates in it: the
+  text of `THIRD_PARTY_LICENSES.txt`, as a custom section named `license` at
+  the start of the file. It isn't compressed, so `head` or `strings` shows it as
+  the first lines of the file, and
+  `WebAssembly.Module.customSections(module, 'license')` returns it. Engines
+  ignore the section. Every license file is there in full. Vite and webpack
+  copy the wasm as it is, so the notices go wherever the wasm goes, with
+  nothing to configure. The wasm grows from 165 KB to 426 KB, or from 72 KB
+  to 87 KB gzipped.
+- `thirdPartyLicenses()` returns the license notices from the loaded wasm, as
+  Markdown. It initializes the wasm on first use and fetches nothing else.
+- `wav2flac/THIRD_PARTY_LICENSES.txt` resolves to the notices file in the
+  package, for tools and docs that want the text.
+- Docs: a page on the license notices when bundling or hosting the wasm
+  yourself.
+
+### Changed
+
+- `THIRD_PARTY_LICENSES.txt` is Markdown: a table of the crates with their
+  versions, licenses and sources, then each crate's license files word for
+  word, in code blocks. The name stays, and the text still reads as plain
+  text.
+- The JS bundles no longer start with a `/*! @license */` comment. The
+  notices it listed are in the wasm now, which has them in full. Before,
+  bundlers such as Vite dropped the comment, and the notices with it.
+
+### Fixed
+
+- Worker encoder: `terminate()` and a crash reject a `probe()` or
+  `wasmMemoryBytes()` call made while the wasm still loads. Before, such a
+  call stayed pending forever. Such a call also rejects when its message
+  can't be posted to the worker, instead of staying pending and keeping Node
+  running.
+- Worker encoder: `wasmMemoryBytes()` rejects when the worker's wasm failed
+  to start, so it tells whether the worker can still encode. Before, it
+  answered 0.
+- `init()` retries a failed or abandoned load from the URL, path, bytes or
+  module it was given. Before, after `init(url, { signal })` gave up, the
+  `init()` inside `encode()` loaded from the default location instead. It
+  keeps a copy of bytes or of a `URL` until the wasm is ready, so a buffer
+  you transfer or a `URL` you change after the call can't break the retry.
+  Bytes that were already transferred (detached) reject with an error that
+  says so, and a retry doesn't use them.
+- `initSync()` accepts a `SharedArrayBuffer`, like `init()`. Before, it
+  threw.
+- `init()` loads from an `ArrayBuffer` of another realm, such as an iframe or
+  a `vm` context. Before, it rejected it as not being wasm bytes.
+- Docs: the worker pool sample replaces a worker that crashed. Before, the
+  pool kept handing jobs to it, and each of them failed. It also rejects a
+  size below 1, which made every job wait forever, and its batch example
+  keeps the results of the other files when one fails. Before, one bad file
+  made the batch terminate the pool, which failed every job still running or
+  waiting. A failed job rejects at once, and a worker that stops answering
+  is replaced after 5 seconds. A job whose signal aborts while it waits for
+  a worker rejects at once, too, not only once it gets one, and a job whose
+  signal already aborted doesn't take an idle worker.
+- Docs: the FIFO queue sample no longer keeps the last result alive, and a
+  rejection that nobody handles is reported again.
+- Docs: buffered output is held in JS memory, not in wasm memory, and the
+  wasm memory of an encoder doesn't grow with long jobs. It depends on
+  `blockSize`, the channel count, the bit depth and resampling instead, from
+  well under 1 MiB with the defaults to up to about 20 MiB with the largest
+  block size and 8 channels.
+- Docs site: the how-to overview is titled "Overview" instead of "Index".
+  "Edit on GitHub" opens the README on the home page and the generator on
+  the third-party page, and is gone from the generated API reference, where
+  it led to a 404.
+- Docs site: every Python package of the build is pinned, not only MkDocs.
+- Third-party notices: the Rust version they name comes from
+  `rust-toolchain.toml`, not from the `rustc` on the path, and the build
+  fails when the standard library's license texts or the `rustc` that built
+  the wasm are from another release.
+- Third-party page: crates are sorted the same in every locale, and the page
+  links the same notice files that `THIRD_PARTY_LICENSES.txt` reproduces.
+- API reference: `Wav2FlacError` no longer lists the static members that
+  Node's type definitions add to `Error` (`captureStackTrace`,
+  `prepareStackTrace`, `stackTraceLimit`). A `@throws` tag with a union type
+  or without text renders cleanly, and the docs build fails when an
+  exported type would be published as `any`.
+- README: the license section names the licenses of the Rust standard
+  library parts (Unicode-3.0, LLVM exception), and says where the notices
+  are.
+
 ## [1.0.0-rc.3] - 2026-09-29
 
 ### Added
@@ -29,6 +114,7 @@ links are collected at the bottom of this file.
   thread, parallel across workers), and how-to guides for a worker pool and
   a FIFO queue.
 - Docs: a how-to section, and a Guides list in the README.
+- README: the package has no runtime dependencies (a new feature bullet).
 - Docs: an API reference generated from the TSDoc (TypeDoc), on Read the Docs
   and checked in CI.
 - Docs: a third-party components page listing every crate compiled into the

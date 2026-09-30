@@ -5,14 +5,10 @@
 // build tools. The page is committed, so Read the Docs
 // needs no Rust toolchain; CI regenerates it and fails when it is out of date.
 // Usage: node scripts/gen-third-party.ts [output file]
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { STD_PARTS, rustVersion, shippedCrates } from './crates.ts';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { STD_PARTS, noticeFiles, rustVersion, shippedCrates } from './crates.ts';
 
 const out = process.argv[2] ?? 'docs/third-party.md';
-
-/** License file names, as gen-licenses.ts picks them. */
-const LICENSE_FILE = /^(licen[cs]e|copying)/i;
 
 /**
  * Links each SPDX identifier of a license expression to its SPDX page.
@@ -25,8 +21,8 @@ function spdxLinks(expr: string): string {
 }
 
 const rows = shippedCrates().map((c) => {
-  const texts = readdirSync(dirname(c.manifest_path)).filter((f) => LICENSE_FILE.test(f)).sort();
-  if (c.license_file !== null && !texts.includes(c.license_file)) texts.push(c.license_file);
+  // The files whose texts THIRD_PARTY_LICENSES.txt reproduces.
+  const texts = noticeFiles(c);
   const license = [
     c.license === null ? 'see license text' : spdxLinks(c.license),
     // docs.rs serves every published crate's sources at the exact version.
@@ -79,12 +75,10 @@ const page = `<!-- SPDX-License-Identifier: 0BSD -->
 
 wav2flac itself is licensed 0BSD. The WebAssembly module also contains the
 Rust crates below, and the parts of the Rust standard library that they use.
-Their full license notices ship in the package as
-\`THIRD_PARTY_LICENSES.txt\`, and each JS file of the package starts with a
-\`/*! @license */\` comment that lists them.
-
-The \`.wasm\` file itself carries no notices. If you host it yourself, for
-example on a CDN, put \`THIRD_PARTY_LICENSES.txt\` next to it.
+Their full license notices are in \`wav2flac.wasm\` itself, as its first
+section, and in the package as \`pkg/THIRD_PARTY_LICENSES.txt\`
+(\`wav2flac/THIRD_PARTY_LICENSES.txt\`). See
+[Bundling and license notices](bundling.md).
 
 ## Compiled into wav2flac.wasm
 

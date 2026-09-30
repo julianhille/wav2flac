@@ -9,12 +9,30 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { NOTICES_SECTION, readLeb128 } from '../../scripts/wasm-section.js';
 import { collect, makeWav } from '../helpers/wav.js';
 
 type Api = typeof import('../../ts/index.js');
 
 const root = resolve(import.meta.dirname, '../..');
 const wav = makeWav({ frames: 44100, channels: 2, bits: 16, seed: 7 });
+
+/** The Rust release in rust-toolchain.toml, which the notices name. */
+const rustRelease = /^channel = "([^"]+)"/m.exec(readFileSync(join(root, 'rust-toolchain.toml'), 'utf8'))?.[1];
+
+/**
+ * Splits THIRD_PARTY_LICENSES.txt into its sections, one per component.
+ * @param text The file.
+ * @returns A lookup by the heading of a section, which must match once.
+ */
+function noticeSections(text: string): (heading: string) => string {
+  const sections = text.split(/\n## /).slice(1);
+  return (heading) => {
+    const found = sections.filter((s) => s.split('\n')[0] === heading || s.startsWith(`${heading} `));
+    expect(found.map((s) => s.split('\n')[0]), heading).toHaveLength(1);
+    return found[0] ?? '';
+  };
+}
 
 /**
  * Runs a command and returns its stdout.
@@ -77,41 +95,57 @@ describe('installed package', () => {
 
   it('ships the license notices of the Rust crates in the wasm', () => {
     const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
+    const section = noticeSections(text);
     for (const name of ['hound', 'libflac-rs', 'rubato', 'wasm-bindgen']) {
-      expect(text).toMatch(new RegExp(`^${name} \\d`, 'm'));
+      expect(section(name)).toMatch(/^- License: /m);
     }
     // The parts of the standard library that the wasm links, each with its notices.
-    for (const part of ['core, alloc, std', 'dlmalloc', 'compiler_builtins, libm']) {
-      expect(text).toMatch(new RegExp(`^Rust standard library \\S+: ${part}$`, 'm'));
-    }
-    expect(text).toContain('Copyright © 1991-2024 Unicode, Inc.');
-    expect(text).toContain('Copyright (c) 2014 Alex Crichton');
-    expect(text).toContain('---- LLVM Exceptions to the Apache 2.0 License ----');
-    expect(text).toContain('Copyright © 2005-2020 Rich Felker, et al.');
+    const std = `Rust standard library ${rustRelease}:`;
+    expect(section(`${std} core, alloc, std`)).toContain('Copyright (c) The Rust Project Contributors');
+    expect(section(`${std} core, alloc, std`)).toContain('Copyright © 1991-2024 Unicode, Inc.');
+    expect(section(`${std} dlmalloc`)).toContain('Copyright (c) 2014 Alex Crichton');
+    expect(section(`${std} compiler_builtins, libm`)).toContain('---- LLVM Exceptions to the Apache 2.0 License ----');
+    expect(section(`${std} compiler_builtins, libm`)).toContain('Copyright © 2005-2020 Rich Felker, et al.');
   });
 
-  it('puts the BSD and MIT notices at the head of every bundle', () => {
+  it('puts the notices first in the wasm, as THIRD_PARTY_LICENSES.txt has them', () => {
+    const notices = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'));
+    const wasm = readFileSync(join(installed, 'pkg/wav2flac.wasm'));
+    // The header, then a custom section (id 0), its size and its name.
+    expect([...wasm.subarray(0, 9)]).toEqual([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 0]);
+    const size = readLeb128(wasm, 9);
+    const name = Buffer.from(NOTICES_SECTION);
+    const start = size.next + 1 + name.length;
+    expect(wasm.subarray(size.next, start)).toEqual(Buffer.concat([Uint8Array.of(name.length), name]));
+    expect(size.next + size.value - start).toBe(notices.length);
+    expect(wasm.subarray(start, start + notices.length)).toEqual(notices);
+    expect(String(wasm.subarray(start, start + 50))).toBe('# Third-party software compiled into wav2flac.wasm');
+    const sections = WebAssembly.Module.customSections(new WebAssembly.Module(wasm), NOTICES_SECTION);
+    expect(sections.map((b) => Buffer.from(b))).toEqual([notices]);
+  });
+
+  it('lists every component in a Markdown table, with its notices in code blocks', () => {
+    const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
+    const rows = text.split('\n').filter((l) => /^\| (?!---|Component )/.test(l));
+    const headings = text.split('\n').filter((l) => l.startsWith('## '));
+    expect(rows).toHaveLength(headings.length);
+    expect(rows).toContain('| hound | 3.5.1 | Apache-2.0 | https://github.com/ruuda/hound |');
+    for (const row of rows) expect(row.split(' | '), row).toHaveLength(4);
+    // Every notice file is a fenced block, and the fences pair up.
+    expect(text.match(/^### /gm)?.length).toBe(text.match(/^```text$/gm)?.length);
+    expect(text.match(/^```$/gm)?.length).toBe(text.match(/^```text$/gm)?.length);
+  });
+
+  it.each([['ESM', esm], ['CJS', cjs]])('returns the notices from the wasm (%s)', async (_, api) => {
+    const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
+    await expect(api.thirdPartyLicenses()).resolves.toBe(text);
+  });
+
+  it('keeps license comments out of the bundles', () => {
     for (const f of ['esm/index.js', 'esm/worker.js', 'cjs/index.cjs', 'cjs/worker.cjs']) {
-      const head = readFileSync(join(installed, 'pkg', f), 'utf8').split('*/')[0] as string;
-      expect(head, f).toMatch(/^\/\/ SPDX-License-Identifier: 0BSD\n\/\*!\n \* @license\n/);
-      expect(head, f).toMatch(/^ \* {3}libflac-rs \S+ \(BSD-3-Clause\)$/m);
-      expect(head, f).toContain(' * Copyright (c) 2026, Dani Sarfati');
-      expect(head, f).toContain(' * Copyright (C) 2000-2009 Josh Coalson, Copyright (C) 2011-2023 Xiph.Org');
-      expect(head, f).toContain(' * 2. Redistributions in binary form must reproduce the above copyright notice,');
-      expect(head, f).toContain(' * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"');
-      // MIT-only crates and the Rust standard library need their notice too.
-      for (const mit of ['generic-array', 'windowfunctions', 'Rust standard library']) {
-        expect(head, f).toMatch(new RegExp(`^ \\* ${mit} .*\\(MIT.*\\):$`, 'm'));
-      }
-      expect(head, f).toContain(' * Copyright (c) The Rust Project Contributors');
-      expect(head, f).toContain(' * Copyright (c) 2014 Alex Crichton');
-      expect(head, f).toContain(' *       Copyright (c) 2009-2016 by the contributors listed in CREDITS.TXT');
-      expect(head, f).toContain(' *     Copyright (c) 2018 Jorge Aparicio');
-      // One copy of the MIT permission notice serves every crate under it.
-      expect(head.split('Permission is hereby granted, free of charge').length - 1, f).toBe(1);
-      expect(head, f).toMatch(/^ \* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE$/m);
-      // The banner points to the notices file for the long Apache-2.0 text.
-      expect(head, f).not.toContain('TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION');
+      const text = readFileSync(join(installed, 'pkg', f), 'utf8');
+      expect(text, f).toMatch(/^\/\/ SPDX-License-Identifier: 0BSD\n/);
+      expect(text, f).not.toMatch(/@license|@preserve|\/\*!/);
     }
   });
 
@@ -146,6 +180,9 @@ describe('installed package', () => {
       if (Buffer.compare(out, viaWorker) !== 0) throw new Error('worker output differs');
       readFileSync(new URL(import.meta.resolve('wav2flac/wasm')));
       readFileSync(new URL(import.meta.resolve('wav2flac/package.json')));
+      if (!readFileSync(new URL(import.meta.resolve('wav2flac/THIRD_PARTY_LICENSES.txt')), 'utf8').includes('libflac-rs')) {
+        throw new Error('THIRD_PARTY_LICENSES.txt does not resolve');
+      }
       process.stdout.write(out);
     `);
     writeFileSync(join(consumer, 'consumer.cjs'), `
@@ -161,6 +198,9 @@ describe('installed package', () => {
         if (Buffer.compare(out, viaWorker) !== 0) throw new Error('worker output differs');
         readFileSync(require.resolve('wav2flac/wasm'));
         readFileSync(require.resolve('wav2flac/package.json'));
+        if (!readFileSync(require.resolve('wav2flac/THIRD_PARTY_LICENSES.txt'), 'utf8').includes('libflac-rs')) {
+          throw new Error('THIRD_PARTY_LICENSES.txt does not resolve');
+        }
         process.stdout.write(out);
       })().catch((e) => { console.error(e); process.exit(1); });
     `);

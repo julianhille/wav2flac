@@ -33,7 +33,11 @@ export interface WorkerEncoder {
   encodeStream(input: Input | PcmInput, options?: Omit<Options, 'seekPointInterval'>): ReadableStream<Bytes>;
   /** Like `probe()`, but in the worker. The header bytes are copied. */
   probe(input: Uint8Array | ArrayBuffer): Promise<WavInfo>;
-  /** Size of the worker's wasm linear memory in bytes. */
+  /**
+   * Size of the worker's wasm linear memory in bytes. Rejects once the worker
+   * has crashed or was terminated, or when its wasm failed to start, so it
+   * also tells whether the worker can still encode.
+   */
   wasmMemoryBytes(): Promise<number>;
   /** Stops the worker; pending jobs reject with an `AbortError`. */
   terminate(): void;
@@ -333,13 +337,11 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
    * @param pick Extracts the result from the reply.
    * @returns The result.
    */
-  const request = async <T>(msg: (id: number) => ToWorker, pick: (m: FromWorker) => T | undefined): Promise<T> => {
-    if (dead !== undefined) throw dead;
-    await ready;
-    // The worker may have died while the wasm was loading.
-    if (dead !== undefined) throw dead;
+  const request = <T>(msg: (id: number) => ToWorker, pick: (m: FromWorker) => T | undefined): Promise<T> => {
     const id = nextId++;
     return new Promise<T>((resolve, reject) => {
+      // Registered before the wasm is ready, so that terminate() and a crash
+      // reject it while the wasm is still loading.
       add(id, {
         handle(m) {
           remove(id);
@@ -348,7 +350,14 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
         },
         fail: reject,
       });
-      post(msg(id));
+      // A load that failed, or a message that cannot be posted, fails it.
+      ready.then(() => {
+        if (jobs.has(id)) post(msg(id));
+      }).catch((e: unknown) => {
+        if (!jobs.has(id)) return;
+        remove(id);
+        reject(e);
+      });
     });
   };
 

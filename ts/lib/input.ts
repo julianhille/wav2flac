@@ -55,7 +55,7 @@ function typeTag(x: unknown): string {
  * @param x Candidate.
  * @returns `true` for array buffers.
  */
-function isBuffer(x: unknown): x is ArrayBuffer {
+export function isBuffer(x: unknown): x is ArrayBuffer {
   const t = typeTag(x);
   return t === 'ArrayBuffer' || t === 'SharedArrayBuffer';
 }
@@ -65,7 +65,7 @@ function isBuffer(x: unknown): x is ArrayBuffer {
  * @param x Candidate.
  * @returns `true` for detached buffers.
  */
-function isDetached(x: unknown): boolean {
+export function isDetached(x: unknown): boolean {
   const b: unknown = ArrayBuffer.isView(x) ? x.buffer : x;
   return isBuffer(b) && (b as { detached?: boolean }).detached === true;
 }

@@ -51,7 +51,8 @@ wasm-opt -O3 --strip-debug --strip-producers \
   build/bindgen/wav2flac_bg.wasm -o pkg/wav2flac.wasm
 
 echo "» third-party licenses"
-node scripts/gen-licenses.ts pkg/THIRD_PARTY_LICENSES.txt build/license-banner.js
+node scripts/gen-licenses.ts pkg/THIRD_PARTY_LICENSES.txt
+node scripts/embed-notices.ts pkg/wav2flac.wasm pkg/THIRD_PARTY_LICENSES.txt
 
 echo "» esbuild + tsc"
 node scripts/build-js.ts
