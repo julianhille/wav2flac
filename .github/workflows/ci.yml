@@ -155,6 +155,9 @@ jobs:
       - name: Lint (oxlint)
         if: matrix.node == 22
         run: npm run lint
+      - name: Formatting (Prettier)
+        if: matrix.node == 22
+        run: npm run format:check
       - name: Build the package
         run: npm run build
       - name: Type-check
