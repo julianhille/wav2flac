@@ -14,15 +14,15 @@ afterEach(() => {
 
 /**
  * A crate directory with the given files and directories.
- * @param files File names.
- * @param dirs Directory names.
+ * @param files File paths, with `/`.
+ * @param dirs Directory paths, created before the files.
  * @param licenseFile The manifest's `license-file`.
  * @returns The crate.
  */
 function crate(files: string[], dirs: string[] = [], licenseFile: string | null = null): Package {
   dir = mkdtempSync(join(tmpdir(), 'crate-'));
+  for (const d of dirs) mkdirSync(join(dir, d), { recursive: true });
   for (const f of ['Cargo.toml', ...files]) writeFileSync(join(dir, f), 'x');
-  for (const d of dirs) mkdirSync(join(dir, d));
   return {
     name: 'c',
     version: '1.0.0',
@@ -36,9 +36,21 @@ describe('noticeFiles', () => {
   it('lists the notice files, sorted, and no directories', () => {
     const c = crate(
       ['README.md', 'LICENSE-MIT', 'COPYRIGHT', 'NOTICE', 'LICENSE-APACHE'],
-      ['LICENSES', 'licenses-extra'],
+      ['LICENSES', 'licenses-extra', 'docs'],
     );
     expect(noticeFiles(c)).toEqual(['COPYRIGHT', 'LICENSE-APACHE', 'LICENSE-MIT', 'NOTICE']);
+  });
+
+  it('lists the files in a license directory, as in the REUSE layout', () => {
+    const c = crate(
+      ['AUTHORS', 'LICENSES/MIT.txt', 'LICENSES/extra/BSD-3-Clause.txt', 'docs/LICENSE'],
+      ['LICENSES/extra', 'docs'],
+    );
+    expect(noticeFiles(c)).toEqual([
+      'AUTHORS',
+      'LICENSES/MIT.txt',
+      'LICENSES/extra/BSD-3-Clause.txt',
+    ]);
   });
 
   it('adds the license-file of the manifest once', () => {

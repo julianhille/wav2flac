@@ -153,6 +153,20 @@ describe('installed package', () => {
     );
   });
 
+  it('ships a license text for every component, not only its NOTICE or AUTHORS', () => {
+    const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
+    // Crates whose license text has a name that does not start with LICENSE or
+    // COPYING, such as a `license-file` elsewhere. Check each one by hand.
+    const otherNames = new Set<string>();
+    const sections = text.split(/\n## /).slice(1);
+    expect(sections.length).toBeGreaterThan(10);
+    for (const s of sections) {
+      const heading = s.split('\n')[0]!;
+      if (otherNames.has(heading.split(' ')[0]!)) continue;
+      expect(s, heading).toMatch(/^### (licen[cs]e|copying)/im);
+    }
+  });
+
   it('puts the notices first in the wasm, as THIRD_PARTY_LICENSES.txt has them', () => {
     const notices = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'));
     const wasm = readFileSync(join(installed, 'pkg/wav2flac.wasm'));

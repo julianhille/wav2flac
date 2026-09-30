@@ -12,6 +12,10 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- The build puts the license texts of a crate that keeps them in a
+  `LICENSES/` directory (the REUSE layout) into the wasm's notices and
+  `THIRD_PARTY_LICENSES.txt`. Before, it silently left them out when the crate
+  also had e.g. an `AUTHORS` file. No crate in the wasm has that layout today.
 - `node scripts/release.ts prepare X.Y.Z` runs on a `release/vX.Y.Z` branch
   started from `origin/main`, as the release workflow describes, and prints
   the matching push command. It used to run only on `main`.

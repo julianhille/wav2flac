@@ -5,7 +5,7 @@
 // Shared by gen-licenses.ts and gen-third-party.ts.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, normalize } from 'node:path';
+import { dirname, join, normalize, relative, sep } from 'node:path';
 
 /** A package as `cargo metadata` describes it. */
 export interface Package {
@@ -71,16 +71,25 @@ const NOTICE_FILE = /^(licen[cs]e|copying|copyright|notice|authors)/i;
 
 /**
  * The files in a crate's sources that carry its license notices: license
- * texts, NOTICE and AUTHORS files, and the `license-file` of its manifest.
+ * texts, NOTICE and AUTHORS files, every file in a directory with such a name
+ * (the `LICENSES/` of the REUSE layout), and the `license-file` of its manifest.
  * @param c The crate.
- * @returns File names relative to the crate's directory, sorted.
+ * @returns File paths relative to the crate's directory, with `/`, sorted.
  * @throws {Error} When the crate has none.
  */
 export function noticeFiles(c: Package): string[] {
   const dir = dirname(c.manifest_path);
   const files = readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && NOTICE_FILE.test(e.name))
-    .map((e) => e.name)
+    .filter((e) => NOTICE_FILE.test(e.name))
+    .flatMap((e) =>
+      e.isDirectory()
+        ? readdirSync(join(dir, e.name), { withFileTypes: true, recursive: true })
+            .filter((f) => f.isFile())
+            .map((f) => relative(dir, join(f.parentPath, f.name)).split(sep).join('/'))
+        : e.isFile()
+          ? [e.name]
+          : [],
+    )
     .sort();
   const own = c.license_file === null ? undefined : normalize(c.license_file);
   if (own !== undefined && !files.includes(own)) files.push(own);
