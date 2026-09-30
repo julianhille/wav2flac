@@ -28,6 +28,10 @@ Only the call that starts a load chooses its source. Later calls share the
 load already in progress and ignore their argument. A retry after a failed or
 abandoned load (see [Retrying](#retrying)) loads from your source again.
 
+Loading the package itself straight from a CDN, without a bundler? Use the
+minified bundles; the wasm then comes from the same CDN folder. See
+[Load from a CDN without a bundler](how-to/load-from-cdn.md).
+
 ## Timeouts and stalled downloads
 
 A download that never finishes, from a hung CDN or a dead connection, keeps

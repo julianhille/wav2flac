@@ -236,6 +236,7 @@ clear message. Nothing is ever converted lossily unless you ask for it.
 - How-to guides ([all](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/index.md)):
   - [Encode in parallel with a worker pool](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/parallel-encoding.md)
   - [Encode one at a time with a FIFO queue](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/fifo-queue.md)
+  - [Load from a CDN without a bundler](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/load-from-cdn.md)
 
 ## Benchmark
 

@@ -58,6 +58,6 @@ echo "» esbuild + tsc"
 node scripts/build-js.ts
 
 printf '  %-22s %8s %8s\n' file bytes gzip
-for f in pkg/wav2flac.wasm pkg/esm/index.js pkg/esm/worker.js pkg/cjs/index.cjs; do
+for f in pkg/wav2flac.wasm pkg/esm/{index,worker}{,.min}.js pkg/cjs/index{,.min}.cjs; do
   printf '  %-22s %8d %8d\n' "${f#pkg/}" "$(wc -c <"$f")" "$(gzip -9c "$f" | wc -c)"
 done

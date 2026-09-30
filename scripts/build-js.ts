@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: 0BSD
-// Bundles ts/ into pkg/esm (ESM) and pkg/cjs (CommonJS) and emits the type
-// declarations for both. The license notices of the Rust crates are in the
-// wasm, not in the bundles. Run by scripts/build.sh (Node ≥ 22.18 strips
-// types).
+// Bundles ts/ into pkg/esm (ESM) and pkg/cjs (CommonJS), each also minified
+// as *.min.js / *.min.cjs, and emits the type declarations for both. The
+// license notices of the Rust crates are in the wasm, not in the bundles. Run
+// by scripts/build.sh (Node ≥ 22.18 strips types).
 import { build, type Plugin } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -18,7 +18,6 @@ const common = {
   logLevel: 'warning' as const,
   banner: { js: banner },
 };
-const entryPoints = { index: 'ts/index.ts', worker: 'ts/worker.ts' };
 
 /** `import.meta.url` for the CommonJS build, without a static `require`. */
 const cjsImportMetaUrl = `const __wav2flac_import_meta_url = (() => {
@@ -32,23 +31,51 @@ const cjsImportMetaUrl = `const __wav2flac_import_meta_url = (() => {
 })();`;
 
 /**
- * Worker URLs in the CommonJS build: Node's worker_threads run worker.cjs;
- * a browser module worker cannot run CommonJS, so it uses the ESM worker.
+ * Points the worker URLs in worker-client.ts at the bundle's own worker: the
+ * `.min` worker from a minified index, and in the CommonJS build Node's
+ * worker_threads run worker.cjs while a browser module worker, which cannot
+ * run CommonJS, uses the ESM worker.
+ * @param min Whether this is the minified build.
+ * @param cjs Whether this is the CommonJS build.
+ * @returns The plugin.
  */
-const cjsWorker: Plugin = {
-  name: 'cjs-worker',
+function workerUrls(min: boolean, cjs: boolean): Plugin {
+  const suffix = min ? '.min' : '';
+  return {
+    name: 'worker-urls',
+    setup(b) {
+      b.onLoad({ filter: /worker-client\.ts$/ }, (args) => {
+        const src = readFileSync(args.path, 'utf8');
+        const nodeWorker = "const NODE_WORKER = './worker.js';";
+        const browserWorker = "new URL('./worker.js', import.meta.url)";
+        if (!src.includes(nodeWorker) || !src.includes(browserWorker)) {
+          throw new Error('build-js: worker URLs in worker-client.ts changed; update workerUrls');
+        }
+        const browserPath = cjs ? `../esm/worker${suffix}.js` : `./worker${suffix}.js`;
+        const contents = src
+          .replace(nodeWorker, `const NODE_WORKER = './worker${suffix}.${cjs ? 'cjs' : 'js'}';`)
+          .replace(browserWorker, `new URL('${browserPath}', import.meta.url)`);
+        return { contents, loader: 'ts' };
+      });
+    },
+  };
+}
+
+/**
+ * Minifying renames the Wav2FlacError class, and consoles print that name
+ * (`P [Wav2FlacError]: …`). This sets the name back, in the minified build
+ * only, so the normal bundles stay as they are.
+ */
+const errorName: Plugin = {
+  name: 'error-name',
   setup(b) {
-    b.onLoad({ filter: /worker-client\.ts$/ }, (args) => {
+    b.onLoad({ filter: /[\\/]lib[\\/]errors\.ts$/ }, (args) => {
       const src = readFileSync(args.path, 'utf8');
-      const nodeWorker = "const NODE_WORKER = './worker.js';";
-      const browserWorker = "new URL('./worker.js', import.meta.url)";
-      if (!src.includes(nodeWorker) || !src.includes(browserWorker)) {
-        throw new Error('build-js: worker URLs in worker-client.ts changed; update cjsWorker');
+      if (!src.includes('export class Wav2FlacError extends Error {')) {
+        throw new Error('build-js: Wav2FlacError in errors.ts changed; update errorName');
       }
-      const contents = src
-        .replace(nodeWorker, "const NODE_WORKER = './worker.cjs';")
-        .replace(browserWorker, "new URL('../esm/worker.js', import.meta.url)");
-      return { contents, loader: 'ts' };
+      const fix = "Object.defineProperty(Wav2FlacError, 'name', { value: 'Wav2FlacError' });";
+      return { contents: `${src}\n${fix}\n`, loader: 'ts' };
     });
   },
 };
@@ -56,23 +83,30 @@ const cjsWorker: Plugin = {
 rmSync('pkg/esm', { recursive: true, force: true });
 rmSync('pkg/cjs', { recursive: true, force: true });
 
-await build({ ...common, entryPoints, outdir: 'pkg/esm', format: 'esm' });
-await build({
-  ...common,
-  entryPoints,
-  outdir: 'pkg/cjs',
-  format: 'cjs',
-  outExtension: { '.js': '.cjs' },
-  define: { 'import.meta.url': '__wav2flac_import_meta_url' },
-  // The directive must come before the shim, or the whole file is sloppy mode.
-  // No `require()`: browser bundlers would try to resolve `node:url`. Outside
-  // Node the URL comes from the script tag or the page; bundled code that
-  // can't tell passes its wasm to `init()`.
-  banner: {
-    js: `${common.banner.js}\n"use strict";\n${cjsImportMetaUrl}`,
-  },
-  plugins: [cjsWorker],
-});
+for (const min of [false, true]) {
+  const suffix = min ? '.min' : '';
+  const entryPoints = { [`index${suffix}`]: 'ts/index.ts', [`worker${suffix}`]: 'ts/worker.ts' };
+  const opts = { ...common, entryPoints, minify: min };
+  // The normal ESM build needs no plugin: its worker URLs are right as written.
+  const plugins = (cjs: boolean): Plugin[] =>
+    [...(min || cjs ? [workerUrls(min, cjs)] : []), ...(min ? [errorName] : [])];
+  await build({ ...opts, outdir: 'pkg/esm', format: 'esm', plugins: plugins(false) });
+  await build({
+    ...opts,
+    outdir: 'pkg/cjs',
+    format: 'cjs',
+    outExtension: { '.js': '.cjs' },
+    define: { 'import.meta.url': '__wav2flac_import_meta_url' },
+    // The directive must come before the shim, or the whole file is sloppy mode.
+    // No `require()`: browser bundlers would try to resolve `node:url`. Outside
+    // Node the URL comes from the script tag or the page; bundled code that
+    // can't tell passes its wasm to `init()`.
+    banner: {
+      js: `${common.banner.js}\n"use strict";\n${cjsImportMetaUrl}`,
+    },
+    plugins: plugins(true),
+  });
+}
 
 // Declarations: one tsc run, copied as .d.ts (ESM) and .d.cts (CJS).
 rmSync('build/types', { recursive: true, force: true });
