@@ -76,7 +76,8 @@ links are collected at the bottom of this file.
   without a bundler: `pkg/esm/index.min.js` and `worker.min.js`,
   `pkg/cjs/index.min.cjs` and `worker.min.cjs`, each with a source map, also
   exported as `wav2flac/min`. About 6 KiB smaller gzipped (index + worker).
-  `wav2flac` still resolves to the normal bundles, which are unchanged.
+  `wav2flac` still resolves to the normal bundles, which lose only the
+  license comment (see Removed).
 - Docs: a how-to for loading from a CDN, including starting the worker
   there.
 
@@ -86,9 +87,13 @@ links are collected at the bottom of this file.
   versions, licenses and sources, then each crate's license files word for
   word, in code blocks. The name stays, and the text still reads as plain
   text.
-- The JS bundles no longer start with a `/*! @license */` comment. The
-  notices it listed are in the wasm now, which has them in full. Before,
-  bundlers such as Vite dropped the comment, and the notices with it.
+
+### Removed
+
+- The `/*! @license */` comment at the start of the JS bundles. If you kept
+  the license notices through that comment, take them from the wasm's
+  `license` custom section instead (see Added), which has them in full.
+  Bundlers such as Vite dropped the comment, and the notices with it.
 
 ### Fixed
 
