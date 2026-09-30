@@ -176,6 +176,32 @@ fn printable_pad_after_odd_data_keeps_trailing_tags() {
 }
 
 #[test]
+fn extensible_fmt_longer_than_40() {
+    // Odd and even sizes; cbSize grows with the chunk (above 22).
+    for size in [41u32, 42, 47, 64] {
+        let s = signal(Signal::Noise, 24, 2, 1000, 3);
+        let mut b = WavBuilder::pcm(2, 48000, 24).extensible(24, 24, 0x3);
+        b.fmt_size = Some(size);
+        check(&b, &s, 24);
+        let f: Vec<f64> = s
+            .iter()
+            .map(|v| f64::from(*v) / f64::from(1 << 23))
+            .collect();
+        let mut b = WavBuilder::pcm(2, 48000, 32)
+            .float32()
+            .extensible(32, 32, 0x3);
+        b.fmt_size = Some(size);
+        let opts = Options {
+            bits_per_sample: Some(24),
+            dither: wav2flac::Dither::None,
+            ..Options::default()
+        };
+        let flac = encode(&b.build_raw(&WavBuilder::pack_f32(&f)), opts);
+        assert_eq!(decode(&flac).md5, pcm_md5(&s, 24), "float fmt size {size}");
+    }
+}
+
+#[test]
 fn fmt_sizes_18_and_40_with_32_bit_pcm() {
     // WAVEFORMATEX nominally allows only 8/16 bits for plain PCM, but 24 and
     // 32-bit files with an 18 or 40-byte fmt chunk exist and are unambiguous.

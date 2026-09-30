@@ -251,6 +251,11 @@ impl WavBuilder {
                 guid[0] = 0x03;
             }
             v.extend_from_slice(&guid);
+            if let Some(sz) = self.fmt_size.filter(|&sz| sz > 40) {
+                // cbSize announces the extra bytes after the 22 standard ones.
+                v[16..18].copy_from_slice(&((sz - 18) as u16).to_le_bytes());
+                v.resize(sz as usize, 0);
+            }
         } else if let Some(sz) = self.fmt_size {
             if sz >= 18 {
                 v.extend_from_slice(&0u16.to_le_bytes());

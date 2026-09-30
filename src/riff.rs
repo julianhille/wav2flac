@@ -362,10 +362,13 @@ fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
     // and float chunks are cut to the 16 bytes that carry information: a
     // `WAVEFORMATEX` (18 bytes) or longer chunk adds nothing for these tags,
     // and hound would reject some of them (e.g. 32-bit PCM in 18 bytes).
-    let fmt_len = if tag == 0x0001 || tag == 0x0003 {
-        16
-    } else {
-        raw.len()
+    // Extensible chunks are cut to the 40 bytes of `WAVEFORMATEXTENSIBLE`:
+    // hound reads exactly that much and would parse the rest as the next
+    // chunk header.
+    let fmt_len = match tag {
+        0x0001 | 0x0003 => 16,
+        0xFFFE => raw.len().min(40),
+        _ => raw.len(),
     };
     let mut mini = Vec::with_capacity(fmt_len + 28);
     mini.extend_from_slice(b"RIFF");
@@ -376,6 +379,11 @@ fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
     mini.extend_from_slice(&raw[..fmt_len]);
     mini.extend_from_slice(b"data");
     mini.extend_from_slice(&0u32.to_le_bytes());
+    // hound accepts only a `cbSize` of exactly 22; a larger one just announces
+    // extra bytes we dropped above.
+    if fmt_len == 40 && le_u16(raw, 16) > 22 {
+        mini[36..38].copy_from_slice(&22u16.to_le_bytes());
+    }
     // The byte rate is redundant and often wrong in the wild; hound rejects a
     // mismatch, so write the value it expects.
     if let Some(rate) = u32::from(le_u16(raw, 12)).checked_mul(le_u32(raw, 4)) {

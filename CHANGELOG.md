@@ -19,6 +19,9 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- A `WAVE_FORMAT_EXTENSIBLE` file whose `fmt ` chunk is longer than 40 bytes
+  (extra bytes after the standard fields, a `cbSize` above 22, or an odd
+  size) is encoded. It used to fail with `INVALID_WAV`.
 - The build puts the license texts of a crate that keeps them in a
   `LICENSES/` directory (the REUSE layout) into the wasm's notices and
   `THIRD_PARTY_LICENSES.txt`. Before, it silently left them out when the crate
