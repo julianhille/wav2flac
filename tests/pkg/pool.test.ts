@@ -18,17 +18,23 @@ const [poolCode = '', batchCode = ''] = jsBlocks(join(root, 'docs/how-to/paralle
 
 // The package's worker, except that it exits as soon as it gets a job whose
 // input starts with "CRSH", like a worker killed by running out of memory.
+// Both listeners are registered by static imports, in this order, before the
+// worker takes any message: after an `await import()`, the package's listener
+// could miss the `init` message (it does on Node 22.12), and the worker hangs.
 const dir = mkdtempSync(join(tmpdir(), 'wav2flac-pool-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 const crashingWorker = join(dir, 'worker.mjs');
-writeFileSync(crashingWorker, `
+writeFileSync(join(dir, 'crash.mjs'), `
 import { parentPort } from 'node:worker_threads';
 parentPort.on('message', (m) => {
   if (m.t === 'job' && m.input !== null && new TextDecoder().decode(m.input.subarray(0, 4)) === 'CRSH') {
     process.exit(1);
   }
 });
-await import(${JSON.stringify(pathToFileURL(join(root, 'pkg/esm/worker.js')).href)});
+`);
+writeFileSync(crashingWorker, `
+import './crash.mjs';
+import ${JSON.stringify(pathToFileURL(join(root, 'pkg/esm/worker.js')).href)};
 `);
 
 const OPTIONS = { compressionLevel: 8 };
