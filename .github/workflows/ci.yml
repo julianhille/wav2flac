@@ -219,10 +219,10 @@ jobs:
           node-version: ${{ steps.engines.outputs.version }}
       - name: Show the Node version
         run: node --version
-      # Not `npm run`: npm enforces devEngines (Node ≥ 22.18 to build) there and
-      # would refuse the minimum Node. `npx` doesn't check it.
+      # Not `npm run` or `npx`: npm enforces devEngines (Node ≥ 22.18 to build)
+      # in both and would refuse the minimum Node.
       - name: Package tests (built ESM/CJS, worker, consumer types)
-        run: npx vitest run --project pkg
+        run: node_modules/.bin/vitest run --project pkg
 
   reproducible:
     name: Reproducible package build
