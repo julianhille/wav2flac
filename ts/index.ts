@@ -193,7 +193,7 @@ export async function probe(input: Uint8Array | ArrayBuffer): Promise<WavInfo> {
 }
 
 /**
- * The encoder's version string, e.g. `wav2flac 0.1.0 (libflac-rs 0.143.1)`.
+ * The encoder's version string, e.g. `wav2flac 1.0.0 (libflac-rs 0.143.1)`.
  * @returns The version string.
  * @throws {Error} If the wasm is not initialized.
  */

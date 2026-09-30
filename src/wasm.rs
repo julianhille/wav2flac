@@ -188,12 +188,14 @@ impl WasmEncoder {
         self.inner.progress().samples_out as f64
     }
 
-    /// Fraction of the data chunk consumed, or NaN before the header is known.
+    /// Fraction of the data chunk consumed, or NaN before the header is known
+    /// and for raw PCM of unknown length.
     pub fn fraction(&self) -> f64 {
         self.inner.progress().fraction.unwrap_or(f64::NAN)
     }
 
     /// Input description as JSON once the header is parsed, else empty string.
+    /// Empty again after `finish()` or a failed call, which release the input state.
     #[wasm_bindgen(js_name = infoJson)]
     pub fn info_json(&self) -> String {
         self.inner

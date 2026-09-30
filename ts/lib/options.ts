@@ -25,7 +25,10 @@ export interface Progress {
   bytesIn: number;
   /** Samples per channel encoded so far. */
   samplesOut: number;
-  /** Fraction of the WAV `data` chunk consumed (0–1), or `null` until the header is parsed. */
+  /**
+   * Fraction of the WAV `data` chunk consumed (0–1). `null` until the header is
+   * parsed, and throughout for a raw PCM stream, whose length is unknown.
+   */
   fraction: number | null;
 }
 

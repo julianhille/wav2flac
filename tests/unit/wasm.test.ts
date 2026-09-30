@@ -16,7 +16,6 @@ afterEach(() => {
   vi.resetModules();
 });
 
-/** A fresh copy of the loader and glue (no instance yet). */
 /** Reads a stream to the end. */
 const collectAll = async (s: ReadableStream<Uint8Array>): Promise<Uint8Array> =>
   new Uint8Array(await new Response(s).arrayBuffer());
@@ -35,6 +34,7 @@ const foreignModule = (): WebAssembly.Module => {
 const foreignUrl = (href: string): URL =>
   ({ [Symbol.toStringTag]: 'URL', href, toString: () => href }) as unknown as URL;
 
+/** A fresh copy of the loader and glue (no instance yet). */
 const fresh = async (): Promise<typeof import('../../ts/lib/wasm.js')> => {
   vi.resetModules();
   return import('../../ts/lib/wasm.js');
