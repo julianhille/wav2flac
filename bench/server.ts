@@ -25,8 +25,12 @@ const BENCH = fileURLToPath(new URL('.', import.meta.url));
 const PKG = resolve(fileURLToPath(new URL('../pkg/', import.meta.url)));
 /** The other libraries compared by the benchmark (dev dependencies), by URL prefix. */
 const VENDOR: Readonly<Record<string, string>> = {
-  '/vendor/libav/': resolve(fileURLToPath(new URL('../node_modules/@libav.js/variant-flac/dist/', import.meta.url))),
-  '/vendor/libflac/': resolve(fileURLToPath(new URL('../node_modules/libflacjs/dist/', import.meta.url))),
+  '/vendor/libav/': resolve(
+    fileURLToPath(new URL('../node_modules/@libav.js/variant-flac/dist/', import.meta.url)),
+  ),
+  '/vendor/libflac/': resolve(
+    fileURLToPath(new URL('../node_modules/libflacjs/dist/', import.meta.url)),
+  ),
 };
 
 const MIME: Readonly<Record<string, string>> = {
@@ -84,7 +88,11 @@ async function bundle(): Promise<string> {
  * @param body Body.
  */
 function send(res: ServerResponse, status: number, type: string, body: string | Uint8Array): void {
-  res.writeHead(status, { ...HEADERS, 'content-type': type, 'content-length': Buffer.byteLength(body) });
+  res.writeHead(status, {
+    ...HEADERS,
+    'content-type': type,
+    'content-length': Buffer.byteLength(body),
+  });
   res.end(body);
 }
 
@@ -129,7 +137,12 @@ function trusted(req: IncomingMessage): boolean {
  */
 async function nodeBench(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (!trusted(req)) {
-    send(res, 403, 'text/plain', 'forbidden: only the bench page on this server may start a benchmark');
+    send(
+      res,
+      403,
+      'text/plain',
+      'forbidden: only the bench page on this server may start a benchmark',
+    );
     return;
   }
   let config: BenchConfig;
@@ -145,9 +158,13 @@ async function nodeBench(req: IncomingMessage, res: ServerResponse): Promise<voi
   }
   busy = true;
   res.writeHead(200, { ...HEADERS, 'content-type': 'application/x-ndjson' });
-  const line = (x: unknown): void => { res.write(`${JSON.stringify(x)}\n`); };
+  const line = (x: unknown): void => {
+    res.write(`${JSON.stringify(x)}\n`);
+  };
   try {
-    const report = await runNodeBench(config, (mode, done, total) => line({ progress: { mode, done, total } }));
+    const report = await runNodeBench(config, (mode, done, total) =>
+      line({ progress: { mode, done, total } }),
+    );
     line({ report });
   } catch (e) {
     line({ error: e instanceof Error ? e.message : String(e) });
@@ -164,7 +181,12 @@ async function nodeBench(req: IncomingMessage, res: ServerResponse): Promise<voi
  * @param res The response.
  * @param hint What to run if the file is missing.
  */
-async function dirFile(dir: string, path: string, res: ServerResponse, hint: string): Promise<void> {
+async function dirFile(
+  dir: string,
+  path: string,
+  res: ServerResponse,
+  hint: string,
+): Promise<void> {
   const file = resolve(dir, `.${sep}${decodeURIComponent(path)}`);
   if (!file.startsWith(dir + sep)) {
     send(res, 403, 'text/plain', 'forbidden');
@@ -185,12 +207,16 @@ async function dirFile(dir: string, path: string, res: ServerResponse, hint: str
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const { pathname } = new URL(req.url ?? '/', 'http://localhost');
   if (req.method === 'POST' && pathname === '/api/node-bench') return nodeBench(req, res);
-  if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'text/plain', 'method not allowed');
-  if (pathname === '/' || pathname === '/index.html') return send(res, 200, MIME['.html']!, await readFile(join(BENCH, 'index.html')));
+  if (req.method !== 'GET' && req.method !== 'HEAD')
+    return send(res, 405, 'text/plain', 'method not allowed');
+  if (pathname === '/' || pathname === '/index.html')
+    return send(res, 200, MIME['.html']!, await readFile(join(BENCH, 'index.html')));
   if (pathname === '/app.js') return send(res, 200, MIME['.js']!, await bundle());
-  if (pathname.startsWith('/pkg/')) return dirFile(PKG, pathname.slice('/pkg/'.length), res, 'npm run build');
+  if (pathname.startsWith('/pkg/'))
+    return dirFile(PKG, pathname.slice('/pkg/'.length), res, 'npm run build');
   for (const [prefix, dir] of Object.entries(VENDOR)) {
-    if (pathname.startsWith(prefix)) return dirFile(dir, pathname.slice(prefix.length), res, 'npm ci');
+    if (pathname.startsWith(prefix))
+      return dirFile(dir, pathname.slice(prefix.length), res, 'npm ci');
   }
   if (pathname === '/favicon.ico') return send(res, 204, 'text/plain', '');
   return send(res, 404, 'text/plain', 'not found');
@@ -204,7 +230,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 export function startServer(port = 8787): Promise<BenchServer> {
   const server = createServer((req, res) => {
     handle(req, res).catch((e: unknown) => {
-      if (!res.headersSent) send(res, 500, 'text/plain', e instanceof Error ? e.message : String(e));
+      if (!res.headersSent)
+        send(res, 500, 'text/plain', e instanceof Error ? e.message : String(e));
       else res.end();
     });
   });
@@ -214,10 +241,11 @@ export function startServer(port = 8787): Promise<BenchServer> {
       const { port: p } = server.address() as AddressInfo;
       ok({
         url: `http://127.0.0.1:${p}/`,
-        close: () => new Promise((r) => {
-          server.closeAllConnections();
-          server.close(() => r());
-        }),
+        close: () =>
+          new Promise((r) => {
+            server.closeAllConnections();
+            server.close(() => r());
+          }),
       });
     });
   });

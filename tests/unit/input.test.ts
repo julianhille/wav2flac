@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: 0BSD
 import { describe, expect, it, vi } from 'vitest';
-import { ASYNC_SLICE_BYTES, chunks, isStream, SLICE_BYTES, slices, toBytes } from '../../ts/lib/input.js';
+import {
+  ASYNC_SLICE_BYTES,
+  chunks,
+  isStream,
+  SLICE_BYTES,
+  slices,
+  toBytes,
+} from '../../ts/lib/input.js';
 
 const all = async (it: AsyncIterable<Uint8Array>): Promise<number[]> => {
   const sizes: number[] = [];
@@ -21,9 +28,11 @@ describe('input', () => {
   });
 
   it.each([[null], ['str'], [[1, 2]], [new Uint16Array(2)], [new DataView(new ArrayBuffer(2))]])(
-    'rejects %o with TypeError', (x) => {
+    'rejects %o with TypeError',
+    (x) => {
       expect(() => toBytes(x)).toThrow(TypeError);
-    });
+    },
+  );
 
   it('slices into 1 MiB views', () => {
     const b = new Uint8Array(SLICE_BYTES * 2 + 5);
@@ -47,25 +56,42 @@ describe('input', () => {
       },
     });
     expect(await all(chunks(s))).toEqual([3, ASYNC_SLICE_BYTES, ASYNC_SLICE_BYTES, 1]);
-    expect(await all(chunks(new Uint8Array(SLICE_BYTES + 1), SLICE_BYTES))).toEqual([SLICE_BYTES, 1]);
+    expect(await all(chunks(new Uint8Array(SLICE_BYTES + 1), SLICE_BYTES))).toEqual([
+      SLICE_BYTES,
+      1,
+    ]);
   });
 
   it('rejects non-byte stream chunks and cancels the stream', async () => {
     const cancel = vi.fn();
-    const s = new ReadableStream<unknown>({ start(c) { c.enqueue('nope'); }, cancel });
+    const s = new ReadableStream<unknown>({
+      start(c) {
+        c.enqueue('nope');
+      },
+      cancel,
+    });
     await expect(all(chunks(s as ReadableStream<Uint8Array>))).rejects.toThrow(TypeError);
     expect(cancel).toHaveBeenCalled();
   });
 
   it('cancels the stream when iteration stops early', async () => {
     const cancel = vi.fn();
-    const s = new ReadableStream<Uint8Array>({ pull(c) { c.enqueue(new Uint8Array(1)); }, cancel });
+    const s = new ReadableStream<Uint8Array>({
+      pull(c) {
+        c.enqueue(new Uint8Array(1));
+      },
+      cancel,
+    });
     for await (const _ of chunks(s)) break;
     expect(cancel).toHaveBeenCalled();
   });
 
   it('propagates stream errors', async () => {
-    const s = new ReadableStream<Uint8Array>({ pull(c) { c.error(new Error('boom')); } });
+    const s = new ReadableStream<Uint8Array>({
+      pull(c) {
+        c.error(new Error('boom'));
+      },
+    });
     await expect(all(chunks(s))).rejects.toThrow('boom');
   });
 
@@ -81,7 +107,8 @@ describe('input', () => {
   });
 
   it('names what the caller accepts in the type error', () => {
-    expect(() => toBytes(1, 'input', 'a Uint8Array or ArrayBuffer')).toThrow('input must be a Uint8Array or ArrayBuffer');
+    expect(() => toBytes(1, 'input', 'a Uint8Array or ArrayBuffer')).toThrow(
+      'input must be a Uint8Array or ArrayBuffer',
+    );
   });
 });
-

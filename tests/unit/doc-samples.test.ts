@@ -12,7 +12,9 @@ import { makeWav } from '../helpers/wav.js';
 const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 describe('parallel-encoding.md', () => {
-  const [poolCode = '', batchCode = ''] = jsBlocks('docs/how-to/parallel-encoding.md', 2).map(asScript);
+  const [poolCode = '', batchCode = ''] = jsBlocks('docs/how-to/parallel-encoding.md', 2).map(
+    asScript,
+  );
 
   /** A stand-in for a worker encoder whose jobs can fail or crash it. */
   class StubWorker {
@@ -63,7 +65,10 @@ describe('parallel-encoding.md', () => {
     }
   }
 
-  type Pool = { encode(input: string, options?: { signal?: AbortSignal }): Promise<string>; terminate(): void };
+  type Pool = {
+    encode(input: string, options?: { signal?: AbortSignal }): Promise<string>;
+    terminate(): void;
+  };
   const createEncoderPool = async (size?: unknown): Promise<Pool> => {
     StubWorker.all = [];
     StubWorker.started = [];
@@ -87,7 +92,9 @@ describe('parallel-encoding.md', () => {
     await expect(pool.encode('crash')).rejects.toThrow('exited');
     await expect(pool.encode('bad')).rejects.toThrow('not a WAV');
     const results = await Promise.all(Array.from({ length: 20 }, (_, i) => pool.encode(`f${i}`)));
-    expect(results).toEqual(Array.from({ length: 20 }, (_, i) => expect.stringMatching(`^flac\\(f${i}\\)`)));
+    expect(results).toEqual(
+      Array.from({ length: 20 }, (_, i) => expect.stringMatching(`^flac\\(f${i}\\)`)),
+    );
     // The crashed worker was replaced once; the one with the bad input was kept.
     expect(StubWorker.all).toHaveLength(3);
     expect(StubWorker.all.filter((w) => w.dead)).toHaveLength(1);
@@ -111,6 +118,7 @@ describe('parallel-encoding.md', () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(StubWorker.all).toHaveLength(2);
       expect(StubWorker.all[0]!.dead).toBe(true);
+      // oxlint-disable-next-line vitest/valid-expect -- awaited after the timers advance
       const done = expect(next).resolves.toBe('flac(a)@2');
       await vi.advanceTimersByTimeAsync(10);
       await done;
@@ -129,7 +137,9 @@ describe('parallel-encoding.md', () => {
     const after = pool.encode('b');
     stop.abort(new Error('gave up'));
     await expect(waiting).rejects.toThrow('gave up');
-    await expect(pool.encode('c', { signal: AbortSignal.abort(new Error('early')) })).rejects.toThrow('early');
+    await expect(
+      pool.encode('c', { signal: AbortSignal.abort(new Error('early')) }),
+    ).rejects.toThrow('early');
     // The worker is still busy with the first job, and the next job still waits.
     expect(StubWorker.all[0]!.jobs).toBe(1);
     busy.abort(new Error('done'));
@@ -147,11 +157,14 @@ describe('parallel-encoding.md', () => {
    */
   const hold = (): (() => void) => {
     let open!: () => void;
-    StubWorker.gate = new Promise((r) => { open = r; });
+    StubWorker.gate = new Promise((r) => {
+      open = r;
+    });
     return open;
   };
   /** Settles with `p`, or with 'pending' when it doesn't settle soon. */
-  const soon = <T>(p: Promise<T>): Promise<T | 'pending'> => Promise.race([p, tick(50).then(() => 'pending' as const)]);
+  const soon = <T>(p: Promise<T>): Promise<T | 'pending'> =>
+    Promise.race([p, tick(50).then(() => 'pending' as const)]);
 
   it('starts waiting jobs in the order they came', async () => {
     const pool = await createEncoderPool(1);
@@ -196,7 +209,9 @@ describe('parallel-encoding.md', () => {
 
   it('does not take a worker for a job whose signal already aborted', async () => {
     const pool = await createEncoderPool(1);
-    await expect(pool.encode('a', { signal: AbortSignal.abort(new Error('early')) })).rejects.toThrow('early');
+    await expect(
+      pool.encode('a', { signal: AbortSignal.abort(new Error('early')) }),
+    ).rejects.toThrow('early');
     expect(StubWorker.all[0]!.jobs).toBe(0);
     pool.terminate();
   });
@@ -205,6 +220,7 @@ describe('parallel-encoding.md', () => {
     vi.useFakeTimers();
     try {
       const pool = await createEncoderPool(1);
+      // oxlint-disable-next-line vitest/valid-expect -- awaited after the timers advance
       const job = expect(pool.encode('bad')).rejects.toThrow('not a WAV');
       await vi.advanceTimersByTimeAsync(0);
       await job;
@@ -227,7 +243,9 @@ describe('parallel-encoding.md', () => {
       console: { error: () => {} },
     });
     const status = (results as PromiseSettledResult<string>[]).map((r) => r.status);
-    expect(status).toEqual(files.map((f) => (f === 'crash' || f === 'bad' ? 'rejected' : 'fulfilled')));
+    expect(status).toEqual(
+      files.map((f) => (f === 'crash' || f === 'bad' ? 'rejected' : 'fulfilled')),
+    );
   });
 
   it('rejects running and waiting jobs on terminate, and replaces nothing after it', async () => {
@@ -246,7 +264,10 @@ describe('parallel-encoding.md', () => {
 });
 
 describe('fifo-queue.md', () => {
-  const [queueCode = '', uploadCode = '', workerCode = ''] = jsBlocks('docs/how-to/fifo-queue.md', 3).map(asScript);
+  const [queueCode = '', uploadCode = '', workerCode = ''] = jsBlocks(
+    'docs/how-to/fifo-queue.md',
+    3,
+  ).map(asScript);
   const wavA = makeWav({ frames: 4410, seed: 1 });
   const wavB = makeWav({ frames: 441, seed: 2 });
 
@@ -264,7 +285,9 @@ describe('fifo-queue.md', () => {
   it('moves on after a failed job, and runs the upload and worker samples', async () => {
     const uploaded: unknown[] = [];
     const errors: unknown[] = [];
-    const worker = { encode: async (x: unknown) => (x === 'bad' ? Promise.reject(new Error('bad')) : `flac(${x})`) };
+    const worker = {
+      encode: async (x: unknown) => (x === 'bad' ? Promise.reject(new Error('bad')) : `flac(${x})`),
+    };
     await run(`${queueCode.replace(/^const enqueue[\s\S]*/m, '')}\n${workerCode}\n${uploadCode}`, {
       createWorkerEncoder: () => worker,
       recordings: ['r1', 'bad', 'r2'],
@@ -279,9 +302,10 @@ describe('fifo-queue.md', () => {
   it('does not keep the last result alive', async () => {
     setFlagsFromString('--expose-gc');
     const gc = runInNewContext('gc') as () => void;
-    const enqueue = (await run(`${queueCode.replace(/^const enqueue[\s\S]*/m, '')}\nreturn createQueue;`, {})) as (
-      run: () => Promise<object>,
-    ) => () => Promise<object>;
+    const enqueue = (await run(
+      `${queueCode.replace(/^const enqueue[\s\S]*/m, '')}\nreturn createQueue;`,
+      {},
+    )) as (run: () => Promise<object>) => () => Promise<object>;
     const queue = enqueue(async () => ({ big: new Uint8Array(1 << 20) }));
     let ref: WeakRef<object> | undefined;
     await queue().then((r) => {
@@ -302,7 +326,9 @@ describe('fifo-queue.md', () => {
       enqueue();
       enqueue().catch(() => {});
       setTimeout(() => console.log(n), 50);`;
-    const out = execFileSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8' });
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', code], {
+      encoding: 'utf8',
+    });
     expect(out.trim()).toBe('1');
   });
 });

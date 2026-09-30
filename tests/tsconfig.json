@@ -6,5 +6,11 @@
     "allowImportingTsExtensions": true,
     "noUnusedLocals": false
   },
-  "include": ["./**/*.ts", "../ts/**/*.ts", "../scripts/**/*.ts", "../bench/**/*.ts", "../vitest.config.ts"]
+  "include": [
+    "./**/*.ts",
+    "../ts/**/*.ts",
+    "../scripts/**/*.ts",
+    "../bench/**/*.ts",
+    "../vitest.config.ts"
+  ]
 }

@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: 0BSD
 import { getEventListeners } from 'node:events';
 import { describe, expect, it } from 'vitest';
-import { encode, encodeStream, encodeSync, probe, version, Wav2FlacError, wasmMemoryBytes, type Progress } from '../../ts/index.js';
+import {
+  encode,
+  encodeStream,
+  encodeSync,
+  probe,
+  version,
+  Wav2FlacError,
+  wasmMemoryBytes,
+  type Progress,
+} from '../../ts/index.js';
 import { liveSessions, PROGRESS_INTERVAL_MS } from '../../ts/lib/engine.js';
 import { SLICE_BYTES } from '../../ts/lib/input.js';
 import { collect, makeWav, streamOf } from '../helpers/wav.js';
@@ -45,16 +54,45 @@ describe('encode / encodeSync / encodeStream', () => {
   });
 
   it('matches the native build for every CLI option, streamed or buffered', async () => {
-    const args = ['--level', '3', '--block-size', '1000', '--bits', '12', '--rate', '32000', '--quality', 'fast',
-      '--dither', 'tpdf', '--seed', '7', '--no-tags', '--seek-interval', '0.5', '--padding', '10'];
+    const args = [
+      '--level',
+      '3',
+      '--block-size',
+      '1000',
+      '--bits',
+      '12',
+      '--rate',
+      '32000',
+      '--quality',
+      'fast',
+      '--dither',
+      'tpdf',
+      '--seed',
+      '7',
+      '--no-tags',
+      '--seek-interval',
+      '0.5',
+      '--padding',
+      '10',
+    ];
     const opts = {
-      compressionLevel: 3, blockSize: 1000, bitsPerSample: 12, sampleRate: 32000, resampleQuality: 'fast',
-      dither: 'tpdf', ditherSeed: 7, tags: false, seekPointInterval: 0.5, padding: 10,
+      compressionLevel: 3,
+      blockSize: 1000,
+      bitsPerSample: 12,
+      sampleRate: 32000,
+      resampleQuality: 'fast',
+      dither: 'tpdf',
+      ditherSeed: 7,
+      tags: false,
+      seekPointInterval: 0.5,
+      padding: 10,
     } as const;
     const native = nativeEncode(wav, args);
     if (native === null) return;
     expect(await encode(wav, opts)).toEqual(native);
-    expect(nativeEncode(wav, [...args, '--stream'])).toEqual(await collect(encodeStream(wav, opts)));
+    expect(nativeEncode(wav, [...args, '--stream'])).toEqual(
+      await collect(encodeStream(wav, opts)),
+    );
   });
 
   it('resamples exactly like the native build, every quality, up and down', async () => {
@@ -63,8 +101,18 @@ describe('encode / encodeSync / encodeStream', () => {
     const f32 = makeWav({ frames: 20_000, channels: 1, bits: 32, float: true, seed: 6 });
     for (const quality of ['fast', 'balanced', 'best'] as const) {
       for (const rate of [8000, 22050, 48000, 96000]) {
-        for (const [input, bits] of [[src, 24], [f32, 16]] as const) {
-          const native = nativeEncode(input, ['--rate', `${rate}`, '--quality', quality, '--bits', `${bits}`]);
+        for (const [input, bits] of [
+          [src, 24],
+          [f32, 16],
+        ] as const) {
+          const native = nativeEncode(input, [
+            '--rate',
+            `${rate}`,
+            '--quality',
+            quality,
+            '--bits',
+            `${bits}`,
+          ]);
           if (native === null) return;
           const opts = { sampleRate: rate, resampleQuality: quality, bitsPerSample: bits };
           expect(encodeSync(input, opts), `${quality} ${rate} Hz ${bits}-bit`).toEqual(native);
@@ -102,14 +150,21 @@ describe('encode / encodeSync / encodeStream', () => {
 
   it('streams from a stream input', async () => {
     const out = await collect(encodeStream(streamOf(wav, 10_000)));
-    expect(out.subarray(metadataLength(out))).toEqual(encodeSync(wav).subarray(metadataLength(encodeSync(wav))));
+    expect(out.subarray(metadataLength(out))).toEqual(
+      encodeSync(wav).subarray(metadataLength(encodeSync(wav))),
+    );
   });
 
   it('reports throttled, monotonic progress ending at 1', async () => {
     const big = makeWav({ frames: 44100 * 20, signal: 'noise' });
     const seen: Progress[] = [];
     const at: number[] = [];
-    await encode(big, { onProgress: (p) => { seen.push(p); at.push(performance.now()); } });
+    await encode(big, {
+      onProgress: (p) => {
+        seen.push(p);
+        at.push(performance.now());
+      },
+    });
     expect(seen.length).toBeGreaterThan(1);
     expect(seen.at(-1)).toMatchObject({ fraction: 1, bytesIn: big.length, samplesOut: 44100 * 20 });
     for (let i = 1; i < seen.length; i++) {
@@ -117,7 +172,8 @@ describe('encode / encodeSync / encodeStream', () => {
       expect(seen[i]!.samplesOut).toBeGreaterThanOrEqual(seen[i - 1]!.samplesOut);
       expect(seen[i]!.fraction!).toBeGreaterThanOrEqual(seen[i - 1]!.fraction!);
       // Only the final, forced report may come sooner than the interval.
-      if (i < seen.length - 1) expect(at[i]! - at[i - 1]!).toBeGreaterThanOrEqual(PROGRESS_INTERVAL_MS - 1);
+      if (i < seen.length - 1)
+        expect(at[i]! - at[i - 1]!).toBeGreaterThanOrEqual(PROGRESS_INTERVAL_MS - 1);
     }
     const sync: Progress[] = [];
     encodeSync(wav, { onProgress: (p) => sync.push(p) });
@@ -139,14 +195,26 @@ describe('encode / encodeSync / encodeStream', () => {
     const f = makeWav({ frames: 1000, bits: 32, float: true });
     expect(() => encodeSync(f)).toThrow(Wav2FlacError);
     expect(encodeSync(f, { bitsPerSample: 24 }).length).toBeGreaterThan(0);
-    await expect(encode(wav, { maxInputBytes: 1000 })).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' });
-    await expect(encode(wav, { compressionLevel: 9 })).rejects.toMatchObject({ code: 'INVALID_OPTIONS' });
-    await expect(encode(wav, { nope: 1 } as never)).rejects.toMatchObject({ code: 'INVALID_OPTIONS' });
-    await expect(collect(encodeStream(new Uint8Array(100)))).rejects.toMatchObject({ code: 'INVALID_WAV' });
+    await expect(encode(wav, { maxInputBytes: 1000 })).rejects.toMatchObject({
+      code: 'LIMIT_EXCEEDED',
+    });
+    await expect(encode(wav, { compressionLevel: 9 })).rejects.toMatchObject({
+      code: 'INVALID_OPTIONS',
+    });
+    await expect(encode(wav, { nope: 1 } as never)).rejects.toMatchObject({
+      code: 'INVALID_OPTIONS',
+    });
+    await expect(collect(encodeStream(new Uint8Array(100)))).rejects.toMatchObject({
+      code: 'INVALID_WAV',
+    });
     // encodeStream never throws: invalid options and bad input error the stream.
-    await expect(collect(encodeStream(wav, { compressionLevel: 99 }))).rejects.toMatchObject({ code: 'INVALID_OPTIONS' });
+    await expect(collect(encodeStream(wav, { compressionLevel: 99 }))).rejects.toMatchObject({
+      code: 'INVALID_OPTIONS',
+    });
     await expect(collect(encodeStream('x' as never))).rejects.toThrow(TypeError);
-    await expect(collect(encodeStream(wav, { blockSize: 15 }))).rejects.toMatchObject({ code: 'INVALID_OPTIONS' });
+    await expect(collect(encodeStream(wav, { blockSize: 15 }))).rejects.toMatchObject({
+      code: 'INVALID_OPTIONS',
+    });
     await expect(encode('x' as never)).rejects.toThrow(TypeError);
   });
 
@@ -158,7 +226,10 @@ describe('encode / encodeSync / encodeStream', () => {
     expect(() => encodeSync(f)).toThrow(/4..=32/);
     // 4-bit audio (the minimum) round-trips.
     new DataView(f.buffer).setUint16(38, 4, true);
-    for (let i = 68; i < f.length; i += 2) { f[i] = 0; f[i + 1]! &= 0xf0; } // low 12 padding bits stay 0
+    for (let i = 68; i < f.length; i += 2) {
+      f[i] = 0;
+      f[i + 1]! &= 0xf0;
+    } // low 12 padding bits stay 0
     expect((await encode(f)).length).toBeGreaterThan(0);
   });
 
@@ -166,7 +237,9 @@ describe('encode / encodeSync / encodeStream', () => {
     const reason = new Error('stop');
     await expect(encode(wav, { signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
     expect(() => encodeSync(wav, { signal: AbortSignal.abort(reason) })).toThrow(reason);
-    await expect(collect(encodeStream(wav, { signal: AbortSignal.abort(reason) }))).rejects.toBe(reason);
+    await expect(collect(encodeStream(wav, { signal: AbortSignal.abort(reason) }))).rejects.toBe(
+      reason,
+    );
 
     const ac = new AbortController();
     const slow = streamOf(wav, 4096);
@@ -184,10 +257,18 @@ describe('encode / encodeSync / encodeStream', () => {
   it('aborts and cancels while the input read is stalled', async () => {
     const reason = new Error('stop');
     let cancelled: unknown;
-    const stalled = (): ReadableStream<Uint8Array> => new ReadableStream<Uint8Array>({
-      start(c) { c.enqueue(wav.subarray(0, 4096)); },
-      cancel(r) { cancelled = r; },
-    }, { highWaterMark: 0 });
+    const stalled = (): ReadableStream<Uint8Array> =>
+      new ReadableStream<Uint8Array>(
+        {
+          start(c) {
+            c.enqueue(wav.subarray(0, 4096));
+          },
+          cancel(r) {
+            cancelled = r;
+          },
+        },
+        { highWaterMark: 0 },
+      );
 
     const ac = new AbortController();
     const p = encode(stalled(), { signal: ac.signal });
@@ -208,40 +289,77 @@ describe('encode / encodeSync / encodeStream', () => {
 
   it('frees the encoder synchronously on every exit path', async () => {
     const reason = new Error('stop');
-    const erroring = (): ReadableStream<Uint8Array> => new ReadableStream<Uint8Array>({
-      start(c) { c.enqueue(wav.subarray(0, 8192)); },
-      pull(c) { c.error(new Error('src')); },
-    });
+    const erroring = (): ReadableStream<Uint8Array> =>
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(wav.subarray(0, 8192));
+        },
+        pull(c) {
+          c.error(new Error('src'));
+        },
+      });
     const paths: [string, () => Promise<unknown>][] = [
       ['encode', () => encode(wav)],
       ['encode, invalid WAV', () => encode(new Uint8Array(100)).catch(() => 0)],
       ['encode, truncated', () => encode(streamOf(wav.subarray(0, 5001), 1000)).catch(() => 0)],
       ['encode, input error', () => encode(erroring()).catch(() => 0)],
-      ['encode, aborted', async () => {
-        const ac = new AbortController();
-        await encode(streamOf(wav, 4096), { signal: ac.signal, onProgress: () => ac.abort(reason) }).catch(() => 0);
-      }],
+      [
+        'encode, aborted',
+        async () => {
+          const ac = new AbortController();
+          await encode(streamOf(wav, 4096), {
+            signal: ac.signal,
+            onProgress: () => ac.abort(reason),
+          }).catch(() => 0);
+        },
+      ],
       ['encodeSync', async () => encodeSync(wav)],
-      ['encodeSync, throws', async () => { expect(() => encodeSync(wav.subarray(0, 5001))).toThrow(); }],
-      ['encodeSync, callback throws', async () => {
-        expect(() => encodeSync(wav, { onProgress: () => { throw reason; } })).toThrow(reason);
-      }],
+      [
+        'encodeSync, throws',
+        async () => {
+          expect(() => encodeSync(wav.subarray(0, 5001))).toThrow(/input ended/);
+        },
+      ],
+      [
+        'encodeSync, callback throws',
+        async () => {
+          expect(() =>
+            encodeSync(wav, {
+              onProgress: () => {
+                throw reason;
+              },
+            }),
+          ).toThrow(reason);
+        },
+      ],
       ['encodeStream', () => collect(encodeStream(streamOf(wav, 4096)))],
-      ['encodeStream, truncated', () => collect(encodeStream(wav.subarray(0, 5001))).catch(() => 0)],
+      [
+        'encodeStream, truncated',
+        () => collect(encodeStream(wav.subarray(0, 5001))).catch(() => 0),
+      ],
       ['encodeStream, input error', () => collect(encodeStream(erroring())).catch(() => 0)],
-      ['encodeStream, cancelled before reading', () => encodeStream(streamOf(wav, 4096)).cancel(reason)],
-      ['encodeStream, cancelled after a read', async () => {
-        const r = encodeStream(streamOf(wav, 4096)).getReader();
-        await r.read();
-        await r.cancel(reason);
-      }],
-      ['encodeStream, aborted mid-stream', async () => {
-        const ac = new AbortController();
-        const r = encodeStream(streamOf(wav, 4096), { signal: ac.signal }).getReader();
-        await r.read();
-        ac.abort(reason);
-        await r.read().catch(() => 0);
-      }],
+      [
+        'encodeStream, cancelled before reading',
+        () => encodeStream(streamOf(wav, 4096)).cancel(reason),
+      ],
+      [
+        'encodeStream, cancelled after a read',
+        async () => {
+          const r = encodeStream(streamOf(wav, 4096)).getReader();
+          await r.read();
+          await r.cancel(reason);
+        },
+      ],
+      [
+        'encodeStream, aborted mid-stream',
+        async () => {
+          const ac = new AbortController();
+          const r = encodeStream(streamOf(wav, 4096), { signal: ac.signal }).getReader();
+          await r.read();
+          ac.abort(reason);
+          await r.read().catch(() => 0);
+        },
+      ],
     ];
     for (const [name, run] of paths) {
       await run();
@@ -282,21 +400,36 @@ describe('encode / encodeSync / encodeStream', () => {
     const wav = makeWav({ frames: 44100 * 20 });
     let firedAt = Infinity;
     const job = run(wav);
-    setTimeout(() => { firedAt = performance.now(); }, 0);
+    setTimeout(() => {
+      firedAt = performance.now();
+    }, 0);
     await job;
     expect(firedAt).toBeLessThan(performance.now());
   });
 
   it('keeps concurrent encodes separate', async () => {
-    const inputs = Array.from({ length: 12 }, (_, i) => makeWav({ frames: 20_000 + i * 997, channels: 1 + (i % 3), seed: i }));
+    const inputs = Array.from({ length: 12 }, (_, i) =>
+      makeWav({ frames: 20_000 + i * 997, channels: 1 + (i % 3), seed: i }),
+    );
     const outs = await Promise.all(inputs.map((w) => encode(streamOf(w, 8192))));
     outs.forEach((o, i) => expect(o).toEqual(encodeSync(inputs[i]!)));
   });
 
   it('probes headers from a prefix', async () => {
-    const big = makeWav({ frames: 44100 * 5, channels: 6, bits: 24, rate: 48000, channelMask: 0x3f });
+    const big = makeWav({
+      frames: 44100 * 5,
+      channels: 6,
+      bits: 24,
+      rate: 48000,
+      channelMask: 0x3f,
+    });
     await expect(probe(big)).resolves.toMatchObject({
-      sampleRate: 48000, channels: 6, bitsPerSample: 24, format: 'int', frames: 44100 * 5, channelMask: 0x3f,
+      sampleRate: 48000,
+      channels: 6,
+      bitsPerSample: 24,
+      format: 'int',
+      frames: 44100 * 5,
+      channelMask: 0x3f,
     });
     await expect(probe(big.subarray(0, 68).slice().buffer)).resolves.toMatchObject({ channels: 6 });
     await expect(probe(big.subarray(0, 10))).rejects.toMatchObject({ code: 'TRUNCATED' });

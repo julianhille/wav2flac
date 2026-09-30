@@ -11,7 +11,15 @@
  * @module
  */
 import { runBuffered, runStream, runSync, type Bytes } from './lib/engine.js';
-import { BUFFER_INPUT, isStream, preparePcm, toBytes, type Input, type PcmBuffer, type PcmInput } from './lib/input.js';
+import {
+  BUFFER_INPUT,
+  isStream,
+  preparePcm,
+  toBytes,
+  type Input,
+  type PcmBuffer,
+  type PcmInput,
+} from './lib/input.js';
 import { normalizeOptions, type Options } from './lib/options.js';
 import { ignore } from './lib/platform.js';
 import { probeBytes, type WavInfo } from './lib/probe.js';
@@ -21,10 +29,20 @@ import { init, isReady, notReady, wasmModule } from './lib/wasm.js';
 export { Wav2FlacError, type ErrorCode } from './lib/errors.js';
 export type { Bytes } from './lib/engine.js';
 export type { Input, PcmBuffer, PcmInput, PcmSamples } from './lib/input.js';
-export type { Options, PcmFormat, PcmSampleFormat, Progress, ResampleQuality } from './lib/options.js';
+export type {
+  Options,
+  PcmFormat,
+  PcmSampleFormat,
+  Progress,
+  ResampleQuality,
+} from './lib/options.js';
 export type { WavInfo } from './lib/probe.js';
 export { init, initSync, wasmMemoryBytes, type InitOptions, type WasmSource } from './lib/wasm.js';
-export { createWorkerEncoder, type WorkerEncoder, type WorkerEncoderOptions } from './lib/worker-client.js';
+export {
+  createWorkerEncoder,
+  type WorkerEncoder,
+  type WorkerEncoderOptions,
+} from './lib/worker-client.js';
 
 /**
  * Encodes a WAV file to FLAC on the calling thread, yielding to the event
@@ -121,7 +139,10 @@ export function encodeStream(
 export function encodeSync(input: Uint8Array | ArrayBuffer | PcmBuffer, options?: Options): Bytes {
   const p = preparePcm(input, normalizeOptions(options, false));
   if (!isReady()) throw notReady();
-  return runSync(toBytes(p.input, 'input', BUFFER_INPUT), p.args, { signal: options?.signal, onProgress: options?.onProgress });
+  return runSync(toBytes(p.input, 'input', BUFFER_INPUT), p.args, {
+    signal: options?.signal,
+    onProgress: options?.onProgress,
+  });
 }
 
 /**
@@ -169,7 +190,9 @@ export async function thirdPartyLicenses(): Promise<string> {
   await init();
   const [section] = WebAssembly.Module.customSections(wasmModule(), 'license');
   if (section === undefined) {
-    throw new Error('wav2flac: the wasm has no "license" section; see wav2flac/THIRD_PARTY_LICENSES.txt');
+    throw new Error(
+      'wav2flac: the wasm has no "license" section; see wav2flac/THIRD_PARTY_LICENSES.txt',
+    );
   }
   return new TextDecoder().decode(section);
 }

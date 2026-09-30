@@ -19,9 +19,23 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ChildResult } from './node-run.ts';
 import {
-  type BenchConfig, type BenchReport, type Mode, type ModeResult, type RunSample,
-  columns, describe, encoderInput, inputBytes, MODE_LABEL, nativeArgs, parseConfig, preset, presetWav, summarize,
-  SUMMARY_HEADERS, toMarkdown,
+  type BenchConfig,
+  type BenchReport,
+  type Mode,
+  type ModeResult,
+  type RunSample,
+  columns,
+  describe,
+  encoderInput,
+  inputBytes,
+  MODE_LABEL,
+  nativeArgs,
+  parseConfig,
+  preset,
+  presetWav,
+  summarize,
+  SUMMARY_HEADERS,
+  toMarkdown,
 } from './shared.ts';
 
 /** Path of the native reference encoder. */
@@ -39,13 +53,20 @@ export type OnRun = (mode: Mode, done: number, total: number) => void;
  * @param args Arguments.
  * @returns Exit code, stdout and stderr.
  */
-function exec(cmd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+function exec(
+  cmd: string,
+  args: string[],
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
-    p.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-    p.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    p.stdout.on('data', (d: Buffer) => {
+      stdout += d.toString();
+    });
+    p.stderr.on('data', (d: Buffer) => {
+      stderr += d.toString();
+    });
     p.on('error', reject);
     p.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
   });
@@ -63,7 +84,15 @@ async function nativeRun(file: string, out: string, args: string[]): Promise<Run
   if (r.code !== 0) throw new Error(r.stderr.trim() || `exit ${r.code}`);
   const line = r.stderr.trim().split('\n').at(-1) ?? '';
   const t = JSON.parse(line) as { ms: number; maxRssKb: number; outBytes: number };
-  return { ms: t.ms, outBytes: t.outBytes, maxBlockMs: null, maxRssKb: t.maxRssKb, baseRssKb: null, wasmBytes: null, heapBytes: null };
+  return {
+    ms: t.ms,
+    outBytes: t.outBytes,
+    maxBlockMs: null,
+    maxRssKb: t.maxRssKb,
+    baseRssKb: null,
+    wasmBytes: null,
+    heapBytes: null,
+  };
 }
 
 /**
@@ -75,7 +104,14 @@ async function nativeRun(file: string, out: string, args: string[]): Promise<Run
  */
 async function nodeRun(wav: string, mode: Mode, config: BenchConfig): Promise<ChildResult> {
   const script = fileURLToPath(new URL('./node-run.ts', import.meta.url));
-  const r = await exec(process.execPath, ['--expose-gc', '--no-warnings', script, wav, mode, JSON.stringify(config)]);
+  const r = await exec(process.execPath, [
+    '--expose-gc',
+    '--no-warnings',
+    script,
+    wav,
+    mode,
+    JSON.stringify(config),
+  ]);
   if (r.code !== 0) throw new Error(r.stderr.trim() || `exit ${r.code}`);
   return JSON.parse(r.stdout) as ChildResult;
 }
@@ -86,7 +122,10 @@ async function nodeRun(wav: string, mode: Mode, config: BenchConfig): Promise<Ch
  * @param onRun Called after every run.
  * @returns The report.
  */
-export async function runNodeBench(config: BenchConfig, onRun: OnRun = () => undefined): Promise<BenchReport> {
+export async function runNodeBench(
+  config: BenchConfig,
+  onRun: OnRun = () => undefined,
+): Promise<BenchReport> {
   if (!existsSync(PKG)) throw new Error('pkg/ is missing; run `npm run build` first');
   const p = preset(config.preset);
   const wav = presetWav(p);
@@ -104,11 +143,18 @@ export async function runNodeBench(config: BenchConfig, onRun: OnRun = () => und
   const results: ModeResult[] = [];
   try {
     for (const mode of config.modes) {
-      const res: ModeResult = { mode, samples: [], startupMs: null, uaMemoryBytes: null, error: null };
+      const res: ModeResult = {
+        mode,
+        samples: [],
+        startupMs: null,
+        uaMemoryBytes: null,
+        error: null,
+      };
       results.push(res);
       try {
         if (mode === 'native') {
-          if (!existsSync(NATIVE)) throw new Error(`${NATIVE} missing; run cargo build --release --example encode`);
+          if (!existsSync(NATIVE))
+            throw new Error(`${NATIVE} missing; run cargo build --release --example encode`);
           if (config.warmup) await nativeRun(nativePath, join(dir, 'out.flac'), native);
           for (let i = 0; i < config.runs; i++) {
             res.samples.push(await nativeRun(nativePath, join(dir, 'out.flac'), native));
@@ -172,21 +218,46 @@ export function parseArgs(argv: string[], defaults: Partial<BenchConfig> = {}): 
       return x;
     };
     switch (a) {
-      case '--runs': raw.runs = Number(v()); break;
-      case '--preset': raw.preset = v(); break;
-      case '--level': raw.level = Number(v()); break;
-      case '--input': raw.input = v() as BenchConfig['input']; break;
-      case '--output': raw.output = v() as BenchConfig['output']; break;
-      case '--transcode': raw.transcode = v() as BenchConfig['transcode']; break;
-      case '--modes': raw.modes = v().split(',') as Mode[]; break;
-      case '--no-warmup': raw.warmup = false; break;
-      case '--json': json = v(); break;
-      case '--markdown': markdown = v(); break;
-      default: throw new Error(`unknown argument ${a}`);
+      case '--runs':
+        raw.runs = Number(v());
+        break;
+      case '--preset':
+        raw.preset = v();
+        break;
+      case '--level':
+        raw.level = Number(v());
+        break;
+      case '--input':
+        raw.input = v() as BenchConfig['input'];
+        break;
+      case '--output':
+        raw.output = v() as BenchConfig['output'];
+        break;
+      case '--transcode':
+        raw.transcode = v() as BenchConfig['transcode'];
+        break;
+      case '--modes':
+        raw.modes = v().split(',') as Mode[];
+        break;
+      case '--no-warmup':
+        raw.warmup = false;
+        break;
+      case '--json':
+        json = v();
+        break;
+      case '--markdown':
+        markdown = v();
+        break;
+      default:
+        throw new Error(`unknown argument ${a}`);
     }
   }
   const config = parseConfig(raw);
-  return { config, ...(json === undefined ? {} : { json }), ...(markdown === undefined ? {} : { markdown }) };
+  return {
+    config,
+    ...(json === undefined ? {} : { json }),
+    ...(markdown === undefined ? {} : { markdown }),
+  };
 }
 
 /**
@@ -198,9 +269,18 @@ export function parseArgs(argv: string[], defaults: Partial<BenchConfig> = {}): 
 export function output(report: BenchReport, args: CliArgs): void {
   const rows = summarize(report);
   console.log(`\n${report.environment}\n${describe(report)}\n`);
-  console.table(Object.fromEntries(rows.map((r) => [r.mode, Object.fromEntries(
-    columns(rows).filter((k) => k !== 'mode').map((k) => [SUMMARY_HEADERS[k], r[k]]),
-  )])));
+  console.table(
+    Object.fromEntries(
+      rows.map((r) => [
+        r.mode,
+        Object.fromEntries(
+          columns(rows)
+            .filter((k) => k !== 'mode')
+            .map((k) => [SUMMARY_HEADERS[k], r[k]]),
+        ),
+      ]),
+    ),
+  );
   if (args.json !== undefined) writeFileSync(args.json, `${JSON.stringify(report, null, 2)}\n`);
   if (args.markdown !== undefined) appendFileSync(args.markdown, `${toMarkdown(report)}\n`);
   for (const r of report.results) {

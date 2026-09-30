@@ -11,7 +11,8 @@ import { readFileSync } from 'node:fs';
 export function jsBlocks(path: string, count: number): string[] {
   const md = readFileSync(path, 'utf8');
   const blocks = [...md.matchAll(/^```js\n([\s\S]*?)^```$/gm)].map((m) => m[1] ?? '');
-  if (blocks.length !== count) throw new Error(`${path}: ${blocks.length} js blocks, expected ${count}`);
+  if (blocks.length !== count)
+    throw new Error(`${path}: ${blocks.length} js blocks, expected ${count}`);
   return blocks;
 }
 

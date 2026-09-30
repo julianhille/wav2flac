@@ -23,18 +23,30 @@ function crate(files: string[], dirs: string[] = [], licenseFile: string | null 
   dir = mkdtempSync(join(tmpdir(), 'crate-'));
   for (const f of ['Cargo.toml', ...files]) writeFileSync(join(dir, f), 'x');
   for (const d of dirs) mkdirSync(join(dir, d));
-  return { name: 'c', version: '1.0.0', license: null, license_file: licenseFile, manifest_path: join(dir, 'Cargo.toml') } as Package;
+  return {
+    name: 'c',
+    version: '1.0.0',
+    license: null,
+    license_file: licenseFile,
+    manifest_path: join(dir, 'Cargo.toml'),
+  } as Package;
 }
 
 describe('noticeFiles', () => {
   it('lists the notice files, sorted, and no directories', () => {
-    const c = crate(['README.md', 'LICENSE-MIT', 'COPYRIGHT', 'NOTICE', 'LICENSE-APACHE'], ['LICENSES', 'licenses-extra']);
+    const c = crate(
+      ['README.md', 'LICENSE-MIT', 'COPYRIGHT', 'NOTICE', 'LICENSE-APACHE'],
+      ['LICENSES', 'licenses-extra'],
+    );
     expect(noticeFiles(c)).toEqual(['COPYRIGHT', 'LICENSE-APACHE', 'LICENSE-MIT', 'NOTICE']);
   });
 
   it('adds the license-file of the manifest once', () => {
     expect(noticeFiles(crate(['LICENSE'], [], './LICENSE'))).toEqual(['LICENSE']);
-    expect(noticeFiles(crate(['LICENSE'], [], 'legal/terms.txt'))).toEqual(['LICENSE', 'legal/terms.txt']);
+    expect(noticeFiles(crate(['LICENSE'], [], 'legal/terms.txt'))).toEqual([
+      'LICENSE',
+      'legal/terms.txt',
+    ]);
   });
 
   it('fails for a crate without one', () => {

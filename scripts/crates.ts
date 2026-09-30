@@ -33,9 +33,20 @@ interface Metadata {
  * @returns The packages.
  */
 export function shippedCrates(): Package[] {
-  const meta = JSON.parse(execFileSync('cargo', [
-    'metadata', '--format-version', '1', '--locked', '--filter-platform', 'wasm32-unknown-unknown',
-  ], { encoding: 'utf8', maxBuffer: 64 << 20 })) as Metadata;
+  const meta = JSON.parse(
+    execFileSync(
+      'cargo',
+      [
+        'metadata',
+        '--format-version',
+        '1',
+        '--locked',
+        '--filter-platform',
+        'wasm32-unknown-unknown',
+      ],
+      { encoding: 'utf8', maxBuffer: 64 << 20 },
+    ),
+  ) as Metadata;
 
   const nodes = new Map(meta.resolve.nodes.map((n) => [n.id, n]));
   const packages = new Map(meta.packages.map((p) => [p.id, p]));
@@ -50,7 +61,9 @@ export function shippedCrates(): Package[] {
       todo.push(d.pkg);
     }
   }
-  return [...seen].map((id) => packages.get(id)!).sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  return [...seen]
+    .map((id) => packages.get(id)!)
+    .sort((a, b) => a.name.localeCompare(b.name, 'en'));
 }
 
 /** The files that hold a crate's license notices, by name. */
@@ -71,7 +84,8 @@ export function noticeFiles(c: Package): string[] {
     .sort();
   const own = c.license_file === null ? undefined : normalize(c.license_file);
   if (own !== undefined && !files.includes(own)) files.push(own);
-  if (files.length === 0) throw new Error(`${c.name} ${c.version}: no license file found in ${dir}`);
+  if (files.length === 0)
+    throw new Error(`${c.name} ${c.version}: no license file found in ${dir}`);
   return files;
 }
 
@@ -93,12 +107,16 @@ export function rustVersion(): string {
   const file = join(import.meta.dirname, '..', 'rust-toolchain.toml');
   const channel = /^channel\s*=\s*"([^"]*)"/m.exec(readFileSync(file, 'utf8'))?.[1];
   if (channel === undefined || !/^\d+\.\d+\.\d+$/.test(channel)) {
-    throw new Error(`rust-toolchain.toml: the channel must be a release such as "1.98.1", not ${channel ?? 'missing'}`);
+    throw new Error(
+      `rust-toolchain.toml: the channel must be a release such as "1.98.1", not ${channel ?? 'missing'}`,
+    );
   }
   if (channel !== STD_TEXTS_RELEASE) {
-    throw new Error(`rust-toolchain.toml pins Rust ${channel}, but the texts in scripts/std-licenses/ ` +
-      `are from ${STD_TEXTS_RELEASE}. Compare them with the new release, then update STD_TEXTS_RELEASE ` +
-      'in scripts/crates.ts.');
+    throw new Error(
+      `rust-toolchain.toml pins Rust ${channel}, but the texts in scripts/std-licenses/ ` +
+        `are from ${STD_TEXTS_RELEASE}. Compare them with the new release, then update STD_TEXTS_RELEASE ` +
+        'in scripts/crates.ts.',
+    );
   }
   return (toolchain = channel);
 }

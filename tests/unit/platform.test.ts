@@ -6,7 +6,8 @@ afterEach(() => {
   vi.resetModules();
 });
 
-const fresh = async (): Promise<typeof import('../../ts/lib/platform.js')> => import('../../ts/lib/platform.js');
+const fresh = async (): Promise<typeof import('../../ts/lib/platform.js')> =>
+  import('../../ts/lib/platform.js');
 
 describe('platform', () => {
   it('detects Node and loads built-ins', async () => {
@@ -26,15 +27,20 @@ describe('platform', () => {
   it.each([
     ['setImmediate', () => undefined],
     ['MessageChannel', () => vi.stubGlobal('setImmediate', undefined)],
-    ['setTimeout', () => {
-      vi.stubGlobal('setImmediate', undefined);
-      vi.stubGlobal('MessageChannel', undefined);
-    }],
+    [
+      'setTimeout',
+      () => {
+        vi.stubGlobal('setImmediate', undefined);
+        vi.stubGlobal('MessageChannel', undefined);
+      },
+    ],
   ])('yields via %s', async (_, stub) => {
     stub();
     const p = await fresh();
     let flag = false;
-    const y = p.yieldNow().then(() => { flag = true; });
+    const y = p.yieldNow().then(() => {
+      flag = true;
+    });
     expect(flag).toBe(false);
     await y;
     await p.yieldNow();
@@ -54,10 +60,15 @@ describe('platform', () => {
     vi.useFakeTimers({ toFake: ['performance'] });
     try {
       const pacer = new p.Pacer();
+      let ticked = false;
+      setImmediate(() => {
+        ticked = true;
+      });
       await pacer.maybeYield();
+      expect(ticked).toBe(false);
       vi.advanceTimersByTime(p.YIELD_EVERY_MS);
-      vi.useRealTimers();
       await pacer.maybeYield();
+      expect(ticked).toBe(true);
     } finally {
       vi.useRealTimers();
     }

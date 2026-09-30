@@ -10,7 +10,13 @@ import { BUFFER_INPUT, isStream, preparePcm, toBytes, type Input, type PcmInput 
 import { normalizeOptions, type Options, type Progress } from './options.js';
 import { builtin, ignore, isNode } from './platform.js';
 import type { WavInfo } from './probe.js';
-import { OUTPUT_WINDOW, transferOf, type FromWorker, type Port, type ToWorker } from './protocol.js';
+import {
+  OUTPUT_WINDOW,
+  transferOf,
+  type FromWorker,
+  type Port,
+  type ToWorker,
+} from './protocol.js';
 import { init, wasmModule, type WasmSource } from './wasm.js';
 
 /** The worker script next to this file, for Node (see `spawn`). */
@@ -30,7 +36,10 @@ export interface WorkerEncoder {
    */
   encode(input: Input | PcmInput, options?: Options): Promise<Bytes>;
   /** Like `encodeStream()`, but in the worker; with backpressure both ways. */
-  encodeStream(input: Input | PcmInput, options?: Omit<Options, 'seekPointInterval'>): ReadableStream<Bytes>;
+  encodeStream(
+    input: Input | PcmInput,
+    options?: Omit<Options, 'seekPointInterval'>,
+  ): ReadableStream<Bytes>;
   /** Like `probe()`, but in the worker. The header bytes are copied. */
   probe(input: Uint8Array | ArrayBuffer): Promise<WavInfo>;
   /**
@@ -73,9 +82,14 @@ function browserPort(w: Worker): Port<FromWorker, ToWorker> {
       w.onmessage = (e: MessageEvent<FromWorker>) => onMessage(e.data);
       w.onerror = (e) => {
         e.preventDefault();
-        onError(new Error(`wav2flac worker failed: ${e.message || 'the worker script could not be loaded'}`));
+        onError(
+          new Error(
+            `wav2flac worker failed: ${e.message || 'the worker script could not be loaded'}`,
+          ),
+        );
       };
-      w.onmessageerror = () => onError(new Error('wav2flac worker: message could not be deserialized'));
+      w.onmessageerror = () =>
+        onError(new Error('wav2flac worker: message could not be deserialized'));
     },
     ref: ignore,
     close: () => w.terminate(),
@@ -123,9 +137,10 @@ function spawn(url: URL | string | undefined): Port<FromWorker, ToWorker> {
     return nodePort(new Worker(u ?? new URL(NODE_WORKER, import.meta.url)));
   }
   // Kept literal so bundlers (Vite, webpack) detect and emit the worker.
-  const w = url === undefined
-    ? new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
-    : new Worker(url, { type: 'module' });
+  const w =
+    url === undefined
+      ? new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
+      : new Worker(url, { type: 'module' });
   return browserPort(w);
 }
 
@@ -184,6 +199,8 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
 
   const failAll = (e: Error): void => {
     dead ??= e;
+    // A copy: job.fail() runs the caller's code, which can add or end jobs.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const [id, job] of [...jobs]) {
       remove(id);
       job.fail(e);
@@ -320,15 +337,25 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
       fail,
     });
 
-    void ready.then(
-      () => {
+    void ready
+      .then(() => {
         if (finished) return;
         if (dead !== undefined) throw dead;
         // Another job may have transferred the same buffer meanwhile.
         if (bytes !== null) toBytes(bytes);
-        post({ t: 'job', id, args, input: bytes, progress: onProgress !== undefined, window: OUTPUT_WINDOW }, bytes ?? undefined);
-      },
-    ).catch(fail);
+        post(
+          {
+            t: 'job',
+            id,
+            args,
+            input: bytes,
+            progress: onProgress !== undefined,
+            window: OUTPUT_WINDOW,
+          },
+          bytes ?? undefined,
+        );
+      })
+      .catch(fail);
     return cancel;
   };
 
@@ -338,7 +365,10 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
    * @param pick Extracts the result from the reply.
    * @returns The result.
    */
-  const request = <T>(msg: (id: number) => ToWorker, pick: (m: FromWorker) => T | undefined): Promise<T> => {
+  const request = <T>(
+    msg: (id: number) => ToWorker,
+    pick: (m: FromWorker) => T | undefined,
+  ): Promise<T> => {
     const id = nextId++;
     return new Promise<T>((resolve, reject) => {
       // Registered before the wasm is ready, so that terminate() and a crash
@@ -352,13 +382,15 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
         fail: reject,
       });
       // A load that failed, or a message that cannot be posted, fails it.
-      ready.then(() => {
-        if (jobs.has(id)) post(msg(id));
-      }).catch((e: unknown) => {
-        if (!jobs.has(id)) return;
-        remove(id);
-        reject(e);
-      });
+      ready
+        .then(() => {
+          if (jobs.has(id)) post(msg(id));
+        })
+        .catch((e: unknown) => {
+          if (!jobs.has(id)) return;
+          remove(id);
+          reject(e);
+        });
     });
   };
 
@@ -382,43 +414,60 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
         w?.();
       };
       let id = 0;
-      return new ReadableStream<Bytes>({
-        start(c) {
-          // Like encodeStream() on the main thread: failures error the stream.
-          try {
-            if (dead !== undefined) throw dead;
-            id = nextId;
-            cancel = start(
-              input,
-              opts,
-              true,
-              (d) => { queue.push(d); poke(); },
-              () => { state = 'done'; poke(); },
-              // Output not yet read is dropped: an abort or error wins.
-              (e) => { state = 'failed'; error = e; queue.length = 0; poke(); },
-            );
-          } catch (e) {
-            c.error(e);
-          }
+      return new ReadableStream<Bytes>(
+        {
+          start(c) {
+            // Like encodeStream() on the main thread: failures error the stream.
+            try {
+              if (dead !== undefined) throw dead;
+              id = nextId;
+              cancel = start(
+                input,
+                opts,
+                true,
+                (d) => {
+                  queue.push(d);
+                  poke();
+                },
+                () => {
+                  state = 'done';
+                  poke();
+                },
+                // Output not yet read is dropped: an abort or error wins.
+                (e) => {
+                  state = 'failed';
+                  error = e;
+                  queue.length = 0;
+                  poke();
+                },
+              );
+            } catch (e) {
+              c.error(e);
+            }
+          },
+          async pull(c) {
+            while (queue.length === 0 && state === 'open')
+              await new Promise<void>((r) => {
+                wake = r;
+              });
+            const d = queue.shift();
+            if (d !== undefined) {
+              c.enqueue(d);
+              if (state === 'open') post({ t: 'ack', id });
+              return;
+            }
+            if (state === 'failed') throw error;
+            c.close();
+          },
+          cancel() {
+            cancel?.();
+            // Settle a pull() still waiting for output.
+            state = 'done';
+            poke();
+          },
         },
-        async pull(c) {
-          while (queue.length === 0 && state === 'open') await new Promise<void>((r) => { wake = r; });
-          const d = queue.shift();
-          if (d !== undefined) {
-            c.enqueue(d);
-            if (state === 'open') post({ t: 'ack', id });
-            return;
-          }
-          if (state === 'failed') throw error;
-          c.close();
-        },
-        cancel() {
-          cancel?.();
-          // Settle a pull() still waiting for output.
-          state = 'done';
-          poke();
-        },
-      }, { highWaterMark: 0 });
+        { highWaterMark: 0 },
+      );
     },
 
     async probe(input) {
@@ -427,7 +476,10 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
       for (let n = Math.min(PROBE_FIRST_TRY, bytes.length); ; n = Math.min(n * 4, bytes.length)) {
         const data = bytes.slice(0, n);
         try {
-          return await request((id) => ({ t: 'probe', id, data }), (m) => (m.t === 'probe' ? m.info : undefined));
+          return await request(
+            (id) => ({ t: 'probe', id, data }),
+            (m) => (m.t === 'probe' ? m.info : undefined),
+          );
         } catch (e) {
           if (!(e instanceof Wav2FlacError && e.code === 'TRUNCATED' && n < bytes.length)) throw e;
         }
@@ -435,7 +487,10 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
     },
 
     async wasmMemoryBytes() {
-      return request((id) => ({ t: 'stats', id }), (m) => (m.t === 'stats' ? m.wasmBytes : undefined));
+      return request(
+        (id) => ({ t: 'stats', id }),
+        (m) => (m.t === 'stats' ? m.wasmBytes : undefined),
+      );
     },
 
     terminate() {

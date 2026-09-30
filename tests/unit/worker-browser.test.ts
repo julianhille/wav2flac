@@ -24,7 +24,9 @@ const wav = makeWav({ frames: 44100, seed: 9 });
 function hostPort(p: MessagePort): Port<ToWorker, FromWorker> {
   return {
     post: (m, t) => p.postMessage(m, t as never),
-    listen: (on) => { p.on('message', on); },
+    listen: (on) => {
+      p.on('message', on);
+    },
     ref: () => undefined,
     close: () => p.close(),
   };

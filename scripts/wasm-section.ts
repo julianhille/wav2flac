@@ -52,7 +52,7 @@ export function readLeb128(bytes: Uint8Array, at: number): { value: number; next
  */
 function customNames(wasm: Uint8Array): string[] {
   const names: string[] = [];
-  for (let at = HEADER.length; at < wasm.length; ) {
+  for (let at = HEADER.length; at < wasm.length;) {
     const size = readLeb128(wasm, at + 1);
     const end = size.next + size.value;
     if (end > wasm.length) throw new RangeError('section runs past the end');
@@ -77,16 +77,28 @@ function customNames(wasm: Uint8Array): string[] {
  * @throws {Error} If `wasm` is not a wasm module of version 1, or already
  *   has a custom section of that name, anywhere.
  */
-export function withFirstSection(wasm: Uint8Array, name: string, content: Uint8Array): Uint8Array<ArrayBuffer> {
+export function withFirstSection(
+  wasm: Uint8Array,
+  name: string,
+  content: Uint8Array,
+): Uint8Array<ArrayBuffer> {
   if (wasm.length < HEADER.length || HEADER.some((b, i) => wasm[i] !== b)) {
     throw new Error('not a wasm module of version 1');
   }
-  if (customNames(wasm).includes(name)) throw new Error(`the module already has a "${name}" section`);
+  if (customNames(wasm).includes(name))
+    throw new Error(`the module already has a "${name}" section`);
   const nameBytes = new TextEncoder().encode(name);
   const nameSize = leb128(nameBytes.length);
   const size = leb128(nameSize.length + nameBytes.length + content.length);
-  const parts = [wasm.subarray(0, HEADER.length), Uint8Array.of(CUSTOM), size, nameSize, nameBytes, content,
-    wasm.subarray(HEADER.length)];
+  const parts = [
+    wasm.subarray(0, HEADER.length),
+    Uint8Array.of(CUSTOM),
+    size,
+    nameSize,
+    nameBytes,
+    content,
+    wasm.subarray(HEADER.length),
+  ];
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;
   for (const p of parts) {

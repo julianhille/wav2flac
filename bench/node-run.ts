@@ -12,7 +12,13 @@
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { createRequire } from 'node:module';
-import { competitorInput, loadCompetitor, type CompetitorMode, type FlacLib, type LibAVInstance } from './competitors.ts';
+import {
+  competitorInput,
+  loadCompetitor,
+  type CompetitorMode,
+  type FlacLib,
+  type LibAVInstance,
+} from './competitors.ts';
 import type { RunSample, BenchConfig } from './shared.ts';
 import { competitorUnsupported, encoderInput, encoderOptions } from './shared.ts';
 
@@ -73,7 +79,8 @@ function gc(): void {
  */
 async function main(): Promise<ChildResult> {
   const [wavPath, mode, json] = process.argv.slice(2);
-  if (wavPath === undefined || mode === undefined || json === undefined) throw new Error('usage: node-run.ts <wav> <mode> <config>');
+  if (wavPath === undefined || mode === undefined || json === undefined)
+    throw new Error('usage: node-run.ts <wav> <mode> <config>');
   const config = JSON.parse(json) as BenchConfig;
   const lib = (await import(new URL('../pkg/esm/index.js', import.meta.url).href)) as Lib;
   await lib.init();
@@ -96,18 +103,20 @@ async function main(): Promise<ChildResult> {
     prepare = () => {
       input = wav.slice();
     };
-    run = config.output === 'stream'
-      ? () => drain(w.encodeStream(input, opts))
-      : async () => (await w.encode(input, opts)).length;
+    run =
+      config.output === 'stream'
+        ? () => drain(w.encodeStream(input, opts))
+        : async () => (await w.encode(input, opts)).length;
     wasmBytes = () => w.wasmMemoryBytes();
     close = () => w.terminate();
   } else if (mode === 'sync') {
     run = async () => lib.encodeSync(wav, opts).length;
     wasmBytes = async () => lib.wasmMemoryBytes();
   } else if (mode === 'main') {
-    run = config.output === 'stream'
-      ? () => drain(lib.encodeStream(wav, opts))
-      : async () => (await lib.encode(wav, opts)).length;
+    run =
+      config.output === 'stream'
+        ? () => drain(lib.encodeStream(wav, opts))
+        : async () => (await lib.encode(wav, opts)).length;
     wasmBytes = async () => lib.wasmMemoryBytes();
   } else if (mode === 'libav' || mode === 'libflac') {
     const why = competitorUnsupported(config);
@@ -131,7 +140,9 @@ async function main(): Promise<ChildResult> {
   gc();
   const baseRssKb = Math.round(process.memoryUsage.rss() / 1024);
   let heap = process.memoryUsage().heapUsed;
-  const sampler = setInterval(() => { heap = Math.max(heap, process.memoryUsage().heapUsed); }, 2);
+  const sampler = setInterval(() => {
+    heap = Math.max(heap, process.memoryUsage().heapUsed);
+  }, 2);
   // Heartbeat: the longest gap between 1 ms ticks is the longest stall of the
   // event loop (a synchronous encode shows up as one long gap).
   let last = performance.now();

@@ -80,9 +80,24 @@ export class Session {
   constructor(a: EncoderArgs) {
     try {
       this.#enc = new WasmEncoder(
-        a.level, a.blockSize, a.sampleRate, a.quality, a.bits, a.dither, a.seed, a.tagsEnabled,
-        a.tagKeys, a.tagValues, a.seekPointInterval, a.padding, a.maxInputBytes, a.streaming,
-        Math.max(a.pcmFormat, 0), a.pcmChannels, a.pcmRate, a.pcmTotalBytes,
+        a.level,
+        a.blockSize,
+        a.sampleRate,
+        a.quality,
+        a.bits,
+        a.dither,
+        a.seed,
+        a.tagsEnabled,
+        a.tagKeys,
+        a.tagValues,
+        a.seekPointInterval,
+        a.padding,
+        a.maxInputBytes,
+        a.streaming,
+        Math.max(a.pcmFormat, 0),
+        a.pcmChannels,
+        a.pcmRate,
+        a.pcmTotalBytes,
       );
     } catch (e) {
       throw fromWasmError(e);
@@ -134,7 +149,11 @@ export class Session {
   progress(): Progress {
     const enc = this.#live();
     const f = enc.fraction();
-    return { bytesIn: enc.bytesIn(), samplesOut: enc.samplesOut(), fraction: Number.isNaN(f) ? null : f };
+    return {
+      bytesIn: enc.bytesIn(),
+      samplesOut: enc.samplesOut(),
+      fraction: Number.isNaN(f) ? null : f,
+    };
   }
 
   /** Releases the wasm memory; idempotent. */
@@ -153,7 +172,11 @@ export class Session {
  * @param tail Trailing bytes.
  * @returns The joined bytes.
  */
-export function assemble(header: Uint8Array, parts: readonly Uint8Array[], tail: Uint8Array): Bytes {
+export function assemble(
+  header: Uint8Array,
+  parts: readonly Uint8Array[],
+  tail: Uint8Array,
+): Bytes {
   let n = header.length + tail.length;
   for (const p of parts) n += p.length;
   const out = new Uint8Array(n);
@@ -200,7 +223,11 @@ export function runSync(bytes: Uint8Array, args: EncoderArgs, hooks: RunHooks): 
  * @param hooks Progress and abort hooks.
  * @returns The complete FLAC file.
  */
-export async function runBuffered(input: Input, args: EncoderArgs, hooks: RunHooks): Promise<Bytes> {
+export async function runBuffered(
+  input: Input,
+  args: EncoderArgs,
+  hooks: RunHooks,
+): Promise<Bytes> {
   let s: Session;
   try {
     hooks.signal?.throwIfAborted();
@@ -263,68 +290,71 @@ export function runStream(input: Input, args: EncoderArgs, hooks: RunHooks): Rea
     it = undefined;
     void i?.return(undefined).catch(ignore);
   };
-  return new ReadableStream<Bytes>({
-    start(controller) {
-      // Every failure errors the stream, including an already-aborted signal
-      // and options the core rejects; nothing throws from the constructor.
-      if (signal?.aborted === true) {
-        cleanup(signal.reason);
-        controller.error(signal.reason);
-        return;
-      }
-      try {
-        s = new Session(args);
-        it = chunks(input, undefined, stop.signal);
-      } catch (e) {
-        cleanup(e);
-        controller.error(e);
-        return;
-      }
-      if (signal !== undefined) {
-        onAbort = () => {
-          controller.error(signal.reason);
+  return new ReadableStream<Bytes>(
+    {
+      start(controller) {
+        // Every failure errors the stream, including an already-aborted signal
+        // and options the core rejects; nothing throws from the constructor.
+        if (signal?.aborted === true) {
           cleanup(signal.reason);
-        };
-        signal.addEventListener('abort', onAbort, { once: true });
-      }
-    },
-    async pull(controller) {
-      try {
-        for (;;) {
-          // Yield here, not only after empty pushes: a consumer reading in a
-          // loop chains pulls on microtasks, which would never let other
-          // tasks run.
-          await pacer.maybeYield();
-          if (s === undefined || it === undefined) return;
-          reading = true;
-          const r = await it.next().catch((e: unknown) => {
-            if (stop.signal.aborted) return undefined; // cancelled meanwhile
-            throw e;
-          });
-          signal?.throwIfAborted();
-          if (s === undefined || r === undefined) return;
-          if (r.done === true) {
-            const { tail } = s.finish();
-            rep.update(s, true);
-            if (tail.length > 0) controller.enqueue(tail);
-            controller.close();
-            cleanup();
-            return;
-          }
-          const out = s.push(r.value);
-          rep.update(s);
-          if (out.length > 0) {
-            controller.enqueue(out);
-            return;
-          }
+          controller.error(signal.reason);
+          return;
         }
-      } catch (e) {
-        cleanup(e);
-        throw e;
-      }
+        try {
+          s = new Session(args);
+          it = chunks(input, undefined, stop.signal);
+        } catch (e) {
+          cleanup(e);
+          controller.error(e);
+          return;
+        }
+        if (signal !== undefined) {
+          onAbort = () => {
+            controller.error(signal.reason);
+            cleanup(signal.reason);
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      },
+      async pull(controller) {
+        try {
+          for (;;) {
+            // Yield here, not only after empty pushes: a consumer reading in a
+            // loop chains pulls on microtasks, which would never let other
+            // tasks run.
+            await pacer.maybeYield();
+            if (s === undefined || it === undefined) return;
+            reading = true;
+            const r = await it.next().catch((e: unknown) => {
+              if (stop.signal.aborted) return undefined; // cancelled meanwhile
+              throw e;
+            });
+            signal?.throwIfAborted();
+            if (s === undefined || r === undefined) return;
+            if (r.done === true) {
+              const { tail } = s.finish();
+              rep.update(s, true);
+              if (tail.length > 0) controller.enqueue(tail);
+              controller.close();
+              cleanup();
+              return;
+            }
+            const out = s.push(r.value);
+            rep.update(s);
+            if (out.length > 0) {
+              controller.enqueue(out);
+              return;
+            }
+          }
+        } catch (e) {
+          cleanup(e);
+          throw e;
+        }
+      },
+      cancel(reason) {
+        cleanup(reason);
+      },
     },
-    cancel(reason) {
-      cleanup(reason);
-    },
-  }, { highWaterMark: 1 });
+    { highWaterMark: 1 },
+  );
 }

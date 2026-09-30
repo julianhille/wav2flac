@@ -52,13 +52,26 @@ export interface Competitor {
 export interface LibAVInstance {
   AV_SAMPLE_FMT_S16: number;
   AV_SAMPLE_FMT_S32: number;
-  ff_init_encoder(name: string, opts: {
-    ctx: Record<string, number>; time_base: [number, number]; options?: Record<string, string>;
-  }): Promise<[number, number, number, number, number]>;
-  ff_init_muxer(opts: { format_name: string; filename: string; open: boolean }, streams: [number, number, number][]):
-  Promise<[number, number, number, number[]]>;
+  ff_init_encoder(
+    name: string,
+    opts: {
+      ctx: Record<string, number>;
+      time_base: [number, number];
+      options?: Record<string, string>;
+    },
+  ): Promise<[number, number, number, number, number]>;
+  ff_init_muxer(
+    opts: { format_name: string; filename: string; open: boolean },
+    streams: [number, number, number][],
+  ): Promise<[number, number, number, number[]]>;
   avformat_write_header(oc: number, options: number): Promise<number>;
-  ff_encode_multi(c: number, frame: number, pkt: number, frames: unknown[], fin: boolean): Promise<unknown[]>;
+  ff_encode_multi(
+    c: number,
+    frame: number,
+    pkt: number,
+    frames: unknown[],
+    fin: boolean,
+  ): Promise<unknown[]>;
   ff_write_multi(oc: number, pkt: number, packets: unknown[]): Promise<void>;
   av_write_trailer(oc: number): Promise<number>;
   ff_free_muxer(oc: number, pb: number): Promise<void>;
@@ -72,8 +85,15 @@ export interface LibAVInstance {
 export interface FlacLib {
   isReady(): boolean;
   on(event: 'ready', cb: () => void): void;
-  create_libflac_encoder(rate: number, channels: number, bps: number, level: number, totalSamples: number,
-    verify: boolean, blockSize: number): number;
+  create_libflac_encoder(
+    rate: number,
+    channels: number,
+    bps: number,
+    level: number,
+    totalSamples: number,
+    verify: boolean,
+    blockSize: number,
+  ): number;
   init_encoder_stream(enc: number, write: (data: Uint8Array) => void): number;
   FLAC__stream_encoder_process_interleaved(enc: number, buf: Int32Array, frames: number): boolean;
   FLAC__stream_encoder_finish(enc: number): boolean;
@@ -121,7 +141,7 @@ export function toInt32(pcm: PcmSamples, shift = 0): Int32Array {
   const b = pcm.data;
   const out = new Int32Array(b.length / 3);
   for (let i = 0, j = 0; i < out.length; i++, j += 3) {
-    out[i] = ((b[j]! | (b[j + 1]! << 8) | (b[j + 2]! << 16)) << 8 >> 8) << shift;
+    out[i] = (((b[j]! | (b[j + 1]! << 8) | (b[j + 2]! << 16)) << 8) >> 8) << shift;
   }
   return out;
 }
@@ -147,14 +167,22 @@ export function libavCompetitor(av: LibAVInstance): Competitor {
       const s16 = pcm.bits === 16;
       const format = s16 ? av.AV_SAMPLE_FMT_S16 : av.AV_SAMPLE_FMT_S32;
       // FFmpeg takes 24-bit audio as S32 with the samples in the top 24 bits.
-      const data = s16 ? pcm.data as Int16Array : toInt32(pcm, 8);
+      const data = s16 ? (pcm.data as Int16Array) : toInt32(pcm, 8);
       const [, c, frame, pkt, frameSize] = await av.ff_init_encoder('flac', {
-        ctx: { sample_fmt: format, sample_rate: pcm.sampleRate, channel_layout: layout(pcm.channels), channels: pcm.channels },
+        ctx: {
+          sample_fmt: format,
+          sample_rate: pcm.sampleRate,
+          channel_layout: layout(pcm.channels),
+          channels: pcm.channels,
+        },
         time_base: [1, pcm.sampleRate],
         options: { compression_level: String(level) },
       });
       const file = `bench-${n++}.flac`;
-      const [oc, , pb] = await av.ff_init_muxer({ format_name: 'flac', filename: file, open: true }, [[c, 1, pcm.sampleRate]]);
+      const [oc, , pb] = await av.ff_init_muxer(
+        { format_name: 'flac', filename: file, open: true },
+        [[c, 1, pcm.sampleRate]],
+      );
       try {
         await av.avformat_write_header(oc, 0);
         const frames = [];
@@ -163,8 +191,13 @@ export function libavCompetitor(av: LibAVInstance): Competitor {
         for (let o = 0; o < data.length; o += step) {
           const d = data.subarray(o, o + step);
           frames.push({
-            data: d, format, pts: o / pcm.channels, sample_rate: pcm.sampleRate,
-            channel_layout: layout(pcm.channels), channels: pcm.channels, nb_samples: d.length / pcm.channels,
+            data: d,
+            format,
+            pts: o / pcm.channels,
+            sample_rate: pcm.sampleRate,
+            channel_layout: layout(pcm.channels),
+            channels: pcm.channels,
+            nb_samples: d.length / pcm.channels,
           });
         }
         const packets = await av.ff_encode_multi(c, frame, pkt, frames, true);
@@ -193,7 +226,15 @@ export function libflacCompetitor(flac: FlacLib): Competitor {
     async encode(pcm, level) {
       const samples = toInt32(pcm);
       const frames = samples.length / pcm.channels;
-      const enc = flac.create_libflac_encoder(pcm.sampleRate, pcm.channels, pcm.bits, level, frames, false, 0);
+      const enc = flac.create_libflac_encoder(
+        pcm.sampleRate,
+        pcm.channels,
+        pcm.bits,
+        level,
+        frames,
+        false,
+        0,
+      );
       if (enc === 0) throw new Error('libflac.js: creating the encoder failed');
       const parts: Uint8Array[] = [];
       try {
@@ -202,7 +243,9 @@ export function libflacCompetitor(flac: FlacLib): Competitor {
         const step = FRAMES_PER_CALL * pcm.channels;
         for (let o = 0; o < samples.length; o += step) {
           const chunk = samples.subarray(o, o + step);
-          if (!flac.FLAC__stream_encoder_process_interleaved(enc, chunk, chunk.length / pcm.channels)) {
+          if (
+            !flac.FLAC__stream_encoder_process_interleaved(enc, chunk, chunk.length / pcm.channels)
+          ) {
             throw new Error('libflac.js: encoding failed');
           }
         }
@@ -249,7 +292,12 @@ export function competitorInput(wav: Uint8Array<ArrayBuffer>): PcmSamples {
     if (id === 'fmt ') {
       let tag = v.getUint16(o + 8, true);
       if (tag === 0xfffe && len >= 26) tag = v.getUint16(o + 32, true);
-      fmt = { tag, channels: v.getUint16(o + 10, true), rate: v.getUint32(o + 12, true), bits: v.getUint16(o + 22, true) };
+      fmt = {
+        tag,
+        channels: v.getUint16(o + 10, true),
+        rate: v.getUint32(o + 12, true),
+        bits: v.getUint16(o + 22, true),
+      };
     } else if (id === 'data') {
       if (fmt === undefined) throw new Error('WAV has no fmt chunk before data');
       if (fmt.tag !== 1 || (fmt.bits !== 16 && fmt.bits !== 24)) {

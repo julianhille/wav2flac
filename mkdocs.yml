@@ -29,10 +29,10 @@ nav:
   - Raw PCM input: pcm.md
   - Concurrent encodes: concurrency.md
   - How-to:
-    - Overview: how-to/index.md
-    - Encode in parallel: how-to/parallel-encoding.md
-    - FIFO queue: how-to/fifo-queue.md
-    - Load from a CDN: how-to/load-from-cdn.md
+      - Overview: how-to/index.md
+      - Encode in parallel: how-to/parallel-encoding.md
+      - FIFO queue: how-to/fifo-queue.md
+      - Load from a CDN: how-to/load-from-cdn.md
   - API reference: reference/api/index.md
   - Benchmark: benchmark.md
   - Third-party components: third-party.md

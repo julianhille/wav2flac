@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import", "vitest", "promise", "node"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    // Vitest's expect() takes a message as its second argument.
+    "vitest/valid-expect": ["error", { "maxArgs": 2 }],
+    // The fuzz tests check different things for inputs that encode and inputs
+    // that fail.
+    "vitest/no-conditional-expect": "off",
+    // vi.fn() infers its type from the implementation.
+    "vitest/require-mock-type-parameters": "off",
+    // Flags any function named done(), such as the cleanup in ts/lib/wasm.ts;
+    // this code has no Node-style callbacks.
+    "promise/no-callback-in-promise": "off"
+  }
+}

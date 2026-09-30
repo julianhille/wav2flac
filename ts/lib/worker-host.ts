@@ -25,7 +25,9 @@ interface Deferred<T> {
  */
 function deferred<T>(): Deferred<T> {
   let resolve!: (v: T) => void;
-  const promise = new Promise<T>((r) => { resolve = r; });
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
   return { promise, resolve };
 }
 
@@ -56,19 +58,27 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
    * @returns The input stream.
    */
   const pulled = (id: number, job: HostJob): ReadableStream<Uint8Array> =>
-    new ReadableStream<Uint8Array>({
-      async pull(c) {
-        job.input = deferred();
-        send({ t: 'need', id });
-        const data = await job.input.promise;
-        job.input = undefined;
-        if (data === null) c.close();
-        else c.enqueue(data);
+    new ReadableStream<Uint8Array>(
+      {
+        async pull(c) {
+          job.input = deferred();
+          send({ t: 'need', id });
+          const data = await job.input.promise;
+          job.input = undefined;
+          if (data === null) c.close();
+          else c.enqueue(data);
+        },
       },
-    }, { highWaterMark: 0 });
+      { highWaterMark: 0 },
+    );
 
   const runJob = async (m: Extract<ToWorker, { t: 'job' }>): Promise<void> => {
-    const job: HostJob = { abort: new AbortController(), input: undefined, credits: m.window, credit: undefined };
+    const job: HostJob = {
+      abort: new AbortController(),
+      input: undefined,
+      credits: m.window,
+      credit: undefined,
+    };
     jobs.set(m.id, job);
     const hooks = {
       signal: job.abort.signal,
@@ -149,7 +159,8 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
         return;
       case 'stats':
         // A worker whose wasm failed to start can't encode; say so.
-        if (initError !== undefined) send({ t: 'error', id: m.id, error: serializeError(initError) });
+        if (initError !== undefined)
+          send({ t: 'error', id: m.id, error: serializeError(initError) });
         else send({ t: 'stats', id: m.id, wasmBytes: wasmMemoryBytes() });
         return;
     }

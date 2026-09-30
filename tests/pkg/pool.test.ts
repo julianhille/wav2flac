@@ -14,7 +14,10 @@ type Api = typeof import('../../ts/index.js');
 
 const root = resolve(import.meta.dirname, '../..');
 const api = (await import(pathToFileURL(join(root, 'pkg/esm/index.js')).href)) as Api;
-const [poolCode = '', batchCode = ''] = jsBlocks(join(root, 'docs/how-to/parallel-encoding.md'), 2).map(asScript);
+const [poolCode = '', batchCode = ''] = jsBlocks(
+  join(root, 'docs/how-to/parallel-encoding.md'),
+  2,
+).map(asScript);
 
 // The package's worker, except that it exits as soon as it gets a job whose
 // input starts with "CRSH", like a worker killed by running out of memory.
@@ -24,18 +27,24 @@ const [poolCode = '', batchCode = ''] = jsBlocks(join(root, 'docs/how-to/paralle
 const dir = mkdtempSync(join(tmpdir(), 'wav2flac-pool-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 const crashingWorker = join(dir, 'worker.mjs');
-writeFileSync(join(dir, 'crash.mjs'), `
+writeFileSync(
+  join(dir, 'crash.mjs'),
+  `
 import { parentPort } from 'node:worker_threads';
 parentPort.on('message', (m) => {
   if (m.t === 'job' && m.input !== null && new TextDecoder().decode(m.input.subarray(0, 4)) === 'CRSH') {
     process.exit(1);
   }
 });
-`);
-writeFileSync(crashingWorker, `
+`,
+);
+writeFileSync(
+  crashingWorker,
+  `
 import './crash.mjs';
 import ${JSON.stringify(pathToFileURL(join(root, 'pkg/esm/worker.js')).href)};
-`);
+`,
+);
 
 const OPTIONS = { compressionLevel: 8 };
 const wav = (i: number): Uint8Array<ArrayBuffer> => makeWav({ frames: 22050, seed: i });
@@ -47,7 +56,9 @@ describe('worker pool sample on real workers', () => {
     await api.init();
     const bad = new Set([5, 17]);
     const crashing = new Set([0, 11, 30]);
-    const files = Array.from({ length: 40 }, (_, i) => (bad.has(i) ? notWav() : crashing.has(i) ? crash() : wav(i)));
+    const files = Array.from({ length: 40 }, (_, i) =>
+      bad.has(i) ? notWav() : crashing.has(i) ? crash() : wav(i),
+    );
     let spawned = 0;
     const logged: unknown[] = [];
     const results = (await run(`${poolCode}\n${batchCode}\nreturn results;`, {
@@ -65,13 +76,19 @@ describe('worker pool sample on real workers', () => {
       if (bad.has(i)) {
         expect(r.status === 'rejected' && r.reason, `file ${i}`).toBeInstanceOf(api.Wav2FlacError);
       } else if (crashing.has(i)) {
-        expect(r.status === 'rejected' && String(r.reason), `file ${i}`).toMatch(/worker exited with code 1/);
+        expect(r.status === 'rejected' && String(r.reason), `file ${i}`).toMatch(
+          /worker exited with code 1/,
+        );
       } else {
         expect(r.status, `file ${i}`).toBe('fulfilled');
-        expect(r.status === 'fulfilled' && r.value, `file ${i}`).toEqual(api.encodeSync(wav(i), OPTIONS));
+        expect(r.status === 'fulfilled' && r.value, `file ${i}`).toEqual(
+          api.encodeSync(wav(i), OPTIONS),
+        );
       }
     }
-    expect(logged).toEqual([...bad, ...crashing].sort((a, b) => a - b).map((i) => `file ${i} failed`));
+    expect(logged).toEqual(
+      [...bad, ...crashing].sort((a, b) => a - b).map((i) => `file ${i} failed`),
+    );
     // Three workers, and one more for each that died.
     expect(spawned).toBe(3 + crashing.size);
   });

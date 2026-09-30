@@ -17,7 +17,14 @@ import type { WavInfo } from './probe.js';
 /** Messages to the worker. */
 export type ToWorker =
   | { t: 'init'; module: WebAssembly.Module }
-  | { t: 'job'; id: number; args: EncoderArgs; input: Uint8Array | null; progress: boolean; window: number }
+  | {
+      t: 'job';
+      id: number;
+      args: EncoderArgs;
+      input: Uint8Array | null;
+      progress: boolean;
+      window: number;
+    }
   | { t: 'chunk'; id: number; data: Uint8Array }
   | { t: 'end'; id: number }
   | { t: 'ack'; id: number }
@@ -58,5 +65,9 @@ export const OUTPUT_WINDOW = 4;
  */
 export function transferOf(data: Uint8Array): Transferable[] {
   const b = data.buffer;
-  return Object.prototype.toString.call(b) === '[object ArrayBuffer]' && data.byteOffset === 0 && data.byteLength === b.byteLength ? [b] : [];
+  return Object.prototype.toString.call(b) === '[object ArrayBuffer]' &&
+    data.byteOffset === 0 &&
+    data.byteLength === b.byteLength
+    ? [b]
+    : [];
 }

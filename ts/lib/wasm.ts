@@ -13,7 +13,8 @@ import { builtin, ignore, isNode } from './platform.js';
  * `URL`), or a `fetch` `Response` (or a promise of one). In Node a string that
  * is not an absolute URL is a file path.
  */
-export type WasmSource = BufferSource | WebAssembly.Module | URL | string | Response | PromiseLike<Response>;
+export type WasmSource =
+  BufferSource | WebAssembly.Module | URL | string | Response | PromiseLike<Response>;
 
 /** Options for {@link init}. */
 export interface InitOptions {
@@ -82,7 +83,9 @@ function toUrl(source: string | URL): URL {
     return builtin<typeof import('node:url')>('url').pathToFileURL(source);
   }
   if (URL.canParse(source)) return new URL(source);
-  throw new TypeError(`wav2flac: cannot resolve wasm URL "${source}" (no page to resolve it against)`);
+  throw new TypeError(
+    `wav2flac: cannot resolve wasm URL "${source}" (no page to resolve it against)`,
+  );
 }
 
 /**
@@ -103,20 +106,31 @@ function bufferSource(bytes: ArrayBufferView | ArrayBufferLike): BufferSource {
  */
 async function compile(source: WasmSource, signal: AbortSignal): Promise<WebAssembly.Module> {
   if (source instanceof WebAssembly.Module) return source;
-  if (ArrayBuffer.isView(source) || isBuffer(source)) return WebAssembly.compile(bufferSource(source));
+  if (ArrayBuffer.isView(source) || isBuffer(source))
+    return WebAssembly.compile(bufferSource(source));
   let res: Response | PromiseLike<Response>;
   if (typeof source === 'string' || source instanceof URL) {
     const url = toUrl(source);
-    if (url.protocol === 'file:' && isNode()) return WebAssembly.compile(await readFileUrl(url, signal));
+    if (url.protocol === 'file:' && isNode())
+      return WebAssembly.compile(await readFileUrl(url, signal));
     res = fetch(url, { signal });
-  } else if (typeof source === 'object' && source !== null && ('ok' in source || 'then' in source)) {
+  } else if (
+    typeof source === 'object' &&
+    source !== null &&
+    ('ok' in source || 'then' in source)
+  ) {
     res = source as Response | PromiseLike<Response>;
   } else {
-    throw new TypeError('wav2flac: init() needs wasm bytes, a WebAssembly.Module, a URL, a path or a Response');
+    throw new TypeError(
+      'wav2flac: init() needs wasm bytes, a WebAssembly.Module, a URL, a path or a Response',
+    );
   }
   const r = await res;
   if (!r.ok) throw new Error(`wav2flac: failed to fetch wasm (${r.status} ${r.statusText})`);
-  if (typeof WebAssembly.compileStreaming === 'function' && r.headers.get('content-type')?.startsWith('application/wasm') === true) {
+  if (
+    typeof WebAssembly.compileStreaming === 'function' &&
+    r.headers.get('content-type')?.startsWith('application/wasm') === true
+  ) {
     return WebAssembly.compileStreaming(r);
   }
   return WebAssembly.compile(await r.arrayBuffer());
@@ -128,7 +142,12 @@ async function compile(source: WasmSource, signal: AbortSignal): Promise<WebAsse
  * @returns The load.
  */
 function startLoad(source: WasmSource): Load {
-  const load: Load = { promise: undefined as never, stop: new AbortController(), waiters: 0, pinned: false };
+  const load: Load = {
+    promise: undefined as never,
+    stop: new AbortController(),
+    waiters: 0,
+    pinned: false,
+  };
   load.promise = (async () => {
     const mod = await compile(source, load.stop.signal);
     // initSync() may have finished while this was compiling; its instance wins.
@@ -185,8 +204,14 @@ function waitFor(load: Load, signal: AbortSignal): Promise<void> {
     };
     signal.addEventListener('abort', onAbort, { once: true });
     load.promise.then(
-      () => { done(); resolve(); },
-      (e: unknown) => { done(); reject(e); },
+      () => {
+        done();
+        resolve();
+      },
+      (e: unknown) => {
+        done();
+        reject(e);
+      },
     );
   });
 }
@@ -265,8 +290,10 @@ function retrySource(source: WasmSource): WasmSource | undefined {
   if (typeof source === 'string' || source instanceof WebAssembly.Module) return source;
   if (source instanceof URL) return new URL(source.href);
   if (!ArrayBuffer.isView(source) && !isBuffer(source)) return undefined;
-  if (isDetached(source)) throw new TypeError('wav2flac: init() got wasm bytes that were transferred (detached)');
-  if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength).slice();
+  if (isDetached(source))
+    throw new TypeError('wav2flac: init() got wasm bytes that were transferred (detached)');
+  if (ArrayBuffer.isView(source))
+    return new Uint8Array(source.buffer, source.byteOffset, source.byteLength).slice();
   return new Uint8Array(source).slice();
 }
 
@@ -286,10 +313,13 @@ function retrySource(source: WasmSource): WasmSource | undefined {
 export function initSync(source?: BufferSource | WebAssembly.Module): void {
   if (compiled !== undefined) return;
   if (instantiating) {
-    throw new Error('wav2flac: init() is instantiating the module; await it instead of calling initSync()');
+    throw new Error(
+      'wav2flac: init() is instantiating the module; await it instead of calling initSync()',
+    );
   }
   const bytes = source ?? builtin<typeof import('node:fs')>('fs').readFileSync(defaultWasmUrl());
-  const mod = bytes instanceof WebAssembly.Module ? bytes : new WebAssembly.Module(bufferSource(bytes));
+  const mod =
+    bytes instanceof WebAssembly.Module ? bytes : new WebAssembly.Module(bufferSource(bytes));
   const out = initGlueSync({ module: mod });
   compiled = mod;
   memory = out.memory;

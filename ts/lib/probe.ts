@@ -42,7 +42,8 @@ export function probeBytes(bytes: Uint8Array): WavInfo {
       return JSON.parse(probeJson(bytes.subarray(0, n))) as WavInfo;
     } catch (e) {
       const err = fromWasmError(e);
-      if (!(err instanceof Wav2FlacError && err.code === 'TRUNCATED' && n < bytes.length)) throw err;
+      if (!(err instanceof Wav2FlacError && err.code === 'TRUNCATED' && n < bytes.length))
+        throw err;
     }
   }
 }

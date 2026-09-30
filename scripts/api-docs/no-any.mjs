@@ -11,8 +11,10 @@ export function load(app) {
     for (const r of Object.values(context.project.reflections)) {
       const type = r.type?.toString();
       if (type !== undefined && /\bany\b/.test(type)) {
-        app.logger.error(`${r.getFullName()} is documented as \`${type}\`. Give it an explicit type in ts/; ` +
-          'the docs build has no wasm-bindgen glue to infer it from.');
+        app.logger.error(
+          `${r.getFullName()} is documented as \`${type}\`. Give it an explicit type in ts/; ` +
+            'the docs build has no wasm-bindgen glue to infer it from.',
+        );
       }
     }
   });

@@ -12,5 +12,6 @@ initSync(readFileSync('build/bindgen/wav2flac_bg.wasm'));
 // wasm memory never shrinks, so only this count can show a leak. Worker jobs
 // finish on the host after the client has settled, hence the wait.
 afterEach(async () => {
+  // oxlint-disable-next-line vitest/no-standalone-expect -- a hook of every test
   await vi.waitFor(() => expect(liveSessions(), 'wasm encoders left alive').toBe(0));
 });

@@ -26,7 +26,9 @@ async function run() {
   const out = {};
   out.encode = await hash(await encode(wav, OPTIONS));
   // Streamed output has no seek table or MD5; compare it on its own.
-  out.stream = await hash(new Uint8Array(await new Response(encodeStream(wav, OPTIONS)).arrayBuffer()));
+  out.stream = await hash(
+    new Uint8Array(await new Response(encodeStream(wav, OPTIONS)).arrayBuffer()),
+  );
   const w = createWorkerEncoder();
   try {
     out.worker = await hash(await w.encode(wav, { ...OPTIONS, copy: true }));
@@ -38,4 +40,6 @@ async function run() {
   window.result = out;
 }
 
-run().catch((e) => { window.result = { error: String(e && e.stack || e) }; });
+run().catch((e) => {
+  window.result = { error: String((e && e.stack) || e) };
+});

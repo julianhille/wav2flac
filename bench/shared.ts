@@ -25,13 +25,62 @@ export interface Preset {
 
 /** The inputs every runner knows. Generated deterministically (music-like signal). */
 export const PRESETS: readonly Preset[] = [
-  { id: 'voice', label: '5 s · 16 kHz · 16-bit · mono', seconds: 5, rate: 16000, channels: 1, bits: 16 },
-  { id: 'cd', label: '1 min · 44.1 kHz · 16-bit · stereo (CD)', seconds: 60, rate: 44100, channels: 2, bits: 16 },
-  { id: 'short', label: '10 s · 44.1 kHz · 16-bit · stereo', seconds: 10, rate: 44100, channels: 2, bits: 16 },
-  { id: 'song', label: '3 min · 44.1 kHz · 16-bit · stereo', seconds: 180, rate: 44100, channels: 2, bits: 16 },
-  { id: 'hires', label: '1 min · 96 kHz · 24-bit · stereo', seconds: 60, rate: 96000, channels: 2, bits: 24 },
-  { id: 'surround', label: '1 min · 48 kHz · 24-bit · 5.1', seconds: 60, rate: 48000, channels: 6, bits: 24 },
-  { id: 'long', label: '10 min · 44.1 kHz · 16-bit · stereo', seconds: 600, rate: 44100, channels: 2, bits: 16 },
+  {
+    id: 'voice',
+    label: '5 s · 16 kHz · 16-bit · mono',
+    seconds: 5,
+    rate: 16000,
+    channels: 1,
+    bits: 16,
+  },
+  {
+    id: 'cd',
+    label: '1 min · 44.1 kHz · 16-bit · stereo (CD)',
+    seconds: 60,
+    rate: 44100,
+    channels: 2,
+    bits: 16,
+  },
+  {
+    id: 'short',
+    label: '10 s · 44.1 kHz · 16-bit · stereo',
+    seconds: 10,
+    rate: 44100,
+    channels: 2,
+    bits: 16,
+  },
+  {
+    id: 'song',
+    label: '3 min · 44.1 kHz · 16-bit · stereo',
+    seconds: 180,
+    rate: 44100,
+    channels: 2,
+    bits: 16,
+  },
+  {
+    id: 'hires',
+    label: '1 min · 96 kHz · 24-bit · stereo',
+    seconds: 60,
+    rate: 96000,
+    channels: 2,
+    bits: 24,
+  },
+  {
+    id: 'surround',
+    label: '1 min · 48 kHz · 24-bit · 5.1',
+    seconds: 60,
+    rate: 48000,
+    channels: 6,
+    bits: 24,
+  },
+  {
+    id: 'long',
+    label: '10 min · 44.1 kHz · 16-bit · stereo',
+    seconds: 600,
+    rate: 44100,
+    channels: 2,
+    bits: 16,
+  },
 ];
 
 /** Optional transcoding applied during the benchmark. */
@@ -49,7 +98,7 @@ export type InputKind = 'wav' | 'pcm-int' | 'pcm-f32';
 
 /** Human-readable input kinds. */
 export const INPUT_LABEL: Readonly<Record<InputKind, string>> = {
-  'wav': 'WAV file',
+  wav: 'WAV file',
   'pcm-int': 'raw PCM, integer',
   'pcm-f32': 'raw PCM, Float32Array',
 };
@@ -183,7 +232,8 @@ export interface BenchReport {
  */
 export function preset(id: string): Preset {
   const p = PRESETS.find((x) => x.id === id);
-  if (p === undefined) throw new Error(`unknown preset "${id}" (${PRESETS.map((x) => x.id).join(', ')})`);
+  if (p === undefined)
+    throw new Error(`unknown preset "${id}" (${PRESETS.map((x) => x.id).join(', ')})`);
   return p;
 }
 
@@ -193,13 +243,24 @@ export function preset(id: string): Preset {
  * @returns WAV bytes.
  */
 export function presetWav(p: Preset): Uint8Array<ArrayBuffer> {
-  return makeWav({ frames: p.seconds * p.rate, rate: p.rate, channels: p.channels, bits: p.bits, signal: 'music', seed: 7 });
+  return makeWav({
+    frames: p.seconds * p.rate,
+    rate: p.rate,
+    channels: p.channels,
+    bits: p.bits,
+    signal: 'music',
+    seed: 7,
+  });
 }
 
 /** The encoder input derived from a WAV for an {@link InputKind}. */
 export interface EncoderInput {
   /** What is passed to `encode()`. */
-  data: Uint8Array<ArrayBuffer> | Int16Array<ArrayBuffer> | Int32Array<ArrayBuffer> | Float32Array<ArrayBuffer>;
+  data:
+    | Uint8Array<ArrayBuffer>
+    | Int16Array<ArrayBuffer>
+    | Int32Array<ArrayBuffer>
+    | Float32Array<ArrayBuffer>;
   /** The `pcm` option, for raw PCM. */
   pcm?: Required<PcmFormat>;
   /** Target bit depth the input needs (float or 32-bit input), unless transcoding sets one. */
@@ -230,12 +291,22 @@ function chunk(wav: Uint8Array, id: string): { offset: number; length: number } 
  * @returns Format tag (the subformat for WAVE_FORMAT_EXTENSIBLE), channels, rate and bits.
  * @throws {Error} If there is no `fmt ` chunk.
  */
-function wavFormat(wav: Uint8Array): { tag: number; channels: number; sampleRate: number; bits: number } {
+function wavFormat(wav: Uint8Array): {
+  tag: number;
+  channels: number;
+  sampleRate: number;
+  bits: number;
+} {
   const fmt = chunk(wav, 'fmt ');
   const f = new DataView(wav.buffer, wav.byteOffset + fmt.offset, fmt.length);
   let tag = f.getUint16(0, true);
   if (tag === 0xfffe && fmt.length >= 26) tag = f.getUint16(24, true);
-  return { tag, channels: f.getUint16(2, true), sampleRate: f.getUint32(4, true), bits: f.getUint16(14, true) };
+  return {
+    tag,
+    channels: f.getUint16(2, true),
+    sampleRate: f.getUint32(4, true),
+    bits: f.getUint16(14, true),
+  };
 }
 
 /**
@@ -261,15 +332,30 @@ export function encoderInput(wav: Uint8Array<ArrayBuffer>, kind: InputKind): Enc
   const { tag, channels, sampleRate, bits } = wavFormat(wav);
   const float = tag === 3;
   if ((tag !== 1 && !float) || (float && bits !== 32) || ![8, 16, 24, 32].includes(bits)) {
-    throw new Error(`raw PCM input needs 8/16/24/32-bit integer or 32-bit float WAV, not format ${tag}/${bits}-bit`);
+    throw new Error(
+      `raw PCM input needs 8/16/24/32-bit integer or 32-bit float WAV, not format ${tag}/${bits}-bit`,
+    );
   }
   const d = chunk(wav, 'data');
   const bytes = wav.slice(d.offset, d.offset + d.length - (d.length % ((bits / 8) * channels)));
-  const format: PcmSampleFormat = float ? 'f32' : bits === 8 ? 'u8' : bits === 16 ? 's16' : bits === 24 ? 's24' : 's32';
+  const format: PcmSampleFormat = float
+    ? 'f32'
+    : bits === 8
+      ? 'u8'
+      : bits === 16
+        ? 's16'
+        : bits === 24
+          ? 's24'
+          : 's32';
   const n = bytes.length / (bits / 8);
   if (kind === 'pcm-int') {
     if (float) throw new Error('pcm-int needs an integer WAV');
-    const data = format === 's16' ? new Int16Array(bytes.buffer, 0, n) : format === 's32' ? new Int32Array(bytes.buffer, 0, n) : bytes;
+    const data =
+      format === 's16'
+        ? new Int16Array(bytes.buffer, 0, n)
+        : format === 's32'
+          ? new Int32Array(bytes.buffer, 0, n)
+          : bytes;
     return { data, pcm: { sampleRate, channels, format } };
   }
   let out: Float32Array<ArrayBuffer>;
@@ -280,14 +366,22 @@ export function encoderInput(wav: Uint8Array<ArrayBuffer>, kind: InputKind): Enc
     const b = new DataView(bytes.buffer);
     const scale = 1 / 2 ** (bits - 1);
     for (let i = 0; i < n; i++) {
-      const x = bits === 8 ? bytes[i]! - 128
-        : bits === 16 ? b.getInt16(i * 2, true)
-          : bits === 24 ? (b.getInt8(i * 3 + 2) << 16) | b.getUint16(i * 3, true)
-            : b.getInt32(i * 4, true);
+      const x =
+        bits === 8
+          ? bytes[i]! - 128
+          : bits === 16
+            ? b.getInt16(i * 2, true)
+            : bits === 24
+              ? (b.getInt8(i * 3 + 2) << 16) | b.getUint16(i * 3, true)
+              : b.getInt32(i * 4, true);
       out[i] = x * scale;
     }
   }
-  return { data: out, pcm: { sampleRate, channels, format: 'f32' }, bits: float ? 24 : Math.min(bits, 24) };
+  return {
+    data: out,
+    pcm: { sampleRate, channels, format: 'f32' },
+    bits: float ? 24 : Math.min(bits, 24),
+  };
 }
 
 /**
@@ -296,7 +390,10 @@ export function encoderInput(wav: Uint8Array<ArrayBuffer>, kind: InputKind): Enc
  * @param input The encoder input (adds `pcm` and a target depth for float PCM).
  * @returns The options.
  */
-export function encoderOptions(c: BenchConfig, input: EncoderInput = { data: new Uint8Array() }): Options {
+export function encoderOptions(
+  c: BenchConfig,
+  input: EncoderInput = { data: new Uint8Array() },
+): Options {
   const o: Options = { compressionLevel: c.level };
   if (input.pcm !== undefined) o.pcm = input.pcm;
   if (input.bits !== undefined) o.bitsPerSample = input.bits;
@@ -311,7 +408,10 @@ export function encoderOptions(c: BenchConfig, input: EncoderInput = { data: new
  * @param input The encoder input (its bytes are what the native run reads).
  * @returns Extra arguments.
  */
-export function nativeArgs(c: BenchConfig, input: EncoderInput = { data: new Uint8Array() }): string[] {
+export function nativeArgs(
+  c: BenchConfig,
+  input: EncoderInput = { data: new Uint8Array() },
+): string[] {
   const a = ['--level', String(c.level), '--time'];
   const o = encoderOptions(c, input);
   if (c.output === 'stream') a.push('--stream');
@@ -338,18 +438,25 @@ export function inputBytes(input: EncoderInput): Uint8Array<ArrayBuffer> {
  * @throws {Error} For invalid values.
  */
 export function parseConfig(raw: unknown): BenchConfig {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new Error('config must be an object');
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw))
+    throw new Error('config must be an object');
   const r = raw as Record<string, unknown>;
   const modes = r['modes'] ?? DEFAULT_CONFIG.modes;
   if (!Array.isArray(modes)) throw new Error('modes must be an array');
   const c = { ...DEFAULT_CONFIG, ...r, modes: [...modes] as unknown[] };
-  if (!Number.isInteger(c.runs) || (c.runs as number) < 1 || (c.runs as number) > 100) throw new Error('runs must be 1–100');
-  if (!Number.isInteger(c.level) || (c.level as number) < 0 || (c.level as number) > 8) throw new Error('level must be 0–8');
-  if (c.output !== 'buffer' && c.output !== 'stream') throw new Error('output must be buffer or stream');
+  if (!Number.isInteger(c.runs) || (c.runs as number) < 1 || (c.runs as number) > 100)
+    throw new Error('runs must be 1–100');
+  if (!Number.isInteger(c.level) || (c.level as number) < 0 || (c.level as number) > 8)
+    throw new Error('level must be 0–8');
+  if (c.output !== 'buffer' && c.output !== 'stream')
+    throw new Error('output must be buffer or stream');
   if (typeof c.input !== 'string' || !Object.hasOwn(INPUT_LABEL, c.input)) {
     throw new Error(`input must be of ${Object.keys(INPUT_LABEL).join(', ')}`);
   }
-  if (typeof c.transcode !== 'string' || !['none', 'resample-48k', 'to-16bit'].includes(c.transcode)) {
+  if (
+    typeof c.transcode !== 'string' ||
+    !['none', 'resample-48k', 'to-16bit'].includes(c.transcode)
+  ) {
     throw new Error('transcode must be none, resample-48k or to-16bit');
   }
   if (typeof c.warmup !== 'boolean') throw new Error('warmup must be a boolean');
@@ -360,10 +467,13 @@ export function parseConfig(raw: unknown): BenchConfig {
     throw new Error(`transcode resample-48k does nothing for preset ${p.id} (already 48 kHz)`);
   }
   if (c.transcode === 'to-16bit' && p.bits === 16 && c.input !== 'pcm-f32') {
-    throw new Error(`transcode to-16bit does nothing for preset ${p.id} with ${c.input} input (already 16-bit)`);
+    throw new Error(
+      `transcode to-16bit does nothing for preset ${p.id} with ${c.input} input (already 16-bit)`,
+    );
   }
   const valid: readonly unknown[] = Object.keys(MODE_LABEL);
-  if (c.modes.length === 0 || !c.modes.every((m) => valid.includes(m))) throw new Error(`modes must be of ${valid.join(', ')}`);
+  if (c.modes.length === 0 || !c.modes.every((m) => valid.includes(m)))
+    throw new Error(`modes must be of ${valid.join(', ')}`);
   return c as BenchConfig;
 }
 
@@ -453,7 +563,20 @@ export function summarize(r: BenchReport): SummaryRow[] {
     const label = MODE_LABEL[m.mode];
     if (m.error !== null || m.samples.length === 0) {
       const e = m.error ?? 'no samples';
-      return { mode: label, median: e, mean: '', range: '', mbps: '', realtime: '', rss: '', wasm: '', heap: '', ua: '', block: '', size: '' };
+      return {
+        mode: label,
+        median: e,
+        mean: '',
+        range: '',
+        mbps: '',
+        realtime: '',
+        rss: '',
+        wasm: '',
+        heap: '',
+        ua: '',
+        block: '',
+        size: '',
+      };
     }
     const t = stats(m.samples.map((s) => s.ms));
     const rss = peak(m.samples.map((s) => s.maxRssKb));
@@ -467,7 +590,12 @@ export function summarize(r: BenchReport): SummaryRow[] {
       range: `${t.min.toFixed(1)}–${t.max.toFixed(1)}`,
       mbps: (r.inputBytes / 1e6 / (t.median / 1000)).toFixed(1),
       realtime: `${(r.inputSeconds / (t.median / 1000)).toFixed(0)}×`,
-      rss: rss === null ? '–' : base === null ? fmtBytes(rss * 1024) : `${fmtBytes(rss * 1024)} (+${fmtBytes(Math.max(0, rss - base) * 1024)})`,
+      rss:
+        rss === null
+          ? '–'
+          : base === null
+            ? fmtBytes(rss * 1024)
+            : `${fmtBytes(rss * 1024)} (+${fmtBytes(Math.max(0, rss - base) * 1024)})`,
       wasm: fmtBytes(peak(m.samples.map((s) => s.wasmBytes))),
       heap: fmtBytes(peak(m.samples.map((s) => s.heapBytes))),
       ua: fmtBytes(m.uaMemoryBytes),
@@ -499,8 +627,9 @@ export const SUMMARY_HEADERS: Readonly<Record<keyof SummaryRow, string>> = {
  * @returns Column keys, `mode` first.
  */
 export function columns(rows: readonly SummaryRow[]): (keyof SummaryRow)[] {
-  return (Object.keys(SUMMARY_HEADERS) as (keyof SummaryRow)[])
-    .filter((k) => k === 'mode' || rows.some((row) => row[k] !== '–' && row[k] !== ''));
+  return (Object.keys(SUMMARY_HEADERS) as (keyof SummaryRow)[]).filter(
+    (k) => k === 'mode' || rows.some((row) => row[k] !== '–' && row[k] !== ''),
+  );
 }
 
 /**
@@ -510,9 +639,11 @@ export function columns(rows: readonly SummaryRow[]): (keyof SummaryRow)[] {
  */
 export function describe(r: BenchReport): string {
   const kind = INPUT_LABEL[r.config.input ?? 'wav'];
-  return `${r.version} · input: ${r.inputLabel} as ${kind} (${fmtBytes(r.inputBytes)}) · level ${r.config.level} · ` +
+  return (
+    `${r.version} · input: ${r.inputLabel} as ${kind} (${fmtBytes(r.inputBytes)}) · level ${r.config.level} · ` +
     `${r.config.output} output · transcode: ${r.config.transcode} · ${r.config.runs} run(s)` +
-    `${r.config.warmup ? ' + warm-up' : ''}`;
+    `${r.config.warmup ? ' + warm-up' : ''}`
+  );
 }
 
 /**

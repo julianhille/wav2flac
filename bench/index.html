@@ -1,168 +1,392 @@
 <!doctype html>
 <!-- SPDX-License-Identifier: 0BSD -->
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>wav2flac benchmark</title>
-<style>
-  :root {
-    --bg: #f7f7f5; --surface: #ffffff; --text: #1c1c1a; --muted: #6b6b66; --border: #deded8;
-    --accent: #2f6fdb; --accent-text: #ffffff; --warn: #a15c00; --bad: #c0392b; --good: #2e7d4f;
-    color-scheme: light;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #151514; --surface: #1f1f1d; --text: #ecece8; --muted: #9a9a93; --border: #34342f;
-      --accent: #6c9cf0; --accent-text: #0d0d0c; --warn: #e0a34a; --bad: #ef7a6c; --good: #6cc592;
-      color-scheme: dark;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
-  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 64px; }
-  h1 { font-size: 1.5rem; margin: 0 0 4px; }
-  h2 { font-size: 1.1rem; margin: 0 0 8px; }
-  p { margin: 0 0 12px; }
-  .muted { color: var(--muted); }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-top: 16px; }
-  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px 18px; align-items: start; }
-  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
-  legend, label.field { display: block; font-size: .8rem; font-weight: 600; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .03em; }
-  select, input[type=file] { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
-  .check { display: flex; gap: 6px; align-items: baseline; font-size: .95rem; }
-  .actions { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  button { font: inherit; padding: 8px 18px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
-  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
-  button:disabled { opacity: .5; cursor: default; }
-  #status { flex: 1; min-width: 200px; }
-  .pulse { display: flex; align-items: center; gap: 8px; font-size: .85rem; color: var(--muted); }
-  .pulse-track { position: relative; width: 120px; height: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
-  .pulse-dot { position: absolute; top: 0; left: 0; width: 16px; height: 100%; background: var(--accent); border-radius: 4px; }
-  .table-wrap { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; font-size: .9rem; font-variant-numeric: tabular-nums; }
-  th, td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
-  th:first-child, td:first-child { text-align: left; }
-  th { font-size: .78rem; color: var(--muted); font-weight: 600; }
-  td.error { color: var(--bad); text-align: left; white-space: normal; }
-  .report-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
-  .report-tools { display: flex; gap: 8px; }
-  .report-tools button { padding: 4px 10px; font-size: .85rem; }
-  details { margin-top: 10px; font-size: .88rem; }
-  summary { cursor: pointer; color: var(--muted); }
-  .notes { font-size: .88rem; color: var(--muted); }
-  .notes li { margin-bottom: 4px; }
-  code { font-size: .9em; }
-  .warn { color: var(--warn); }
-</style>
-</head>
-<body>
-<main>
-  <h1>wav2flac benchmark</h1>
-  <p class="muted">Encodes the same WAV on the main thread (<code>encode()</code> / <code>encodeSync()</code>) and in a
-    Web Worker, and compares timing, memory and how long the page freezes.</p>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>wav2flac benchmark</title>
+    <style>
+      :root {
+        --bg: #f7f7f5;
+        --surface: #ffffff;
+        --text: #1c1c1a;
+        --muted: #6b6b66;
+        --border: #deded8;
+        --accent: #2f6fdb;
+        --accent-text: #ffffff;
+        --warn: #a15c00;
+        --bad: #c0392b;
+        --good: #2e7d4f;
+        color-scheme: light;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          --bg: #151514;
+          --surface: #1f1f1d;
+          --text: #ecece8;
+          --muted: #9a9a93;
+          --border: #34342f;
+          --accent: #6c9cf0;
+          --accent-text: #0d0d0c;
+          --warn: #e0a34a;
+          --bad: #ef7a6c;
+          --good: #6cc592;
+          color-scheme: dark;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 24px 16px 64px;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 1.1rem;
+        margin: 0 0 8px;
+      }
+      p {
+        margin: 0 0 12px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px;
+        margin-top: 16px;
+      }
+      form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 14px 18px;
+        align-items: start;
+      }
+      fieldset {
+        border: 0;
+        padding: 0;
+        margin: 0;
+        min-width: 0;
+      }
+      legend,
+      label.field {
+        display: block;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--muted);
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+      select,
+      input[type='file'] {
+        width: 100%;
+        font: inherit;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .check {
+        display: flex;
+        gap: 6px;
+        align-items: baseline;
+        font-size: 0.95rem;
+      }
+      .actions {
+        grid-column: 1 / -1;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      button {
+        font: inherit;
+        padding: 8px 18px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        color: var(--accent-text);
+        border-color: var(--accent);
+        font-weight: 600;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      #status {
+        flex: 1;
+        min-width: 200px;
+      }
+      .pulse {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+      .pulse-track {
+        position: relative;
+        width: 120px;
+        height: 8px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .pulse-dot {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 16px;
+        height: 100%;
+        background: var(--accent);
+        border-radius: 4px;
+      }
+      .table-wrap {
+        overflow-x: auto;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.9rem;
+        font-variant-numeric: tabular-nums;
+      }
+      th,
+      td {
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border);
+        text-align: right;
+        white-space: nowrap;
+      }
+      th:first-child,
+      td:first-child {
+        text-align: left;
+      }
+      th {
+        font-size: 0.78rem;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      td.error {
+        color: var(--bad);
+        text-align: left;
+        white-space: normal;
+      }
+      .report-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: baseline;
+      }
+      .report-tools {
+        display: flex;
+        gap: 8px;
+      }
+      .report-tools button {
+        padding: 4px 10px;
+        font-size: 0.85rem;
+      }
+      details {
+        margin-top: 10px;
+        font-size: 0.88rem;
+      }
+      summary {
+        cursor: pointer;
+        color: var(--muted);
+      }
+      .notes {
+        font-size: 0.88rem;
+        color: var(--muted);
+      }
+      .notes li {
+        margin-bottom: 4px;
+      }
+      code {
+        font-size: 0.9em;
+      }
+      .warn {
+        color: var(--warn);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>wav2flac benchmark</h1>
+      <p class="muted">
+        Encodes the same WAV on the main thread (<code>encode()</code> / <code>encodeSync()</code>)
+        and in a Web Worker, and compares timing, memory and how long the page freezes.
+      </p>
 
-  <section class="card">
-    <form id="form">
-      <fieldset>
-        <label class="field" for="runs">Runs</label>
-        <select id="runs" name="runs">
-          <option>1</option><option>3</option><option selected>5</option><option>10</option><option>20</option>
-        </select>
-      </fieldset>
-      <fieldset>
-        <label class="field" for="preset">Input</label>
-        <select id="preset" name="preset"></select>
-      </fieldset>
-      <fieldset>
-        <label class="field" for="file">…or your own WAV</label>
-        <input id="file" name="file" type="file" accept=".wav,audio/wav,audio/x-wav">
-      </fieldset>
-      <fieldset>
-        <label class="field" for="level">Compression level</label>
-        <select id="level" name="level"></select>
-      </fieldset>
-      <fieldset>
-        <label class="field" for="input">Encoder input</label>
-        <select id="input" name="input">
-          <option value="wav">WAV file (Uint8Array)</option>
-          <option value="pcm-int">Raw PCM, integer (Int16Array…)</option>
-          <option value="pcm-f32">Raw PCM, Float32Array (Web Audio)</option>
-        </select>
-      </fieldset>
-      <fieldset>
-        <label class="field" for="output">Output</label>
-        <select id="output" name="output">
-          <option value="buffer">Buffer (encode)</option>
-          <option value="stream">Stream (encodeStream)</option>
-        </select>
-      </fieldset>
-      <fieldset>
-        <label class="field" for="transcode">Transcode</label>
-        <select id="transcode" name="transcode">
-          <option value="none">None</option>
-          <option value="resample-48k">Resample to 48 kHz</option>
-          <option value="to-16bit">Reduce to 16-bit</option>
-        </select>
-      </fieldset>
-      <fieldset>
-        <legend>Run in</legend>
-        <label class="check"><input type="radio" name="where" value="browser" checked> This browser</label>
-        <label class="check"><input type="radio" name="where" value="node"> Node (server, real max RSS)</label>
-      </fieldset>
-      <fieldset>
-        <legend>Compare</legend>
-        <label class="check"><input type="checkbox" name="mode" value="main" checked> Main thread, <code>encode()</code></label>
-        <label class="check"><input type="checkbox" name="mode" value="sync" checked> Main thread, <code>encodeSync()</code></label>
-        <label class="check"><input type="checkbox" name="mode" value="worker" checked> Web Worker</label>
-        <label class="check"><input type="checkbox" name="mode" value="native" disabled> Native Rust (Node only)</label>
-        <label class="check"><input type="checkbox" name="mode" value="libav"> libav.js (FFmpeg FLAC, its own worker)</label>
-        <label class="check"><input type="checkbox" name="mode" value="libflac"> libflac.js (libFLAC, main thread)</label>
-      </fieldset>
-      <fieldset>
-        <legend>Extras</legend>
-        <label class="check"><input type="checkbox" id="warmup" checked> Warm-up run</label>
-        <label class="check"><input type="checkbox" id="ua"> UA memory (slow)</label>
-      </fieldset>
-      <div class="actions">
-        <button class="primary" id="start" type="submit">Run benchmark</button>
-        <span id="status" class="muted" role="status"></span>
-        <span class="pulse" title="Moves every frame. When it stops, the main thread is blocked.">
-          <span class="pulse-track"><span class="pulse-dot" id="dot"></span></span> main thread
-        </span>
-      </div>
-    </form>
-  </section>
+      <section class="card">
+        <form id="form">
+          <fieldset>
+            <label class="field" for="runs">Runs</label>
+            <select id="runs" name="runs">
+              <option>1</option>
+              <option>3</option>
+              <option selected>5</option>
+              <option>10</option>
+              <option>20</option>
+            </select>
+          </fieldset>
+          <fieldset>
+            <label class="field" for="preset">Input</label>
+            <select id="preset" name="preset"></select>
+          </fieldset>
+          <fieldset>
+            <label class="field" for="file">…or your own WAV</label>
+            <input id="file" name="file" type="file" accept=".wav,audio/wav,audio/x-wav" />
+          </fieldset>
+          <fieldset>
+            <label class="field" for="level">Compression level</label>
+            <select id="level" name="level"></select>
+          </fieldset>
+          <fieldset>
+            <label class="field" for="input">Encoder input</label>
+            <select id="input" name="input">
+              <option value="wav">WAV file (Uint8Array)</option>
+              <option value="pcm-int">Raw PCM, integer (Int16Array…)</option>
+              <option value="pcm-f32">Raw PCM, Float32Array (Web Audio)</option>
+            </select>
+          </fieldset>
+          <fieldset>
+            <label class="field" for="output">Output</label>
+            <select id="output" name="output">
+              <option value="buffer">Buffer (encode)</option>
+              <option value="stream">Stream (encodeStream)</option>
+            </select>
+          </fieldset>
+          <fieldset>
+            <label class="field" for="transcode">Transcode</label>
+            <select id="transcode" name="transcode">
+              <option value="none">None</option>
+              <option value="resample-48k">Resample to 48 kHz</option>
+              <option value="to-16bit">Reduce to 16-bit</option>
+            </select>
+          </fieldset>
+          <fieldset>
+            <legend>Run in</legend>
+            <label class="check"
+              ><input type="radio" name="where" value="browser" checked /> This browser</label
+            >
+            <label class="check"
+              ><input type="radio" name="where" value="node" /> Node (server, real max RSS)</label
+            >
+          </fieldset>
+          <fieldset>
+            <legend>Compare</legend>
+            <label class="check"
+              ><input type="checkbox" name="mode" value="main" checked /> Main thread,
+              <code>encode()</code></label
+            >
+            <label class="check"
+              ><input type="checkbox" name="mode" value="sync" checked /> Main thread,
+              <code>encodeSync()</code></label
+            >
+            <label class="check"
+              ><input type="checkbox" name="mode" value="worker" checked /> Web Worker</label
+            >
+            <label class="check"
+              ><input type="checkbox" name="mode" value="native" disabled /> Native Rust (Node
+              only)</label
+            >
+            <label class="check"
+              ><input type="checkbox" name="mode" value="libav" /> libav.js (FFmpeg FLAC, its own
+              worker)</label
+            >
+            <label class="check"
+              ><input type="checkbox" name="mode" value="libflac" /> libflac.js (libFLAC, main
+              thread)</label
+            >
+          </fieldset>
+          <fieldset>
+            <legend>Extras</legend>
+            <label class="check"><input type="checkbox" id="warmup" checked /> Warm-up run</label>
+            <label class="check"><input type="checkbox" id="ua" /> UA memory (slow)</label>
+          </fieldset>
+          <div class="actions">
+            <button class="primary" id="start" type="submit">Run benchmark</button>
+            <span id="status" class="muted" role="status"></span>
+            <span
+              class="pulse"
+              title="Moves every frame. When it stops, the main thread is blocked."
+            >
+              <span class="pulse-track"><span class="pulse-dot" id="dot"></span></span> main thread
+            </span>
+          </div>
+        </form>
+      </section>
 
-  <div id="reports"></div>
+      <div id="reports"></div>
 
-  <section class="card notes">
-    <h2>What is measured</h2>
-    <ul>
-      <li><b>Worker vs. no worker.</b> "Worker" is a dedicated Web Worker (<code>createWorkerEncoder()</code>). An
-        AudioWorklet isn't used: it runs on the real-time audio thread with 128-frame render quanta and is meant for
-        playback, not batch encoding.</li>
-      <li><b>Encoder input.</b> "WAV file" encodes the WAV bytes. The raw PCM inputs encode the same samples without
-        a header, via the <code>pcm</code> option: as integer typed arrays (<code>Int16Array</code>, or bytes for
-        24-bit), or as a <code>Float32Array</code> like Web Audio delivers, converted back to the source bit depth.
-        The conversion from the WAV happens before timing. MB/s and the output ratio refer to the input actually
-        passed, so a <code>Float32Array</code> of 16-bit audio is twice the bytes.</li>
-      <li><b>Other libraries.</b> libav.js (FFmpeg's FLAC encoder, in its own worker) and libflac.js (libFLAC, on the
-        main thread) get the same samples as integer PCM, prepared before timing. Any conversion a library needs on top of
-        that is timed. They don't transcode.</li>
-      <li><b>Timing</b> covers one encode call with the input already in memory. Worker runs include transferring
-        the input to the worker; the worker is started once per mode, and its start-up time is listed separately.</li>
-      <li><b>Longest block</b> is the longest gap between 1 ms timer ticks on the page's main thread. That's how long
-        the page couldn't respond. Browsers clamp timers to about 4 ms, so smaller values are noise.</li>
-      <li><b>Max RSS</b> (peak resident memory) isn't observable from a web page. Choose "Node (server)", or run
-        <code>npm run bench:browser</code>: its Playwright driver reads the renderer process's peak RSS from
-        <code>/proc</code>. In the browser you get wasm memory, Chrome's JS heap (<code>performance.memory</code>) and
-        <code>measureUserAgentSpecificMemory()</code>. That last one needs cross-origin isolation, which the bench
-        server provides.</li>
-      <li>See <code>docs/benchmark.md</code> for details.</li>
-    </ul>
-  </section>
-</main>
-<script type="module" src="/app.js"></script>
-</body>
+      <section class="card notes">
+        <h2>What is measured</h2>
+        <ul>
+          <li>
+            <b>Worker vs. no worker.</b> "Worker" is a dedicated Web Worker
+            (<code>createWorkerEncoder()</code>). An AudioWorklet isn't used: it runs on the
+            real-time audio thread with 128-frame render quanta and is meant for playback, not batch
+            encoding.
+          </li>
+          <li>
+            <b>Encoder input.</b> "WAV file" encodes the WAV bytes. The raw PCM inputs encode the
+            same samples without a header, via the <code>pcm</code> option: as integer typed arrays
+            (<code>Int16Array</code>, or bytes for 24-bit), or as a <code>Float32Array</code> like
+            Web Audio delivers, converted back to the source bit depth. The conversion from the WAV
+            happens before timing. MB/s and the output ratio refer to the input actually passed, so
+            a <code>Float32Array</code> of 16-bit audio is twice the bytes.
+          </li>
+          <li>
+            <b>Other libraries.</b> libav.js (FFmpeg's FLAC encoder, in its own worker) and
+            libflac.js (libFLAC, on the main thread) get the same samples as integer PCM, prepared
+            before timing. Any conversion a library needs on top of that is timed. They don't
+            transcode.
+          </li>
+          <li>
+            <b>Timing</b> covers one encode call with the input already in memory. Worker runs
+            include transferring the input to the worker; the worker is started once per mode, and
+            its start-up time is listed separately.
+          </li>
+          <li>
+            <b>Longest block</b> is the longest gap between 1 ms timer ticks on the page's main
+            thread. That's how long the page couldn't respond. Browsers clamp timers to about 4 ms,
+            so smaller values are noise.
+          </li>
+          <li>
+            <b>Max RSS</b> (peak resident memory) isn't observable from a web page. Choose "Node
+            (server)", or run <code>npm run bench:browser</code>: its Playwright driver reads the
+            renderer process's peak RSS from <code>/proc</code>. In the browser you get wasm memory,
+            Chrome's JS heap (<code>performance.memory</code>) and
+            <code>measureUserAgentSpecificMemory()</code>. That last one needs cross-origin
+            isolation, which the bench server provides.
+          </li>
+          <li>See <code>docs/benchmark.md</code> for details.</li>
+        </ul>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
 </html>

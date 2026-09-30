@@ -43,7 +43,9 @@ function proc(pid: number): { ppid: number; cmd: string } | null {
 function renderers(): number[] {
   let all: [number, { ppid: number; cmd: string }][];
   try {
-    all = readdirSync('/proc').filter((d) => /^\d+$/.test(d)).map(Number)
+    all = readdirSync('/proc')
+      .filter((d) => /^\d+$/.test(d))
+      .map(Number)
       .map((pid) => [pid, proc(pid)] as const)
       .filter((x): x is [number, { ppid: number; cmd: string }] => x[1] !== null);
   } catch {
@@ -59,7 +61,9 @@ function renderers(): number[] {
       }
     }
   }
-  return all.filter(([pid, p]) => ours.has(pid) && p.cmd.includes('--type=renderer')).map(([pid]) => pid);
+  return all
+    .filter(([pid, p]) => ours.has(pid) && p.cmd.includes('--type=renderer'))
+    .map(([pid]) => pid);
 }
 
 /**
@@ -70,7 +74,9 @@ function renderers(): number[] {
  */
 function status(pid: number, field: string): number | null {
   try {
-    const m = new RegExp(`^${field}:\\s+(\\d+) kB`, 'm').exec(readFileSync(`/proc/${pid}/status`, 'utf8'));
+    const m = new RegExp(`^${field}:\\s+(\\d+) kB`, 'm').exec(
+      readFileSync(`/proc/${pid}/status`, 'utf8'),
+    );
     return m === null ? null : Number(m[1]);
   } catch {
     return null;
@@ -89,7 +95,9 @@ function rssProbe(): ((phase: 'before' | 'after') => number | null) | null {
   let resettable = true;
   return (phase) => {
     if (phase === 'before') {
-      const rs = renderers().map((p) => [p, status(p, 'VmRSS') ?? 0] as const).sort((a, b) => b[1] - a[1]);
+      const rs = renderers()
+        .map((p) => [p, status(p, 'VmRSS') ?? 0] as const)
+        .sort((a, b) => b[1] - a[1]);
       pid = rs[0]?.[0];
       if (pid === undefined) return null;
       try {
@@ -110,7 +118,10 @@ function rssProbe(): ((phase: 'before' | 'after') => number | null) | null {
  * @param onRun Progress callback.
  * @returns The report.
  */
-export async function runBrowserBench(config: BenchConfig, onRun: (mode: Mode, done: number, total: number) => void): Promise<BenchReport> {
+export async function runBrowserBench(
+  config: BenchConfig,
+  onRun: (mode: Mode, done: number, total: number) => void,
+): Promise<BenchReport> {
   const server = await startServer(0);
   const executablePath = process.env['WAV2FLAC_CHROMIUM'];
   const browser = await chromium.launch({
@@ -128,7 +139,10 @@ export async function runBrowserBench(config: BenchConfig, onRun: (mode: Mode, d
     const c = { ...config, modes: config.modes.filter((m) => m !== 'native') };
     return await page.evaluate(async (cfg) => {
       const w = window as unknown as {
-        runBenchmark: (c: BenchConfig, e: { uaMemory: boolean; onRun?: (m: Mode, d: number, t: number) => void }) => Promise<BenchReport>;
+        runBenchmark: (
+          c: BenchConfig,
+          e: { uaMemory: boolean; onRun?: (m: Mode, d: number, t: number) => void },
+        ) => Promise<BenchReport>;
         __wav2flacProgress: (m: Mode, d: number, t: number) => void;
       };
       return w.runBenchmark(cfg, { uaMemory: true, onRun: w.__wav2flacProgress });
