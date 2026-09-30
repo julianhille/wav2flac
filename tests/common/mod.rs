@@ -56,9 +56,29 @@ pub fn have_tool(bin: &str) -> bool {
         panic!("required tool `{bin}` is missing (WAV2FLAC_REQUIRE_TOOLS=1)");
     }
     if !ok {
-        eprintln!("skipping: `{bin}` not installed");
+        warn_skipped(bin);
     }
     ok
+}
+
+/// Warns once per test binary that `bin` is missing and its checks pass without running.
+/// Writes to the stderr handle, which libtest does not capture, so a green local run
+/// still shows what it did not check.
+fn warn_skipped(bin: &str) {
+    use std::io::Write;
+    static WARNED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let mut warned = WARNED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if warned.iter().any(|b| b == bin) {
+        return;
+    }
+    warned.push(bin.to_owned());
+    let _ = writeln!(
+        std::io::stderr(),
+        "wav2flac tests: `{bin}` not installed, its checks are skipped \
+         (WAV2FLAC_REQUIRE_TOOLS=1 makes this fail)"
+    );
 }
 
 // -------------------------------------------------------------- signals ---

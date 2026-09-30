@@ -16,6 +16,8 @@ import { SLICE_BYTES } from '../../ts/lib/input.js';
 import { collect, makeWav, streamOf } from '../helpers/wav.js';
 import { flacTest, nativeEncode } from '../helpers/tools.js';
 
+// nativeEncode() has already warned why; skip, so the run reports it instead of a pass.
+const NO_NATIVE = 'native reference build unavailable';
 const wav = makeWav({ frames: 44100 * 3, channels: 2, bits: 16, seed: 3 });
 
 /** Byte length of the FLAC metadata (everything before the first frame). */
@@ -47,13 +49,13 @@ describe('encode / encodeSync / encodeStream', () => {
     for await (const chunk of encodeStream(wav)) expect(tag(chunk)).toBe('[object ArrayBuffer]');
   });
 
-  it('is byte-identical to the native build', async () => {
+  it('is byte-identical to the native build', async ({ skip }) => {
     const native = nativeEncode(wav, ['--level', '8']);
-    if (native === null) return;
+    if (native === null) skip(NO_NATIVE);
     expect(await encode(wav, { compressionLevel: 8 })).toEqual(native);
   });
 
-  it('matches the native build for every CLI option, streamed or buffered', async () => {
+  it('matches the native build for every CLI option, streamed or buffered', async ({ skip }) => {
     const args = [
       '--level',
       '3',
@@ -88,14 +90,14 @@ describe('encode / encodeSync / encodeStream', () => {
       padding: 10,
     } as const;
     const native = nativeEncode(wav, args);
-    if (native === null) return;
+    if (native === null) skip(NO_NATIVE);
     expect(await encode(wav, opts)).toEqual(native);
     expect(nativeEncode(wav, [...args, '--stream'])).toEqual(
       await collect(encodeStream(wav, opts)),
     );
   });
 
-  it('resamples exactly like the native build, every quality, up and down', async () => {
+  it('resamples exactly like the native build, every quality, up and down', async ({ skip }) => {
     // The sinc tables use f64 sin/cos: wasm and native libm must agree bit for bit.
     const src = makeWav({ frames: 20_000, channels: 2, bits: 24, seed: 5 });
     const f32 = makeWav({ frames: 20_000, channels: 1, bits: 32, float: true, seed: 6 });
@@ -113,7 +115,7 @@ describe('encode / encodeSync / encodeStream', () => {
             '--bits',
             `${bits}`,
           ]);
-          if (native === null) return;
+          if (native === null) skip(NO_NATIVE);
           const opts = { sampleRate: rate, resampleQuality: quality, bitsPerSample: bits };
           expect(encodeSync(input, opts), `${quality} ${rate} Hz ${bits}-bit`).toEqual(native);
         }
