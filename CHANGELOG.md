@@ -23,6 +23,10 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- The docs no longer promise that resampled output is byte-identical to a
+  native build of the Rust crate. The wasm gives the same bytes on every host,
+  but natively rubato uses the CPU's SIMD and the platform's libm, so a
+  resampled sample can differ by 1 LSB. The crate docs say so.
 - Resampled output stays aligned with the input at every supported ratio. At
   large upsampling ratios it used to start up to 4 frames early (for example
   1 kHz to 256 kHz at `resampleQuality: 'fast'`), and at the largest

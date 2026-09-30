@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use wav2flac::{Dither, Encoder, Options, OutputMode, PcmFormat, PcmSpec, ResampleQuality};
+use wav2flac::{Dither, Encoder, Options, OutputMode, PcmFormat, PcmSpec};
 
 const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden.json");
 
@@ -28,6 +28,8 @@ fn cases() -> Vec<(String, Vec<u8>)> {
             }
         }
     }
+    // No resampling cases: native resampled output depends on the CPU (rubato's SIMD dot
+    // product) and libm, by up to 1 LSB. tests/unit/api.test.ts pins the wasm's instead.
     let s = signal(Signal::Sine, 24, 2, 20_000, 1);
     let w = wav(2, 96000, 24, &s);
     for (name, o) in [
@@ -35,22 +37,6 @@ fn cases() -> Vec<(String, Vec<u8>)> {
             "stream",
             Options {
                 mode: OutputMode::Streaming,
-                ..Options::default()
-            },
-        ),
-        (
-            "resample-fast",
-            Options {
-                sample_rate: Some(44100),
-                resample_quality: ResampleQuality::Fast,
-                ..Options::default()
-            },
-        ),
-        (
-            "resample-best",
-            Options {
-                sample_rate: Some(48000),
-                resample_quality: ResampleQuality::Best,
                 ..Options::default()
             },
         ),

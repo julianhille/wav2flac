@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: 0BSD
+import { createHash } from 'node:crypto';
 import { getEventListeners } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import {
@@ -14,7 +15,7 @@ import {
 import { liveSessions, PROGRESS_INTERVAL_MS } from '../../ts/lib/engine.js';
 import { SLICE_BYTES } from '../../ts/lib/input.js';
 import { collect, makeWav, streamOf } from '../helpers/wav.js';
-import { flacTest, nativeEncode } from '../helpers/tools.js';
+import { flacDecode, flacTest, nativeEncode } from '../helpers/tools.js';
 
 // nativeEncode() has already warned why; skip, so the run reports it instead of a pass.
 const NO_NATIVE = 'native reference build unavailable';
@@ -56,6 +57,7 @@ describe('encode / encodeSync / encodeStream', () => {
   });
 
   it('matches the native build for every CLI option, streamed or buffered', async ({ skip }) => {
+    // Resampling is left out: see the next test.
     const args = [
       '--level',
       '3',
@@ -63,10 +65,6 @@ describe('encode / encodeSync / encodeStream', () => {
       '1000',
       '--bits',
       '12',
-      '--rate',
-      '32000',
-      '--quality',
-      'fast',
       '--dither',
       'tpdf',
       '--seed',
@@ -81,8 +79,6 @@ describe('encode / encodeSync / encodeStream', () => {
       compressionLevel: 3,
       blockSize: 1000,
       bitsPerSample: 12,
-      sampleRate: 32000,
-      resampleQuality: 'fast',
       dither: 'tpdf',
       ditherSeed: 7,
       tags: false,
@@ -97,30 +93,57 @@ describe('encode / encodeSync / encodeStream', () => {
     );
   });
 
-  it('resamples exactly like the native build, every quality, up and down', async ({ skip }) => {
-    // The sinc tables use f64 sin/cos: wasm and native libm must agree bit for bit.
+  it('resamples like the native build to within 1 LSB, every quality, up and down', ({ skip }) => {
+    // rubato's dot product uses FMA/SIMD natively and scalar code in wasm, and the sinc tables
+    // come from different libms, so a sample can round the other way. Bytes can differ.
     const src = makeWav({ frames: 20_000, channels: 2, bits: 24, seed: 5 });
     const f32 = makeWav({ frames: 20_000, channels: 1, bits: 32, float: true, seed: 6 });
     for (const quality of ['fast', 'balanced', 'best'] as const) {
       for (const rate of [8000, 22050, 48000, 96000]) {
-        for (const [input, bits] of [
-          [src, 24],
-          [f32, 16],
+        for (const [input, bits, dither] of [
+          [src, 24, 'none'],
+          [src, 32, 'none'],
+          [f32, 16, 'tpdf'],
         ] as const) {
-          const native = nativeEncode(input, [
-            '--rate',
-            `${rate}`,
-            '--quality',
-            quality,
-            '--bits',
-            `${bits}`,
-          ]);
-          if (native === null) skip(NO_NATIVE);
-          const opts = { sampleRate: rate, resampleQuality: quality, bitsPerSample: bits };
-          expect(encodeSync(input, opts), `${quality} ${rate} Hz ${bits}-bit`).toEqual(native);
+          const args = ['--rate', `${rate}`, '--quality', quality, '--bits', `${bits}`];
+          const native = nativeEncode(input, [...args, '--dither', dither]);
+          if (native === null) return skip(NO_NATIVE);
+          const opts = { sampleRate: rate, resampleQuality: quality, bitsPerSample: bits, dither };
+          const ours = encodeSync(input, opts);
+          const [a, b] = [flacDecode(ours), flacDecode(native)];
+          if (a === null || b === null) return skip('flac unavailable');
+          const what = `${quality} ${rate} Hz ${bits}-bit`;
+          expect(a.length, what).toBeGreaterThan(0);
+          expect(a.length, what).toBe(b.length);
+          let worst = 0;
+          for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i]! - b[i]!));
+          expect(worst, what).toBeLessThanOrEqual(1);
+          // STREAMINFO rate, channels, bits and length.
+          expect(ours.subarray(18, 26), what).toEqual(native.subarray(18, 26));
         }
       }
     }
+  });
+
+  it('resamples to the same bytes on every host', () => {
+    // wasm floats are IEEE without fused ops and the libm is compiled in, so the output
+    // is fixed. A change here is a change of the resampler: note it in the CHANGELOG.
+    const src = makeWav({ frames: 20_000, channels: 2, bits: 24, seed: 5 });
+    const hashes = (['fast', 'balanced', 'best'] as const).map((quality) => {
+      const flac = encodeSync(src, {
+        sampleRate: 48000,
+        resampleQuality: quality,
+        bitsPerSample: 32,
+      });
+      return createHash('sha256')
+        .update(flac.subarray(metadataLength(flac)))
+        .digest('hex');
+    });
+    expect(hashes).toEqual([
+      '0ccb172e2fe3f5c851ee7e8424272df53b4a6de49c5d52f2f38a9f6f4e475e3b',
+      '7e04e0be73aa0f32413778c3da9657aef928e1665e4fe4cdd10b9b0c9cbc8f7a',
+      '44c45476548bc15f66aa0cf2424ca80d594c651e44ff22ab0ca67223de9acf4a',
+    ]);
   });
 
   it('agrees across paths on input larger than one wasm slice', async () => {

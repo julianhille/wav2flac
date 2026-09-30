@@ -42,7 +42,8 @@ const flac = await encode(wavBytes); // Uint8Array in, Uint8Array (a .flac file)
 - **Production details.** Progress callbacks, `AbortSignal` cancellation,
   input-size limits, stable error codes, ESM + CommonJS, TypeScript types.
   The output is deterministic: the same input and options give the same
-  bytes, however the input is chunked.
+  bytes, however the input is chunked, in every browser and runtime and on
+  every CPU.
 - **Zero dependencies.** `npm install wav2flac` installs just this package:
   JS bundles, types and one `.wasm` file. In Node it uses only built-in
   modules.
