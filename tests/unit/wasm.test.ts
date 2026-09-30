@@ -646,12 +646,39 @@ describe('init', () => {
     expect(() => api.version()).toThrow(/not initialized/);
   });
 
-  it('thirdPartyLicenses returns the license section, initializing on first use', async () => {
+  it('thirdPartyLicenses returns the license section of the loaded wasm', async () => {
     vi.resetModules();
     const api = await import('../../ts/index.js');
-    // The default URL (ts/wav2flac.wasm) does not exist next to the sources.
-    await expect(api.thirdPartyLicenses()).rejects.toThrow(/ENOENT/);
     const text = '# Notices\n\n| a | b |\n| --- | --- |\n| ü | → |\n';
+    await api.init(
+      withFirstSection(Uint8Array.from(bytes), NOTICES_SECTION, new TextEncoder().encode(text)),
+    );
+    await expect(api.thirdPartyLicenses()).resolves.toBe(text);
+  });
+
+  it('thirdPartyLicenses rejects before init, without loading or waiting for the wasm', async () => {
+    vi.resetModules();
+    const api = await import('../../ts/index.js');
+    // A download that never answers until it is aborted.
+    const fetch = vi.fn(
+      (_: URL, opts: RequestInit) =>
+        new Promise<Response>((_, reject) => {
+          opts.signal!.addEventListener('abort', () => reject(opts.signal!.reason));
+        }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    await expect(api.thirdPartyLicenses()).rejects.toThrow(/not initialized/);
+    expect(fetch).not.toHaveBeenCalled();
+    // A load in progress is not waited for, and not kept alive.
+    const loading = api.init('https://cdn.example/wav2flac.wasm', {
+      signal: AbortSignal.timeout(10),
+    });
+    await expect(api.thirdPartyLicenses()).rejects.toThrow(/not initialized/);
+    await expect(loading).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(fetch.mock.calls[0]![1].signal!.aborted).toBe(true);
+    await expect(api.thirdPartyLicenses()).rejects.toThrow(/not initialized/);
+    expect(fetch).toHaveBeenCalledOnce();
+    const text = '# Notices\n';
     await api.init(
       withFirstSection(Uint8Array.from(bytes), NOTICES_SECTION, new TextEncoder().encode(text)),
     );

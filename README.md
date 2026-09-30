@@ -180,7 +180,7 @@ const info = await probe(wav);
 | `probe(input)` | → `Promise<WavInfo>`. Reads the WAV header only. |
 | `init(source?, { signal? })` / `initSync(source?)` | Loads the wasm. `encode`, `encodeStream`, `probe` and the worker encoder do this for you. A `signal` (e.g. `AbortSignal.timeout(10_000)`) gives up on a stalled download. Once every caller waiting on the load has given up, or the load failed, the next call retries: from its own source, or else from the last one; a caller without a signal, such as `probe()`, keeps the load going. |
 | `version()` | The encoder's version string. |
-| `thirdPartyLicenses()` | → `Promise<string>`. The license notices of the crates in the wasm, as Markdown. |
+| `thirdPartyLicenses()` | → `Promise<string>`. The license notices of the crates in the wasm, as Markdown. Needs the wasm loaded: it rejects before `init()` has finished, and never loads it itself. |
 | `wasmMemoryBytes()` | Size of the wasm linear memory in bytes (for diagnostics and leak checks). |
 
 `input` is a `Uint8Array`, an `ArrayBuffer` or a `ReadableStream<Uint8Array>`

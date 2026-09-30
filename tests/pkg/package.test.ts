@@ -221,6 +221,7 @@ describe('installed package', () => {
     ['minified CJS', cjsMin],
   ])('returns the notices from the wasm (%s)', async (_, api) => {
     const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
+    await api.init();
     await expect(api.thirdPartyLicenses()).resolves.toBe(text);
   });
 

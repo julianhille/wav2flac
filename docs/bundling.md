@@ -33,13 +33,16 @@ is there in full, even where other crates have the same text.
 
 ## Reading the notices
 
-In code, `thirdPartyLicenses()` returns the text. It loads the wasm like
-`encode()` does, if that hasn't happened yet, and reads the section from it,
-so it fetches nothing else:
+In code, `thirdPartyLicenses()` returns the text. It reads the section from
+the wasm that is already loaded, so it fetches nothing. It never loads the
+wasm itself, and doesn't wait for a load in progress: until `init()` or
+`initSync()` has finished, it rejects with an error. So it can't hang on a
+stalled download.
 
 ```js
-import { thirdPartyLicenses } from 'wav2flac';
+import { init, thirdPartyLicenses } from 'wav2flac';
 
+await init();
 const markdown = await thirdPartyLicenses();
 ```
 

@@ -184,18 +184,22 @@ export function version(): string {
 /**
  * The license notices of the third-party code in the wasm, as Markdown: a
  * table of the Rust crates, then each crate's license files word for word.
- * Initializes the wasm on first use, and reads the notices from its `license`
- * section, so nothing else is fetched.
+ * Reads the notices from the `license` section of the wasm that is already
+ * loaded. It never loads the wasm or waits for a load, so it cannot hang on a
+ * stalled download: before {@link init} or {@link initSync} has finished, it
+ * rejects.
  *
  * @example
  * ```ts
+ * await init();
  * console.log(await thirdPartyLicenses());
  * ```
  * @returns The same text as `wav2flac/THIRD_PARTY_LICENSES.txt`.
- * @throws {Error} If the wasm was loaded from a copy without its `license` section.
+ * @throws {Error} If the wasm is not initialized, or was loaded from a copy
+ * without its `license` section.
  */
 export async function thirdPartyLicenses(): Promise<string> {
-  await init();
+  if (!isReady()) throw notReady();
   const [section] = WebAssembly.Module.customSections(wasmModule(), 'license');
   if (section === undefined) {
     throw new Error(

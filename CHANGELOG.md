@@ -10,6 +10,13 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Changed
+
+- `thirdPartyLicenses()` no longer loads the wasm. It reads the notices from
+  the wasm that is already loaded, and rejects with an error if `init()` or
+  `initSync()` hasn't finished yet, without starting or waiting for a load.
+  Call `await init()` first.
+
 ### Fixed
 
 - The build puts the license texts of a crate that keeps them in a
@@ -61,6 +68,10 @@ links are collected at the bottom of this file.
 - Cancelling the output of a worker encoder's `encodeStream()` with a reason
   now passes that reason to the input stream, as `encodeStream()` on the main
   thread does. Before, the input stream was cancelled with `undefined`.
+- `thirdPartyLicenses()` can no longer hang on a stalled wasm download, or
+  keep that download alive after every `encode()` waiting on it gave up.
+  Before, it started the load without a signal, so the load could not be
+  cancelled and later `encode()` calls kept waiting on the same stalled fetch.
 
 ## [1.0.0-rc.4] - 2026-09-30
 
