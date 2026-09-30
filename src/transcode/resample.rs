@@ -285,6 +285,8 @@ mod tests {
     /// a least-squares fit of a low tone. The filter has linear phase, so
     /// this is its uncorrected delay at any ratio, even where an impulse
     /// response is too narrow or too wide to locate.
+    // The fit reads best in the usual notation.
+    #[allow(clippy::many_single_char_names)]
     fn measured_offset(from: u32, to: u32, q: ResampleQuality) -> f64 {
         let tone = 0.05 * f64::from(from.min(to));
         let n_in = ((8.0 * f64::from(from) / tone) as usize).max(16 * CHUNK_FRAMES);
@@ -329,14 +331,14 @@ mod tests {
             (44100, 22050),
             (8000, 8001),
             // Stretch 4 (`sinc_len == CHUNK_FRAMES` for Best) and its edges.
-            (192000, 16000),
+            (192_000, 16000),
             (48000, 12000),
             (48001, 12000),
             // Largest upsampling, where the sub-sample term reaches frames.
-            (8000, 192000),
-            (1000, 256000),
+            (8000, 192_000),
+            (1000, 256_000),
             // Largest downsampling, where the delay is negative.
-            (384000, 6),
+            (384_000, 6),
             (6 * MAX_DOWNSAMPLE_RATIO, 6),
         ];
         // Pseudo-random rates across the whole supported range.

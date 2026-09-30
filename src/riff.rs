@@ -342,33 +342,13 @@ fn map_hound(e: hound::Error) -> crate::error::Error {
     }
 }
 
-/// Validates the fmt chunk body using hound and extracts what we need.
-fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
-    if raw.len() < 16 {
-        return err(ErrorCode::InvalidWav, "fmt chunk is shorter than 16 bytes");
-    }
-    let tag = le_u16(raw, 0);
-    // Give a precise message for common non-PCM encodings before hound's generic one.
-    match tag {
-        0x0002 | 0x0011 => return err(ErrorCode::UnsupportedFormat, "ADPCM WAV is not supported"),
-        0x0006 => return err(ErrorCode::UnsupportedFormat, "A-law WAV is not supported"),
-        0x0007 => return err(ErrorCode::UnsupportedFormat, "µ-law WAV is not supported"),
-        0x0055 => return err(ErrorCode::UnsupportedFormat, "MP3-in-WAV is not supported"),
-        _ => {}
-    }
-    let container_field = le_u16(raw, 14);
-    let extensible_float = tag == 0xFFFE && raw.len() >= 26 && le_u16(raw, 24) == 0x0003;
-    if (tag == 0x0003 || extensible_float) && container_field == 64 {
-        return err(
-            ErrorCode::UnsupportedFormat,
-            "64-bit float WAV is not supported (only 32-bit float)",
-        );
-    }
-
-    // Normalized minimal file: RIFF/WAVE + fmt + empty data chunk. Plain PCM
-    // and float chunks are cut to the 16 bytes that carry information: a
-    // `WAVEFORMATEX` (18 bytes) or longer chunk adds nothing for these tags,
-    // and hound would reject some of them (e.g. 32-bit PCM in 18 bytes).
+/// Builds a minimal file for hound: RIFF/WAVE, the fmt chunk and an empty
+/// data chunk, with the fields hound is strict about corrected.
+fn minimal_wav(raw: &[u8], tag: u16) -> Vec<u8> {
+    // Plain PCM and float chunks are cut to the 16 bytes that carry
+    // information: a `WAVEFORMATEX` (18 bytes) or longer chunk adds nothing
+    // for these tags, and hound would reject some of them (e.g. 32-bit PCM in
+    // 18 bytes).
     // Extensible chunks are cut to the 40 bytes of `WAVEFORMATEXTENSIBLE`:
     // hound reads exactly that much and would parse the rest as the next
     // chunk header.
@@ -396,12 +376,39 @@ fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
     if let Some(rate) = u32::from(le_u16(raw, 12)).checked_mul(le_u32(raw, 4)) {
         mini[28..32].copy_from_slice(&rate.to_le_bytes());
     }
+    mini
+}
+
+/// Validates the fmt chunk body using hound and extracts what we need.
+fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
+    if raw.len() < 16 {
+        return err(ErrorCode::InvalidWav, "fmt chunk is shorter than 16 bytes");
+    }
+    let tag = le_u16(raw, 0);
+    // Give a precise message for common non-PCM encodings before hound's generic one.
+    match tag {
+        0x0002 | 0x0011 => return err(ErrorCode::UnsupportedFormat, "ADPCM WAV is not supported"),
+        0x0006 => return err(ErrorCode::UnsupportedFormat, "A-law WAV is not supported"),
+        0x0007 => return err(ErrorCode::UnsupportedFormat, "µ-law WAV is not supported"),
+        0x0055 => return err(ErrorCode::UnsupportedFormat, "MP3-in-WAV is not supported"),
+        _ => {}
+    }
+    let container_field = le_u16(raw, 14);
+    let extensible_float = tag == 0xFFFE && raw.len() >= 26 && le_u16(raw, 24) == 0x0003;
+    if (tag == 0x0003 || extensible_float) && container_field == 64 {
+        return err(
+            ErrorCode::UnsupportedFormat,
+            "64-bit float WAV is not supported (only 32-bit float)",
+        );
+    }
+
+    let mut mini = minimal_wav(raw, tag);
     // Plain PCM may declare a width that is not a multiple of 8 (e.g. 20 bits):
     // the samples then fill the most significant bits of the smallest container
     // that holds them. hound rejects such a width, so give it the container's
     // and keep the declared one as the valid bits.
     let pcm_bits = le_u16(raw, 14);
-    let odd_pcm_width = tag == 0x0001 && pcm_bits % 8 != 0;
+    let odd_pcm_width = tag == 0x0001 && !pcm_bits.is_multiple_of(8);
     if odd_pcm_width {
         // Near u16::MAX there is no larger multiple of 8 that fits.
         let Some(container_bits) = pcm_bits.checked_next_multiple_of(8) else {
@@ -603,7 +610,7 @@ fn after_pad(buf: &[u8], end: usize) -> usize {
         (Some(0), _, _) | (_, None, _) => end + 1,
         (_, Some(here), Some(next))
             if !KNOWN_IDS.contains(&here)
-                && (KNOWN_IDS.contains(&next) || !(huge(end + 1) && !huge(end))) =>
+                && (KNOWN_IDS.contains(&next) || !huge(end + 1) || huge(end)) =>
         {
             end + 1
         }
