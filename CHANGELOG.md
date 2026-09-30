@@ -58,6 +58,9 @@ links are collected at the bottom of this file.
   which it then loads from as before.
 - Docs: the README gives the wasm as ~90 KB gzipped, its size since the
   license notices are in it. It said ~70 KB.
+- Cancelling the output of a worker encoder's `encodeStream()` with a reason
+  now passes that reason to the input stream, as `encodeStream()` on the main
+  thread does. Before, the input stream was cancelled with `undefined`.
 
 ## [1.0.0-rc.4] - 2026-09-30
 

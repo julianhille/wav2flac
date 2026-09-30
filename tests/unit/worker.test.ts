@@ -236,6 +236,41 @@ describe('worker protocol', () => {
     expect(await w.wasmMemoryBytes()).toBeGreaterThan(0);
   });
 
+  it('passes the consumer cancel reason to a stream input', async () => {
+    const { w } = pair();
+    const reason = new Error('user stopped');
+    const big = makeWav({ frames: 44100 * 4, signal: 'noise', seed: 9 });
+    /** A chunked source that records how it was cancelled. */
+    const source = (): { stream: ReadableStream<Uint8Array>; cancelled: () => unknown } => {
+      let why: unknown = 'not cancelled';
+      let off = 0;
+      const stream = new ReadableStream<Uint8Array>(
+        {
+          pull(c) {
+            if (off >= big.length) return c.close();
+            c.enqueue(big.slice(off, off + 8192));
+            off += 8192;
+          },
+          cancel(r) {
+            why = r;
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      return { stream, cancelled: () => why };
+    };
+
+    const a = source();
+    const r = w.encodeStream(a.stream).getReader();
+    await r.read();
+    await r.cancel(reason);
+    await vi.waitFor(() => expect(a.cancelled()).toBe(reason));
+
+    const b = source();
+    await w.encodeStream(b.stream).cancel(reason);
+    await vi.waitFor(() => expect(b.cancelled()).toBe(reason));
+  });
+
   it('removes its abort listeners from a long-lived signal', async () => {
     const { w } = pair();
     const signal = new AbortController().signal;

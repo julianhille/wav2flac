@@ -243,7 +243,7 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
     onOut: (data: Bytes) => void,
     onDone: (data: Bytes | null) => void,
     onFail: (e: unknown) => void,
-  ): (() => void) => {
+  ): ((reason?: unknown) => void) => {
     let prepared: ReturnType<typeof preparePcm>;
     try {
       // A dead encoder wins over bad options, and still releases the input.
@@ -410,7 +410,7 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
       let wake: (() => void) | undefined;
       let state: 'open' | 'done' | 'failed' = 'open';
       let error: unknown;
-      let cancel: (() => void) | undefined;
+      let cancel: ((reason?: unknown) => void) | undefined;
       const poke = (): void => {
         const w = wake;
         wake = undefined;
@@ -461,8 +461,9 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
             if (state === 'failed') throw error;
             c.close();
           },
-          cancel() {
-            cancel?.();
+          cancel(reason) {
+            // Like the main thread: the input stream gets the consumer's reason.
+            cancel?.(reason);
             // Settle a pull() still waiting for output.
             state = 'done';
             poke();
