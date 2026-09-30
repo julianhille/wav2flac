@@ -50,6 +50,10 @@ export interface Port<In, Out> {
   post(msg: Out, transfer: Transferable[]): void;
   /** Installs the message and error handlers. */
   listen(onMessage: (msg: In) => void, onError: (err: Error) => void): void;
+}
+
+/** The client's endpoint to a worker, which it also keeps alive and terminates. */
+export interface WorkerPort<In, Out> extends Port<In, Out> {
   /** Keeps (`true`) or stops keeping (`false`) a Node process alive; no-op elsewhere. */
   ref(keep: boolean): void;
   /** Terminates the worker or closes the port. */

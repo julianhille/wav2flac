@@ -7,14 +7,14 @@
 import type { Bytes } from './engine.js';
 import { abortError, reviveError, Wav2FlacError } from './errors.js';
 import { BUFFER_INPUT, isStream, preparePcm, toBytes, type Input, type PcmInput } from './input.js';
-import { normalizeOptions, type Options, type Progress } from './options.js';
+import { normalizeOptions, type Options } from './options.js';
 import { builtin, ignore, isNode } from './platform.js';
 import type { WavInfo } from './probe.js';
 import {
   OUTPUT_WINDOW,
   transferOf,
   type FromWorker,
-  type Port,
+  type WorkerPort,
   type ToWorker,
 } from './protocol.js';
 import { init, wasmModule, type WasmSource } from './wasm.js';
@@ -81,11 +81,11 @@ function lostMessage(detail?: string): Error {
 }
 
 /**
- * Wraps a browser `Worker` as a {@link Port}.
+ * Wraps a browser `Worker` as a {@link WorkerPort}.
  * @param w The worker.
  * @returns The port.
  */
-function browserPort(w: Worker): Port<FromWorker, ToWorker> {
+function browserPort(w: Worker): WorkerPort<FromWorker, ToWorker> {
   return {
     post: (msg, transfer) => w.postMessage(msg, transfer),
     listen(onMessage, onError) {
@@ -108,12 +108,12 @@ function browserPort(w: Worker): Port<FromWorker, ToWorker> {
 type NodeWorker = import('node:worker_threads').Worker;
 
 /**
- * Wraps a Node `worker_threads.Worker` as a {@link Port}.
+ * Wraps a Node `worker_threads.Worker` as a {@link WorkerPort}.
  * @param w The worker.
  * @returns The port.
  * @internal
  */
-export function nodePort(w: NodeWorker): Port<FromWorker, ToWorker> {
+export function nodePort(w: NodeWorker): WorkerPort<FromWorker, ToWorker> {
   let closed = false;
   return {
     post: (msg, transfer) => w.postMessage(msg, transfer as never),
@@ -138,7 +138,7 @@ export function nodePort(w: NodeWorker): Port<FromWorker, ToWorker> {
  * @param url Override of the worker script URL.
  * @returns The port to the new worker.
  */
-function spawn(url: URL | string | undefined): Port<FromWorker, ToWorker> {
+function spawn(url: URL | string | undefined): WorkerPort<FromWorker, ToWorker> {
   // Undefined in the CommonJS build bundled without __filename, document.currentScript
   // or location (see build-js.ts).
   if (url === undefined && typeof import.meta.url !== 'string') {
@@ -179,7 +179,7 @@ function spawn(url: URL | string | undefined): Port<FromWorker, ToWorker> {
  * ```
  */
 export function createWorkerEncoder(options: WorkerEncoderOptions = {}): WorkerEncoder {
-  let port: Port<FromWorker, ToWorker>;
+  let port: WorkerPort<FromWorker, ToWorker>;
   try {
     port = spawn(options.url);
   } catch (e) {
@@ -194,7 +194,7 @@ export function createWorkerEncoder(options: WorkerEncoderOptions = {}): WorkerE
  * @param error Why the worker did not start.
  * @returns The port.
  */
-function deadPort(error: Error): Port<FromWorker, ToWorker> {
+function deadPort(error: Error): WorkerPort<FromWorker, ToWorker> {
   return {
     post: ignore,
     listen: (_, onError) => onError(error),
@@ -210,7 +210,7 @@ function deadPort(error: Error): Port<FromWorker, ToWorker> {
  * @returns The worker encoder.
  * @internal
  */
-export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): WorkerEncoder {
+export function connect(port: WorkerPort<FromWorker, ToWorker>, wasm?: WasmSource): WorkerEncoder {
   const jobs = new Map<number, ClientJob>();
   let nextId = 1;
   let dead: Error | undefined;
@@ -549,5 +549,3 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
     },
   };
 }
-
-export type { Progress };

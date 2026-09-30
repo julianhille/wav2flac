@@ -5,7 +5,7 @@
  * @module
  * @internal
  */
-import { builtin, ignore, isNode } from './lib/platform.js';
+import { builtin, isNode } from './lib/platform.js';
 import type { FromWorker, Port, ToWorker } from './lib/protocol.js';
 import { serve } from './lib/worker-host.js';
 
@@ -14,7 +14,6 @@ interface WorkerScope {
   postMessage(msg: unknown, transfer: Transferable[]): void;
   onmessage: ((e: MessageEvent<ToWorker>) => void) | null;
   onmessageerror: (() => void) | null;
-  close(): void;
 }
 
 /**
@@ -42,8 +41,6 @@ function parent(): Port<ToWorker, FromWorker> {
         pp.on('message', onMessage);
         pp.on('messageerror', (e: Error) => onError(lost(e.message)));
       },
-      ref: ignore,
-      close: () => pp.close(),
     };
   }
   const scope = globalThis as unknown as WorkerScope;
@@ -53,8 +50,6 @@ function parent(): Port<ToWorker, FromWorker> {
       scope.onmessage = (e: MessageEvent<ToWorker>) => onMessage(e.data);
       scope.onmessageerror = () => onError(lost());
     },
-    ref: ignore,
-    close: () => scope.close(),
   };
 }
 

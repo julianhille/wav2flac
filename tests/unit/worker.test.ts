@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Wav2FlacError } from '../../ts/lib/errors.js';
 import { encodeSync } from '../../ts/index.js';
 import { liveSessions } from '../../ts/lib/engine.js';
-import type { FromWorker, Port, ToWorker } from '../../ts/lib/protocol.js';
+import type { FromWorker, ToWorker, WorkerPort } from '../../ts/lib/protocol.js';
 import { OUTPUT_WINDOW, transferOf } from '../../ts/lib/protocol.js';
 import { normalizeOptions } from '../../ts/lib/options.js';
 import {
@@ -30,7 +30,7 @@ const wav = makeWav({ frames: 44100 * 2, seed: 5 });
  * @param p The port.
  * @param log Messages sent through it.
  */
-function wrap<I, O>(p: MessagePort, log: O[] = []): Port<I, O> {
+function wrap<I, O>(p: MessagePort, log: O[] = []): WorkerPort<I, O> {
   return {
     post: (m, t) => {
       log.push(m);
@@ -380,7 +380,7 @@ describe('worker protocol', () => {
 
     // Same after a crash.
     let fire: (e: Error) => void = () => undefined;
-    const port: Port<FromWorker, ToWorker> = {
+    const port: WorkerPort<FromWorker, ToWorker> = {
       post: () => undefined,
       listen: (_on, onErr) => {
         fire = onErr;
@@ -400,7 +400,7 @@ describe('worker protocol', () => {
   it('fails all jobs when the worker errors', async () => {
     const ch = new MessageChannel();
     let fire: (e: Error) => void = () => undefined;
-    const port: Port<FromWorker, ToWorker> = {
+    const port: WorkerPort<FromWorker, ToWorker> = {
       post: () => undefined,
       listen: (_on, onErr) => {
         fire = onErr;
@@ -419,7 +419,7 @@ describe('worker protocol', () => {
 
   it('rejects requests when the worker dies while loading', async () => {
     let fire: (e: Error) => void = () => undefined;
-    const port: Port<FromWorker, ToWorker> = {
+    const port: WorkerPort<FromWorker, ToWorker> = {
       post: () => undefined,
       listen: (_on, onErr) => {
         fire = onErr;
@@ -438,7 +438,7 @@ describe('worker protocol', () => {
     // A fresh loader, whose download never finishes.
     vi.resetModules();
     const client = await import('../../ts/lib/worker-client.js');
-    const port: Port<FromWorker, ToWorker> = {
+    const port: WorkerPort<FromWorker, ToWorker> = {
       post: vi.fn(),
       listen: () => undefined,
       ref: () => undefined,
@@ -456,7 +456,7 @@ describe('worker protocol', () => {
   it('fails every job of an encoder whose wasm failed to load', async () => {
     vi.resetModules();
     const client = await import('../../ts/lib/worker-client.js');
-    const port: Port<FromWorker, ToWorker> = {
+    const port: WorkerPort<FromWorker, ToWorker> = {
       post: vi.fn(),
       listen: () => undefined,
       ref: () => undefined,

@@ -18,7 +18,7 @@ import {
   type PcmSampleFormat,
   type Progress,
 } from '../../ts/index.js';
-import type { FromWorker, Port, ToWorker } from '../../ts/lib/protocol.js';
+import type { FromWorker, ToWorker, WorkerPort } from '../../ts/lib/protocol.js';
 import { connect, type WorkerEncoder } from '../../ts/lib/worker-client.js';
 import { serve } from '../../ts/lib/worker-host.js';
 import { params } from '../helpers/fc.js';
@@ -142,7 +142,7 @@ async function codeOf(f: () => unknown): Promise<string> {
  * @param p The port.
  * @returns The protocol port.
  */
-function wrap<I, O>(p: MessagePort): Port<I, O> {
+function wrap<I, O>(p: MessagePort): WorkerPort<I, O> {
   return {
     post: (m, t) => p.postMessage(m, t as never),
     listen: (on, onErr) => {
