@@ -235,7 +235,7 @@ describe('parallel-encoding.md', () => {
     const running = pool.encode('crash');
     const waiting = pool.encode('a');
     pool.terminate();
-    await expect(running).rejects.toThrow();
+    await expect(running).rejects.toThrow('exited');
     await expect(waiting).rejects.toThrow('terminated');
     await expect(pool.encode('b')).rejects.toThrow('terminated');
     expect(StubWorker.all).toHaveLength(1);
