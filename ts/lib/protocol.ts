@@ -40,7 +40,9 @@ export type FromWorker =
   | { t: 'done'; id: number; data: Bytes | null }
   | { t: 'error'; id: number; error: SerializedError }
   | { t: 'probe'; id: number; info: WavInfo }
-  | { t: 'stats'; id: number; wasmBytes: number };
+  | { t: 'stats'; id: number; wasmBytes: number }
+  /** The worker can't run jobs any more (a message to it was lost); fail them all. */
+  | { t: 'fatal'; error: SerializedError };
 
 /** A bidirectional message endpoint (Worker, worker_threads port, MessagePort). */
 export interface Port<In, Out> {

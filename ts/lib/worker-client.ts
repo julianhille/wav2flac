@@ -71,6 +71,16 @@ interface ClientJob {
 }
 
 /**
+ * The error for a message from the worker that could not be deserialized.
+ * @param detail What the platform says, if anything.
+ * @returns The error.
+ */
+function lostMessage(detail?: string): Error {
+  const msg = 'wav2flac worker: a message from the worker could not be deserialized';
+  return new Error(detail === undefined ? msg : `${msg}: ${detail}`);
+}
+
+/**
  * Wraps a browser `Worker` as a {@link Port}.
  * @param w The worker.
  * @returns The port.
@@ -88,8 +98,7 @@ function browserPort(w: Worker): Port<FromWorker, ToWorker> {
           ),
         );
       };
-      w.onmessageerror = () =>
-        onError(new Error('wav2flac worker: message could not be deserialized'));
+      w.onmessageerror = () => onError(lostMessage());
     },
     ref: ignore,
     close: () => w.terminate(),
@@ -102,13 +111,15 @@ type NodeWorker = import('node:worker_threads').Worker;
  * Wraps a Node `worker_threads.Worker` as a {@link Port}.
  * @param w The worker.
  * @returns The port.
+ * @internal
  */
-function nodePort(w: NodeWorker): Port<FromWorker, ToWorker> {
+export function nodePort(w: NodeWorker): Port<FromWorker, ToWorker> {
   let closed = false;
   return {
     post: (msg, transfer) => w.postMessage(msg, transfer as never),
     listen(onMessage, onError) {
       w.on('message', onMessage);
+      w.on('messageerror', (e: Error) => onError(lostMessage(e.message)));
       w.on('error', onError);
       w.on('exit', (code) => {
         if (!closed) onError(new Error(`wav2flac worker exited with code ${code}`));
@@ -237,13 +248,14 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
     }
   };
 
-  port.listen(
-    (m) => jobs.get(m.id)?.handle(m),
-    (e) => {
-      failAll(e);
-      port.close();
-    },
-  );
+  const die = (e: Error): void => {
+    failAll(e);
+    port.close();
+  };
+  port.listen((m) => {
+    if (m.t === 'fatal') die(reviveError(m.error));
+    else jobs.get(m.id)?.handle(m);
+  }, die);
 
   /**
    * Prepares bytes for sending: transfers when allowed, copies otherwise.

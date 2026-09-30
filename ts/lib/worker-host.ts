@@ -7,7 +7,6 @@
 import { serializeError } from './errors.js';
 import { runBuffered, runStream } from './engine.js';
 import type { Progress } from './options.js';
-import { ignore } from './platform.js';
 import { probeBytes } from './probe.js';
 import type { FromWorker, Port, ToWorker } from './protocol.js';
 import { transferOf } from './protocol.js';
@@ -45,7 +44,8 @@ interface HostJob {
  */
 export function serve(port: Port<ToWorker, FromWorker>): void {
   const jobs = new Map<number, HostJob>();
-  let initError: unknown;
+  /** Why this worker can't run jobs: its wasm failed to start, or a message was lost. */
+  let fatal: unknown;
 
   const send = (msg: FromWorker, data?: Uint8Array): void => {
     port.post(msg, data === undefined ? [] : transferOf(data));
@@ -72,6 +72,31 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
       { highWaterMark: 0 },
     );
 
+  /**
+   * Stops a running job.
+   * @param job Job state.
+   * @param reason Why.
+   */
+  const stop = (job: HostJob, reason?: unknown): void => {
+    job.abort.abort(reason);
+    job.input?.resolve(null);
+    job.credit?.resolve();
+  };
+
+  /**
+   * Handles a message that could not be deserialized, such as an `init` whose
+   * wasm module can't be shared with this worker. Nothing tells which job it
+   * belonged to, and a lost `init`, `chunk` or `ack` would leave jobs failing
+   * obscurely or waiting forever, so the worker gives up: it fails every job
+   * and tells the client to do the same.
+   * @param e Why.
+   */
+  const lost = (e: Error): void => {
+    fatal ??= e;
+    send({ t: 'fatal', error: serializeError(e) });
+    for (const job of jobs.values()) stop(job, e);
+  };
+
   const runJob = async (m: Extract<ToWorker, { t: 'job' }>): Promise<void> => {
     const job: HostJob = {
       abort: new AbortController(),
@@ -85,7 +110,7 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
       onProgress: m.progress ? (p: Progress) => send({ t: 'progress', id: m.id, p }) : undefined,
     };
     try {
-      if (initError !== undefined) throw initError;
+      if (fatal !== undefined) throw fatal;
       const input = m.input ?? pulled(m.id, job);
       if (!m.args.streaming) {
         const out = await runBuffered(input, m.args, hooks);
@@ -122,7 +147,7 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
         try {
           initSync(m.module);
         } catch (e) {
-          initError = e;
+          fatal ??= e;
         }
         return;
       case 'job':
@@ -143,15 +168,12 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
       }
       case 'abort': {
         const job = jobs.get(m.id);
-        if (job === undefined) return;
-        job.abort.abort();
-        job.input?.resolve(null);
-        job.credit?.resolve();
+        if (job !== undefined) stop(job);
         return;
       }
       case 'probe':
         try {
-          if (initError !== undefined) throw initError;
+          if (fatal !== undefined) throw fatal;
           send({ t: 'probe', id: m.id, info: probeBytes(m.data) });
         } catch (e) {
           send({ t: 'error', id: m.id, error: serializeError(e) });
@@ -159,10 +181,9 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
         return;
       case 'stats':
         // A worker whose wasm failed to start can't encode; say so.
-        if (initError !== undefined)
-          send({ t: 'error', id: m.id, error: serializeError(initError) });
+        if (fatal !== undefined) send({ t: 'error', id: m.id, error: serializeError(fatal) });
         else send({ t: 'stats', id: m.id, wasmBytes: wasmMemoryBytes() });
         return;
     }
-  }, ignore);
+  }, lost);
 }

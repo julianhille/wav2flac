@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: 0BSD
 // The worker client and host, connected in-process through a MessageChannel.
 import { getEventListeners } from 'node:events';
-import { MessageChannel, type MessagePort } from 'node:worker_threads';
+import { MessageChannel, Worker, type MessagePort } from 'node:worker_threads';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +13,12 @@ import { liveSessions } from '../../ts/lib/engine.js';
 import type { FromWorker, Port, ToWorker } from '../../ts/lib/protocol.js';
 import { OUTPUT_WINDOW, transferOf } from '../../ts/lib/protocol.js';
 import { normalizeOptions } from '../../ts/lib/options.js';
-import { connect, createWorkerEncoder, type WorkerEncoder } from '../../ts/lib/worker-client.js';
+import {
+  connect,
+  createWorkerEncoder,
+  nodePort,
+  type WorkerEncoder,
+} from '../../ts/lib/worker-client.js';
 import { serve } from '../../ts/lib/worker-host.js';
 import { collect, makeWav, streamOf } from '../helpers/wav.js';
 
@@ -553,6 +558,77 @@ describe('worker protocol', () => {
     for (const m of inbox)
       expect(m).toMatchObject({ t: 'error', error: { message: expect.stringMatching(/env/) } });
     ch.port1.close();
+  });
+
+  it('fails every job when a message to the worker is lost', async () => {
+    const { w, toClient, hostPort } = pair();
+    const cancels: unknown[] = [];
+    // Stalls after the header, so the job is still running in the host.
+    const input = new ReadableStream<Uint8Array>({
+      start: (c) => c.enqueue(wav.slice(0, 4096)),
+      pull: () => new Promise(() => {}),
+      cancel: (why) => void cancels.push(why),
+    });
+    const running = w.encode(input);
+    await vi.waitFor(() => expect(liveSessions()).toBe(1));
+    // As a MessagePort does when it can't deserialize a message, e.g. an `init`.
+    const lost = new Error('lost');
+    hostPort.emit('messageerror', lost);
+    await expect(running).rejects.toThrow('lost');
+    expect(toClient).toContainEqual({ t: 'fatal', error: { name: 'Error', message: 'lost' } });
+    await vi.waitFor(() => expect(cancels).toHaveLength(1));
+    expect(cancels[0]).toMatchObject({ message: 'lost' });
+    await vi.waitFor(() => expect(liveSessions()).toBe(0));
+    await expect(w.encode(wav.slice())).rejects.toThrow('lost');
+    await expect(w.wasmMemoryBytes()).rejects.toThrow('lost');
+  });
+
+  it('refuses jobs after a message to the worker is lost', async () => {
+    const ch = new MessageChannel();
+    serve(wrap<ToWorker, FromWorker>(ch.port2));
+    const inbox: FromWorker[] = [];
+    ch.port1.on('message', (m: FromWorker) => inbox.push(m));
+    // The `init` never arrives: without the loss noted, the job would fail in the glue.
+    ch.port2.emit('messageerror', new Error('no module'));
+    ch.port1.postMessage({ t: 'probe', id: 1, data: wav.slice(0, 64) });
+    const args = normalizeOptions(undefined, false);
+    ch.port1.postMessage({
+      t: 'job',
+      id: 2,
+      args,
+      input: wav.slice(),
+      progress: false,
+      window: OUTPUT_WINDOW,
+    });
+    ch.port1.postMessage({ t: 'stats', id: 3 });
+    await vi.waitFor(() => expect(inbox).toHaveLength(4));
+    expect(inbox[0]).toEqual({ t: 'fatal', error: { name: 'Error', message: 'no module' } });
+    for (const m of inbox.slice(1))
+      expect(m).toMatchObject({ t: 'error', error: { message: 'no module' } });
+    ch.port1.close();
+  });
+
+  it('fails every job when a message from a Node worker is lost', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wav2flac-'));
+    const script = join(dir, 'idle.mjs');
+    writeFileSync(
+      script,
+      "import { parentPort } from 'node:worker_threads';\nparentPort.on('message', () => {});\n",
+    );
+    try {
+      const worker = new Worker(pathToFileURL(script));
+      const exited = new Promise((r) => worker.once('exit', r));
+      const w = connect(nodePort(worker), wasm);
+      const p = w.encode(wav.slice());
+      worker.emit('messageerror', new Error('bad clone'));
+      await expect(p).rejects.toThrow(
+        'wav2flac worker: a message from the worker could not be deserialized: bad clone',
+      );
+      await expect(w.probe(wav)).rejects.toThrow(/bad clone/);
+      await exited;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('ignores messages for unknown jobs', async () => {
