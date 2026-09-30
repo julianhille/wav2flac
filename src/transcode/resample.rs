@@ -103,6 +103,8 @@ pub struct Resample {
     frames_out: u64,
     /// Output frames still to drop (resampler delay).
     to_trim: usize,
+    /// Interleaved output of one chunk, reused across chunks.
+    scratch: Vec<f64>,
 }
 
 impl Resample {
@@ -161,7 +163,6 @@ impl Resample {
         };
         let to_trim = (delay + lead_in as f64 * ratio).round().max(0.0) as usize;
         Ok(Self {
-            inner,
             channels,
             from,
             to,
@@ -169,6 +170,8 @@ impl Resample {
             frames_in: 0,
             frames_out: 0,
             to_trim,
+            scratch: vec![0.0; inner.output_frames_max() * channels],
+            inner,
         })
     }
 
@@ -189,13 +192,20 @@ impl Resample {
             ..Indexing::default()
         };
         debug_assert!(partial.is_some() || frames >= need);
-        let buf = self
-            .inner
-            .process(&adapter, Some(&indexing))
-            .map_err(map_err)?;
-        let data = buf.take_data();
-        self.emit(&data, out);
-        Ok(())
+        let mut scratch = std::mem::take(&mut self.scratch);
+        let max = scratch.len() / self.channels;
+        let r = InterleavedSlice::new_mut(&mut scratch, self.channels, max)
+            .map_err(map_err)
+            .and_then(|mut buf| {
+                self.inner
+                    .process_into_buffer(&adapter, &mut buf, Some(&indexing))
+                    .map_err(map_err)
+            });
+        if let Ok((_, written)) = r {
+            self.emit(&scratch[..written * self.channels], out);
+        }
+        self.scratch = scratch;
+        r.map(|_| ())
     }
 
     /// Pushes interleaved input and appends all output that is ready.
