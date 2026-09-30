@@ -45,15 +45,24 @@ export function readLeb128(bytes: Uint8Array, at: number): { value: number; next
 }
 
 /**
- * The name of the first section of a module, if it is a custom section.
- * @param wasm The module.
- * @returns The name, or `undefined`.
+ * The names of a module's custom sections, wherever they are.
+ * @param wasm The module, starting with its header.
+ * @returns The names, in order.
+ * @throws {RangeError} If a section runs past the end.
  */
-function firstCustomName(wasm: Uint8Array): string | undefined {
-  if (wasm[HEADER.length] !== CUSTOM) return undefined;
-  const size = readLeb128(wasm, HEADER.length + 1);
-  const name = readLeb128(wasm, size.next);
-  return new TextDecoder().decode(wasm.subarray(name.next, name.next + name.value));
+function customNames(wasm: Uint8Array): string[] {
+  const names: string[] = [];
+  for (let at = HEADER.length; at < wasm.length; ) {
+    const size = readLeb128(wasm, at + 1);
+    const end = size.next + size.value;
+    if (end > wasm.length) throw new RangeError('section runs past the end');
+    if (wasm[at] === CUSTOM) {
+      const name = readLeb128(wasm, size.next);
+      names.push(new TextDecoder().decode(wasm.subarray(name.next, name.next + name.value)));
+    }
+    at = end;
+  }
+  return names;
 }
 
 /**
@@ -65,13 +74,13 @@ function firstCustomName(wasm: Uint8Array): string | undefined {
  * @param content The section's content.
  * @returns The module with the section.
  * @throws {Error} If `wasm` is not a wasm module of version 1, or already
- *   starts with a custom section of that name.
+ *   has a custom section of that name, anywhere.
  */
 export function withFirstSection(wasm: Uint8Array, name: string, content: Uint8Array): Uint8Array<ArrayBuffer> {
   if (wasm.length < HEADER.length || HEADER.some((b, i) => wasm[i] !== b)) {
     throw new Error('not a wasm module of version 1');
   }
-  if (firstCustomName(wasm) === name) throw new Error(`the module already starts with a "${name}" section`);
+  if (customNames(wasm).includes(name)) throw new Error(`the module already has a "${name}" section`);
   const nameBytes = new TextEncoder().encode(name);
   const nameSize = leb128(nameBytes.length);
   const size = leb128(nameSize.length + nameBytes.length + content.length);

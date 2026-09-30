@@ -65,9 +65,19 @@ describe('withFirstSection', () => {
     }
   });
 
+  it('rejects a module cut off inside a section', () => {
+    expect(() => withFirstSection(wasm.subarray(0, 100), NOTICES_SECTION, new Uint8Array())).toThrow(
+      /runs past the end/,
+    );
+  });
+
   it('refuses to add the section twice', () => {
     const once = withFirstSection(wasm, NOTICES_SECTION, Uint8Array.of(0x41));
-    expect(() => withFirstSection(once, NOTICES_SECTION, Uint8Array.of(0x41))).toThrow(/already starts/);
+    expect(() => withFirstSection(once, NOTICES_SECTION, Uint8Array.of(0x41))).toThrow(/already has/);
+    // Also where wasm-opt leaves it: at the end.
+    const atEnd = Uint8Array.from([...wasm, ...once.subarray(8, once.length - wasm.length + 8)]);
+    expect(WebAssembly.Module.customSections(new WebAssembly.Module(atEnd), NOTICES_SECTION)).toHaveLength(1);
+    expect(() => withFirstSection(atEnd, NOTICES_SECTION, Uint8Array.of(0x41))).toThrow(/already has/);
     // A first custom section with another name is fine.
     expect(() => withFirstSection(withFirstSection(wasm, 'other', new Uint8Array()), NOTICES_SECTION, new Uint8Array()))
       .not.toThrow();
