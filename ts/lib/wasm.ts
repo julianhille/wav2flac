@@ -117,9 +117,20 @@ async function readFileUrl(url: URL, signal: AbortSignal): Promise<Uint8Array<Ar
 }
 
 /**
+ * Whether this is an Electron renderer, which has both Node and a real page.
+ * @returns `true` in a renderer.
+ */
+function isElectronRenderer(): boolean {
+  const p = (globalThis as { process?: { type?: unknown; versions?: { electron?: unknown } } })
+    .process;
+  return typeof p?.versions?.electron === 'string' && p.type === 'renderer';
+}
+
+/**
  * Resolves a URL string: in Node a string that has no URL scheme (`file:`,
  * `https:`, ...) is a file path, also where a `location` exists (jsdom, Deno
- * `--location`); elsewhere it is relative to the page.
+ * `--location`), except in an Electron renderer, whose page it is relative
+ * to as it is everywhere else.
  * @param source The URL or path.
  * @returns The URL.
  * @throws {TypeError} For strings that are neither.
@@ -129,7 +140,7 @@ function toUrl(source: string | URL): URL {
   if (typeof source !== 'string') return source instanceof URL ? source : new URL(String(source));
   // A Windows drive path ("C:\\x.wasm") parses as a URL with scheme "c"; only
   // schemes of two or more characters count as URLs in Node.
-  if (isNode() && !/^[a-z][a-z0-9+.-]+:/i.test(source)) {
+  if (isNode() && !isElectronRenderer() && !/^[a-z][a-z0-9+.-]+:/i.test(source)) {
     return builtin<typeof import('node:url')>('url').pathToFileURL(source);
   }
   if (typeof location === 'object' && location !== null) return new URL(source, location.href);

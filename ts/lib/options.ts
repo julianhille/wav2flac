@@ -113,6 +113,15 @@ export interface Options {
   copy?: boolean | undefined;
 }
 
+/** Brands {@link ResolvedArgs}; exists only in types. */
+declare const resolvedPcm: unique symbol;
+
+/**
+ * {@link EncoderArgs} whose PCM format is resolved (never -1), as only
+ * `preparePcm()` returns them; the encoder takes nothing else.
+ */
+export type ResolvedArgs = EncoderArgs & { readonly [resolvedPcm]: true };
+
 /**
  * Plain, structured-cloneable arguments for the wasm `WasmEncoder` constructor.
  * Not part of the public API, but kept in the declarations because they

@@ -437,6 +437,31 @@ describe('init', () => {
     expect(w.isReady()).toBe(true);
   });
 
+  it('resolves a relative URL against the page in an Electron renderer', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', (url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(new Response(bytes));
+    });
+    vi.stubGlobal('location', { href: 'http://localhost:5173/app/' });
+    // Node integration on: Node is there, but so is the page.
+    const real = process;
+    vi.stubGlobal(
+      'process',
+      new Proxy(real, {
+        get: (t, k) =>
+          k === 'versions'
+            ? { ...real.versions, electron: '38.0.0' }
+            : k === 'type'
+              ? 'renderer'
+              : Reflect.get(t, k),
+      }),
+    );
+    const w = await fresh();
+    await w.init('wav2flac.wasm');
+    expect(urls).toEqual(['http://localhost:5173/app/wav2flac.wasm']);
+  });
+
   it('retries a relative path resolved against the cwd it was given in', async () => {
     const reads: string[] = [];
     const readFile = async (p: URL): Promise<Uint8Array> => {

@@ -13,7 +13,7 @@
 import { runBuffered, runStream, runSync, type Bytes } from './lib/engine.js';
 import {
   BUFFER_INPUT,
-  isStream,
+  releaseUnread,
   preparePcm,
   toBytes,
   type Input,
@@ -74,12 +74,12 @@ export async function encode(input: Input | PcmInput, options?: Options): Promis
     p = preparePcm(input, normalizeOptions(options, false));
   } catch (e) {
     // Bad options fail the encode, so a stream input is cancelled too.
-    if (isStream(input) && !input.locked) void input.cancel(e).catch(ignore);
+    releaseUnread(input, e);
     throw e;
   }
   await init(undefined, { signal: options?.signal }).catch((e: unknown) => {
     // As for any failed encode, a stream input is cancelled.
-    if (isStream(p.input)) void p.input.cancel(e).catch(ignore);
+    releaseUnread(p.input, e);
     throw e;
   });
   return runBuffered(p.input, p.args, { signal: options?.signal, onProgress: options?.onProgress });
@@ -107,7 +107,7 @@ export function encodeStream(input: Input | PcmInput, options?: Options): Readab
   try {
     prepared = preparePcm(input, normalizeOptions(options, true));
   } catch (e) {
-    if (isStream(input) && !input.locked) void input.cancel(e).catch(ignore);
+    releaseUnread(input, e);
     return new ReadableStream<Bytes>({ start: (c) => c.error(e) });
   }
   const { input: bytes, args } = prepared;
@@ -140,7 +140,7 @@ export function encodeStream(input: Input | PcmInput, options?: Options): Readab
         loading = false;
         signal?.removeEventListener('abort', onAbort);
         // The input is never read, so release it like a failed encode would.
-        if (isStream(bytes)) void bytes.cancel(e).catch(ignore);
+        releaseUnread(bytes, e);
         return writer.abort(e);
       },
     )

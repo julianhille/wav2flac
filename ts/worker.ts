@@ -37,9 +37,10 @@ function parent(): Port<ToWorker, FromWorker> {
   if (pp !== null) {
     return {
       post: (msg, transfer) => pp.postMessage(msg, transfer as never),
-      listen: (onMessage, onError) => {
+      listen: (onMessage, onError, onClose) => {
         pp.on('message', onMessage);
         pp.on('messageerror', (e: Error) => onError(lost(e.message)));
+        if (onClose !== undefined) pp.on('close', onClose);
       },
     };
   }

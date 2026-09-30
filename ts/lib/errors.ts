@@ -122,15 +122,44 @@ const MAX_CAUSES = 8;
  * @internal
  */
 export function serializeError(e: unknown, depth = 0): SerializedError {
+  // Never throws: an error that can't be described still has to reach the client.
+  try {
+    return serializeOne(e, depth);
+  } catch {
+    return { name: 'Error', message: 'unserializable error' };
+  }
+}
+
+/**
+ * {@link serializeError} without its fallback.
+ * @param e The error.
+ * @param depth Nesting level of `e` in a chain of causes.
+ * @returns A plain, structured-cloneable object.
+ */
+function serializeOne(e: unknown, depth: number): SerializedError {
   if (!(e instanceof Error || e instanceof DOMException))
-    return { name: 'Error', message: String(e) };
-  const out: SerializedError = { name: e.name, message: e.message };
+    return { name: 'Error', message: describe(e) };
+  const out: SerializedError = { name: String(e.name), message: String(e.message) };
   if (e instanceof Wav2FlacError) out.code = e.code;
   if (e instanceof DOMException) out.dom = true;
   if (typeof e.stack === 'string') out.stack = e.stack;
   // An absent cause and `cause: undefined` both arrive as no cause.
   if (e.cause !== undefined && depth < MAX_CAUSES) out.cause = serializeError(e.cause, depth + 1);
   return out;
+}
+
+/**
+ * `String(v)`, or its `Object.prototype.toString` tag for a value that has no
+ * usable conversion (a null-prototype object, a throwing `toString`).
+ * @param v Any value.
+ * @returns A description.
+ */
+function describe(v: unknown): string {
+  try {
+    return String(v);
+  } catch {
+    return Object.prototype.toString.call(v);
+  }
 }
 
 /**

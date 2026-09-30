@@ -11,7 +11,7 @@
  */
 import type { Bytes } from './engine.js';
 import type { SerializedError } from './errors.js';
-import type { EncoderArgs, Progress } from './options.js';
+import type { ResolvedArgs, Progress } from './options.js';
 import type { WavInfo } from './probe.js';
 
 /** Messages to the worker. */
@@ -20,7 +20,7 @@ export type ToWorker =
   | {
       t: 'job';
       id: number;
-      args: EncoderArgs;
+      args: ResolvedArgs;
       input: Uint8Array | null;
       progress: boolean;
       window: number;
@@ -48,8 +48,11 @@ export type FromWorker =
 export interface Port<In, Out> {
   /** Sends a message, transferring the listed objects. */
   post(msg: Out, transfer: Transferable[]): void;
-  /** Installs the message and error handlers. */
-  listen(onMessage: (msg: In) => void, onError: (err: Error) => void): void;
+  /**
+   * Installs the message and error handlers, and the close handler where the
+   * port reports closing (a closed port drops messages silently).
+   */
+  listen(onMessage: (msg: In) => void, onError: (err: Error) => void, onClose?: () => void): void;
 }
 
 /** The client's endpoint to a worker, which it also keeps alive and terminates. */

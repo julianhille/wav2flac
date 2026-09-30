@@ -33,8 +33,13 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
-- A worker job whose output could not be posted back, because the port had
-  closed, no longer keeps its wasm encoder alive.
+- A worker job stops, and frees its wasm encoder, when the worker's port
+  closes, instead of waiting forever for input or acknowledgements that can
+  no longer arrive. It also frees the encoder when its output can't be posted.
+- A worker job whose error can't be serialized (a `cause` without a usable
+  string conversion) still settles on the client, instead of never settling.
+- `createWorkerEncoder()` no longer loads the wasm on the calling thread when
+  its worker could not start.
 - The docs no longer promise that resampled output is byte-identical to a
   native build of the Rust crate. The wasm gives the same bytes on every host,
   but natively rubato uses the CPU's SIMD and the platform's libm, so a
@@ -79,6 +84,8 @@ links are collected at the bottom of this file.
 - In Node, `init()` reads a string without a URL scheme as a file path also
   where a global `location` exists, as in jsdom or Deno with `--location`. It
   used to resolve the path against `location.href` and fetch it over HTTP.
+  An Electron renderer, which has a real page, still resolves it against the
+  page.
 - A `WAVE_FORMAT_EXTENSIBLE` file whose `fmt ` chunk is longer than 40 bytes
   (extra bytes after the standard fields, a `cbSize` above 22, or an odd
   size) is encoded. It used to fail with `INVALID_WAV`.

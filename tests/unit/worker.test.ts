@@ -12,7 +12,7 @@ import { encodeStream, encodeSync } from '../../ts/index.js';
 import { liveSessions } from '../../ts/lib/engine.js';
 import type { FromWorker, ToWorker, WorkerPort } from '../../ts/lib/protocol.js';
 import { OUTPUT_WINDOW, transferOf } from '../../ts/lib/protocol.js';
-import { normalizeOptions } from '../../ts/lib/options.js';
+import { normalizeOptions, type ResolvedArgs } from '../../ts/lib/options.js';
 import {
   connect,
   createWorkerEncoder,
@@ -560,7 +560,7 @@ describe('worker protocol', () => {
     );
     client.post({ t: 'init', module: bad }, []);
     client.post({ t: 'probe', id: 1, data: wav.slice(0, 64) }, []);
-    const args = normalizeOptions(undefined, false);
+    const args = normalizeOptions(undefined, false) as ResolvedArgs;
     client.post(
       { t: 'job', id: 2, args, input: wav.slice(), progress: false, window: OUTPUT_WINDOW },
       [],
@@ -605,7 +605,7 @@ describe('worker protocol', () => {
     const sent: FromWorker['t'][] = [];
     serve({
       ...inner,
-      // As a closed port does: every message from the first chunk on fails.
+      // Every message from the first chunk on fails, the fallback error too.
       post: (m, t) => {
         sent.push(m.t);
         if (m.t === 'out' || m.t === 'error') throw new Error('port closed');
@@ -620,9 +620,65 @@ describe('worker protocol', () => {
       progress: false,
       window: OUTPUT_WINDOW,
     });
-    await vi.waitFor(() => expect(sent).toEqual(['out', 'error']));
+    await vi.waitFor(() => expect(sent).toEqual(['out', 'error', 'error']));
     await vi.waitFor(() => expect(liveSessions()).toBe(0));
     ch.port1.close();
+  });
+
+  it('stops its jobs when the port closes', async () => {
+    const ch = new MessageChannel();
+    const inner = wrap<ToWorker, FromWorker>(ch.port2);
+    let close!: () => void;
+    const sent: FromWorker['t'][] = [];
+    serve({
+      post: (m, t) => {
+        sent.push(m.t);
+        inner.post(m, t);
+      },
+      listen: (on, onErr, onClose) => {
+        inner.listen(on, onErr);
+        close = onClose!;
+      },
+    });
+    // A stream job without acks and a buffered one without input: both wait.
+    ch.port1.postMessage({
+      t: 'job',
+      id: 1,
+      args: normalizeOptions(undefined, true),
+      input: wav.slice(),
+      progress: false,
+      window: 1,
+    });
+    ch.port1.postMessage({
+      t: 'job',
+      id: 2,
+      args: normalizeOptions(undefined, false),
+      progress: false,
+      window: OUTPUT_WINDOW,
+    });
+    await vi.waitFor(() => expect(sent).toEqual(expect.arrayContaining(['out', 'need'])));
+    expect(liveSessions()).toBe(2);
+    close();
+    await vi.waitFor(() => expect(liveSessions()).toBe(0));
+    ch.port1.close();
+  });
+
+  it('skips the wasm for a worker that could not start', async () => {
+    vi.resetModules();
+    const client = await import('../../ts/lib/worker-client.js');
+    const wasmMod = await import('../../ts/lib/wasm.js');
+    const w = client.connect(
+      {
+        post: vi.fn(),
+        listen: (_on, onErr) => onErr(new Error('no worker')),
+        ref: () => undefined,
+        close: () => undefined,
+      },
+      wasm,
+    );
+    await expect(w.encode(wav.slice())).rejects.toThrow('no worker');
+    await expect(w.wasmMemoryBytes()).rejects.toThrow('no worker');
+    expect(wasmMod.isReady()).toBe(false);
   });
 
   it('refuses jobs after a message to the worker is lost', async () => {

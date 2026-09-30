@@ -71,6 +71,26 @@ describe('errors', () => {
     expect(u).toMatchObject({ name: 'MyError', message: 'm' });
 
     expect(serializeError(42)).toEqual({ name: 'Error', message: '42' });
+    // Values without a usable string conversion still serialize.
+    expect(serializeError(Object.create(null))).toEqual({
+      name: 'Error',
+      message: '[object Object]',
+    });
+    const bad = new Error('outer', {
+      cause: {
+        toString() {
+          throw new Error('no');
+        },
+      },
+    });
+    expect(serializeError(bad).cause).toEqual({ name: 'Error', message: '[object Object]' });
+    const trap = new Error('m');
+    Object.defineProperty(trap, 'message', {
+      get() {
+        throw new Error('no');
+      },
+    });
+    expect(serializeError(trap)).toEqual({ name: 'Error', message: 'unserializable error' });
     expect(reviveError({ name: 'Error', message: 'x' }).name).toBe('Error');
     expect(reviveError({ name: 'Wav2FlacError', code: 'BOGUS', message: 'm' })).not.toBeInstanceOf(
       Wav2FlacError,

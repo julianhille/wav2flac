@@ -8,8 +8,12 @@ import {
   runStream,
   Session,
 } from '../../ts/lib/engine.js';
-import { normalizeOptions } from '../../ts/lib/options.js';
+import { normalizeOptions as normalize, type ResolvedArgs } from '../../ts/lib/options.js';
 import { makeWav } from '../helpers/wav.js';
+
+/** Normalized options fed to the engine as they are, unresolved PCM included. */
+const normalizeOptions = (...a: Parameters<typeof normalize>): ResolvedArgs =>
+  normalize(...a) as ResolvedArgs;
 
 describe('engine internals', () => {
   it('assembles header, parts and tail in one buffer', () => {

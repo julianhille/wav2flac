@@ -6,7 +6,15 @@
  */
 import type { Bytes } from './engine.js';
 import { abortError, reviveError, Wav2FlacError } from './errors.js';
-import { BUFFER_INPUT, isStream, preparePcm, toBytes, type Input, type PcmInput } from './input.js';
+import {
+  BUFFER_INPUT,
+  isStream,
+  preparePcm,
+  releaseUnread,
+  toBytes,
+  type Input,
+  type PcmInput,
+} from './input.js';
 import { normalizeOptions, type Options } from './options.js';
 import { builtin, ignore, isNode } from './platform.js';
 import type { WavInfo } from './probe.js';
@@ -217,12 +225,6 @@ export function connect(port: WorkerPort<FromWorker, ToWorker>, wasm?: WasmSourc
     if (dead === undefined) port.post(msg, data === undefined ? [] : transferOf(data));
   };
 
-  const ready = init(wasm).then(() => {
-    post({ t: 'init', module: wasmModule() });
-  });
-  // Avoid an unhandled rejection before the first call awaits it.
-  ready.catch(ignore);
-
   const add = (id: number, job: ClientJob): void => {
     if (dead !== undefined) {
       job.fail(dead);
@@ -253,6 +255,16 @@ export function connect(port: WorkerPort<FromWorker, ToWorker>, wasm?: WasmSourc
     if (m.t === 'fatal') die(reviveError(m.error));
     else jobs.get(m.id)?.handle(m);
   }, die);
+
+  // A port that failed at once (a worker that could not start) needs no wasm.
+  const ready =
+    dead === undefined
+      ? init(wasm).then(() => {
+          post({ t: 'init', module: wasmModule() });
+        })
+      : Promise.reject(dead);
+  // Avoid an unhandled rejection before the first call awaits it.
+  ready.catch(ignore);
 
   /**
    * Prepares bytes for sending: transfers when allowed, copies otherwise.
@@ -292,7 +304,7 @@ export function connect(port: WorkerPort<FromWorker, ToWorker>, wasm?: WasmSourc
       prepared = preparePcm(rawInput, normalizeOptions(opts, streaming));
     } catch (e) {
       // Like the main thread: a failed encode cancels a stream input.
-      if (isStream(rawInput) && !rawInput.locked) void rawInput.cancel(e).catch(ignore);
+      releaseUnread(rawInput, e);
       throw e;
     }
     const { input, args } = prepared;

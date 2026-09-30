@@ -47,8 +47,11 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
   const jobs = new Map<number, HostJob>();
   /** Why this worker can't run jobs: its wasm failed to start, or a message was lost. */
   let fatal: unknown;
+  /** Set once the port closed: nothing sent arrives any more. */
+  let closed = false;
 
   const send = (msg: FromWorker, data?: Uint8Array): void => {
+    if (closed) throw new DOMException('wav2flac worker: the port closed', 'AbortError');
     port.post(msg, data === undefined ? [] : transferOf(data));
   };
 
@@ -143,56 +146,71 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
       try {
         send({ t: 'error', id: m.id, error: serializeError(e) });
       } catch {
-        // The port is closed: nobody is left to tell.
+        // The port closed, or the error can't be cloned: the client still waits
+        // unless the port is gone, so send what can always be sent.
+        try {
+          send({ t: 'error', id: m.id, error: { name: 'Error', message: 'unserializable error' } });
+        } catch {
+          // The port closed: nobody is left to tell.
+        }
       }
     } finally {
       jobs.delete(m.id);
     }
   };
 
-  port.listen((m) => {
-    switch (m.t) {
-      case 'init':
-        try {
-          initSync(m.module);
-        } catch (e) {
-          fatal ??= e;
+  port.listen(
+    (m) => {
+      switch (m.t) {
+        case 'init':
+          try {
+            initSync(m.module);
+          } catch (e) {
+            fatal ??= e;
+          }
+          return;
+        case 'job':
+          void runJob(m);
+          return;
+        case 'chunk':
+        case 'end': {
+          const job = jobs.get(m.id);
+          job?.input?.resolve(m.t === 'chunk' ? m.data : null);
+          return;
         }
-        return;
-      case 'job':
-        void runJob(m);
-        return;
-      case 'chunk':
-      case 'end': {
-        const job = jobs.get(m.id);
-        job?.input?.resolve(m.t === 'chunk' ? m.data : null);
-        return;
-      }
-      case 'ack': {
-        const job = jobs.get(m.id);
-        if (job === undefined) return;
-        job.credits++;
-        job.credit?.resolve();
-        return;
-      }
-      case 'abort': {
-        const job = jobs.get(m.id);
-        if (job !== undefined) stop(job);
-        return;
-      }
-      case 'probe':
-        try {
-          if (fatal !== undefined) throw fatal;
-          send({ t: 'probe', id: m.id, info: probeBytes(m.data) });
-        } catch (e) {
-          send({ t: 'error', id: m.id, error: serializeError(e) });
+        case 'ack': {
+          const job = jobs.get(m.id);
+          if (job === undefined) return;
+          job.credits++;
+          job.credit?.resolve();
+          return;
         }
-        return;
-      case 'stats':
-        // A worker whose wasm failed to start can't encode; say so.
-        if (fatal !== undefined) send({ t: 'error', id: m.id, error: serializeError(fatal) });
-        else send({ t: 'stats', id: m.id, wasmBytes: wasmMemoryBytes() });
-        return;
-    }
-  }, lost);
+        case 'abort': {
+          const job = jobs.get(m.id);
+          if (job !== undefined) stop(job);
+          return;
+        }
+        case 'probe':
+          try {
+            if (fatal !== undefined) throw fatal;
+            send({ t: 'probe', id: m.id, info: probeBytes(m.data) });
+          } catch (e) {
+            send({ t: 'error', id: m.id, error: serializeError(e) });
+          }
+          return;
+        case 'stats':
+          // A worker whose wasm failed to start can't encode; say so.
+          if (fatal !== undefined) send({ t: 'error', id: m.id, error: serializeError(fatal) });
+          else send({ t: 'stats', id: m.id, wasmBytes: wasmMemoryBytes() });
+          return;
+      }
+    },
+    lost,
+    () => {
+      // A closed port drops messages silently, so waiting jobs would wait forever.
+      closed = true;
+      const reason = new DOMException('wav2flac worker: the port closed', 'AbortError');
+      for (const job of jobs.values()) stop(job, reason);
+    },
+  );
 }
