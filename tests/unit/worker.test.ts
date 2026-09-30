@@ -566,6 +566,21 @@ describe('worker protocol', () => {
     await expect(w.encode(wav.slice())).rejects.toThrow(/Cannot find module/);
   });
 
+  it('fails every call, without throwing, when the worker cannot start', async () => {
+    // Node's Worker throws at once for a relative path.
+    const w = createWorkerEncoder({ url: 'relative/worker.js', wasm });
+    open.push(w);
+    await expect(w.encode(wav.slice())).rejects.toMatchObject({ code: 'ERR_WORKER_PATH' });
+    await expect(collect(w.encodeStream(wav.slice()))).rejects.toMatchObject({
+      code: 'ERR_WORKER_PATH',
+    });
+    await expect(w.probe(wav)).rejects.toMatchObject({ code: 'ERR_WORKER_PATH' });
+    // A stream input is released, as on any failed encode.
+    const input = streamOf(wav, 4096);
+    await expect(w.encode(input)).rejects.toMatchObject({ code: 'ERR_WORKER_PATH' });
+    expect(input.locked).toBe(false);
+  });
+
   it('fails pending jobs when a real worker exits unexpectedly', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'wav2flac-'));
     const script = join(dir, 'exit.mjs');

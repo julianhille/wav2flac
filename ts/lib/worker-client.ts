@@ -147,7 +147,8 @@ function spawn(url: URL | string | undefined): Port<FromWorker, ToWorker> {
 /**
  * Creates an encoder that runs in a dedicated worker, keeping the calling
  * thread free. The wasm is compiled once on the calling side and shared. In
- * Node the worker does not keep the process alive while idle.
+ * Node the worker does not keep the process alive while idle. It never
+ * throws: if the worker cannot start, every call fails with the reason.
  *
  * @param options Worker script and wasm location.
  * @returns The worker encoder. Call `terminate()` when done.
@@ -159,7 +160,28 @@ function spawn(url: URL | string | undefined): Port<FromWorker, ToWorker> {
  * ```
  */
 export function createWorkerEncoder(options: WorkerEncoderOptions = {}): WorkerEncoder {
-  return connect(spawn(options.url), options.wasm);
+  let port: Port<FromWorker, ToWorker>;
+  try {
+    port = spawn(options.url);
+  } catch (e) {
+    // Like a worker that crashed: every call fails, none throws.
+    port = deadPort(e instanceof Error ? e : new Error(String(e)));
+  }
+  return connect(port, options.wasm);
+}
+
+/**
+ * A port to a worker that could not start: it reports `error` at once.
+ * @param error Why the worker did not start.
+ * @returns The port.
+ */
+function deadPort(error: Error): Port<FromWorker, ToWorker> {
+  return {
+    post: ignore,
+    listen: (_, onError) => onError(error),
+    ref: ignore,
+    close: ignore,
+  };
 }
 
 /**

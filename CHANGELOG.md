@@ -33,6 +33,13 @@ links are collected at the bottom of this file.
   `LICENSES/` directory (the REUSE layout) into the wasm's notices and
   `THIRD_PARTY_LICENSES.txt`. Before, it silently left them out when the crate
   also had e.g. an `AUTHORS` file. No crate in the wasm has that layout today.
+- `init()`, `encodeStream()` and `createWorkerEncoder()` no longer throw
+  synchronously when the CommonJS build is bundled into a script that has no
+  `__filename`, `document.currentScript` or `location`, so the default wasm or
+  worker URL can't be resolved. `init()` rejects and `encodeStream()` errors
+  its stream, saying to pass the wasm to `init()`. The worker encoder fails
+  every call, as it does when its worker can't start for any other reason,
+  such as a relative `url` in Node.
 - `node scripts/release.ts prepare X.Y.Z` runs on a `release/vX.Y.Z` branch
   started from `origin/main`, as the release workflow describes, and prints
   the matching push command. It used to run only on `main`.

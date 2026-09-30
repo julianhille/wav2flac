@@ -57,10 +57,21 @@ let instantiating = false;
 /**
  * URL of the `.wasm` shipped next to this bundle (`pkg/wav2flac.wasm`).
  * @returns The URL.
+ * @throws {Error} If the bundle cannot tell where it was loaded from: the
+ *   CommonJS build bundled into a script without `__filename`,
+ *   `document.currentScript` or `location`.
  * @internal
  */
 export function defaultWasmUrl(): URL {
-  return new URL('../wav2flac.wasm', import.meta.url);
+  try {
+    return new URL('../wav2flac.wasm', import.meta.url);
+  } catch (e) {
+    throw new Error(
+      "wav2flac: can't tell where this bundle was loaded from, so can't find " +
+        'wav2flac.wasm; pass its URL, path or bytes to init()',
+      { cause: e },
+    );
+  }
 }
 
 /**
@@ -312,15 +323,15 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
   if (compiled !== undefined) return Promise.resolve();
   if (signal?.aborted === true) return Promise.reject(signal.reason);
   if (pending === undefined) {
-    let again: WasmSource | undefined;
+    let from: WasmSource | typeof RESPONSE_READ;
     try {
-      again = source === undefined ? undefined : retrySource(source);
+      const again = source === undefined ? undefined : retrySource(source);
+      if (again !== undefined) configured = again;
+      else if (source !== undefined && isResponse(source)) configured ??= RESPONSE_READ;
+      from = again ?? source ?? configured ?? defaultWasmUrl();
     } catch (e) {
       return Promise.reject(e);
     }
-    if (again !== undefined) configured = again;
-    else if (source !== undefined && isResponse(source)) configured ??= RESPONSE_READ;
-    const from = again ?? source ?? configured ?? defaultWasmUrl();
     if (from === RESPONSE_READ) {
       return Promise.reject(
         new Error(

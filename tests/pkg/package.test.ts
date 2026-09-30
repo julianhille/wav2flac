@@ -225,6 +225,29 @@ describe('installed package', () => {
     await expect(api.thirdPartyLicenses()).resolves.toBe(text);
   });
 
+  it.each(['cjs/index.cjs', 'cjs/index.min.cjs'])(
+    'rejects, never throws, when %s cannot tell where it was loaded from',
+    async (f) => {
+      // Bundled into a script with no __filename, document.currentScript or location.
+      const src = readFileSync(join(installed, 'pkg', f), 'utf8');
+      const module = { exports: {} as Api };
+      new Function('module', 'exports', src)(module, module.exports);
+      const api = module.exports;
+      const lost = /can't tell where this bundle was loaded from/;
+      await expect(api.init()).rejects.toThrow(lost);
+      await expect(collect(api.encodeStream(wav))).rejects.toThrow(lost);
+      await expect(api.encode(wav)).rejects.toThrow(lost);
+      const w = api.createWorkerEncoder();
+      await expect(w.encode(wav)).rejects.toThrow(TypeError);
+      await expect(w.probe(wav)).rejects.toThrow(TypeError);
+      w.terminate();
+      // A source passed explicitly still loads.
+      await api.init(readFileSync(join(installed, 'pkg/wav2flac.wasm')));
+      await esm.init();
+      expect(api.encodeSync(wav)).toEqual(esm.encodeSync(wav));
+    },
+  );
+
   it('keeps license comments out of the bundles', () => {
     for (const f of BUNDLES) {
       const text = readFileSync(join(installed, 'pkg', f), 'utf8');
