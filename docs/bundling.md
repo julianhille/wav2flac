@@ -16,11 +16,20 @@ text is stored as plain UTF-8, uncompressed, right after the 8-byte header
 and the section's name, so it makes up the first lines of the file:
 
 ```
-\0asm...licenseThird-party software compiled into wav2flac.wasm
+\0asm...license# Third-party software compiled into wav2flac.wasm
 
 wav2flac itself is licensed 0BSD (see LICENSE). The WebAssembly module also
-contains the following Rust crates; their license notices follow.
+contains the following Rust crates. Their license notices follow the table.
+
+| Component | Version | License | Source |
+| --- | --- | --- | --- |
+| audio-codec-algorithms | 0.8.1 | 0BSD OR Apache-2.0 | https://github.com/karip/audio-codec-algorithms |
 ```
+
+The text is Markdown: a table of every crate, with its version, license and
+source, then a section per crate with each of its license files word for
+word, in a code block. Nothing is shortened: a crate's Apache or MIT license
+is there in full, even where other crates have the same text.
 
 ## Reading the notices
 

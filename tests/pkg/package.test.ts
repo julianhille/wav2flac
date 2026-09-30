@@ -23,10 +23,10 @@ const rustRelease = /^channel = "([^"]+)"/m.exec(readFileSync(join(root, 'rust-t
 /**
  * Splits THIRD_PARTY_LICENSES.txt into its sections, one per component.
  * @param text The file.
- * @returns A lookup by the first line of a section, which must match once.
+ * @returns A lookup by the heading of a section, which must match once.
  */
 function noticeSections(text: string): (heading: string) => string {
-  const sections = text.split(/\n={78}\n/).slice(1);
+  const sections = text.split(/\n## /).slice(1);
   return (heading) => {
     const found = sections.filter((s) => s.split('\n')[0] === heading || s.startsWith(`${heading} `));
     expect(found.map((s) => s.split('\n')[0]), heading).toHaveLength(1);
@@ -97,7 +97,7 @@ describe('installed package', () => {
     const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
     const section = noticeSections(text);
     for (const name of ['hound', 'libflac-rs', 'rubato', 'wasm-bindgen']) {
-      expect(section(name)).toMatch(/^License: /m);
+      expect(section(name)).toMatch(/^- License: /m);
     }
     // The parts of the standard library that the wasm links, each with its notices.
     const std = `Rust standard library ${rustRelease}:`;
@@ -119,9 +119,21 @@ describe('installed package', () => {
     expect(wasm.subarray(size.next, start)).toEqual(Buffer.concat([Uint8Array.of(name.length), name]));
     expect(size.next + size.value - start).toBe(notices.length);
     expect(wasm.subarray(start, start + notices.length)).toEqual(notices);
-    expect(String(wasm.subarray(start, start + 48))).toBe('Third-party software compiled into wav2flac.wasm');
+    expect(String(wasm.subarray(start, start + 50))).toBe('# Third-party software compiled into wav2flac.wasm');
     const sections = WebAssembly.Module.customSections(new WebAssembly.Module(wasm), NOTICES_SECTION);
     expect(sections.map((b) => Buffer.from(b))).toEqual([notices]);
+  });
+
+  it('lists every component in a Markdown table, with its notices in code blocks', () => {
+    const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
+    const rows = text.split('\n').filter((l) => /^\| (?!---|Component )/.test(l));
+    const headings = text.split('\n').filter((l) => l.startsWith('## '));
+    expect(rows).toHaveLength(headings.length);
+    expect(rows).toContain('| hound | 3.5.1 | Apache-2.0 | https://github.com/ruuda/hound |');
+    for (const row of rows) expect(row.split(' | '), row).toHaveLength(4);
+    // Every notice file is a fenced block, and the fences pair up.
+    expect(text.match(/^### /gm)?.length).toBe(text.match(/^```text$/gm)?.length);
+    expect(text.match(/^```$/gm)?.length).toBe(text.match(/^```text$/gm)?.length);
   });
 
   it('keeps license comments out of the bundles', () => {

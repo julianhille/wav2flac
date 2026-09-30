@@ -17,9 +17,10 @@ links are collected at the bottom of this file.
   the start of the file. It is plain text, so `head` or `strings` shows it as
   the first lines of the file, and
   `WebAssembly.Module.customSections(module, 'license')` returns it. Engines
-  ignore the section. Vite and webpack copy the wasm as it is, so the
-  notices go wherever the wasm goes, with nothing to configure. The wasm
-  grows from 165 KB to 426 KB, or from 72 KB to 87 KB gzipped.
+  ignore the section. Every license file is there in full. Vite and webpack
+  copy the wasm as it is, so the notices go wherever the wasm goes, with
+  nothing to configure. The wasm grows from 165 KB to 426 KB, or from 72 KB
+  to 87 KB gzipped.
 - `wav2flac/THIRD_PARTY_LICENSES.txt` resolves to the notices file in the
   package, for tools and docs that want the text.
 - Docs: a page on the license notices when bundling or hosting the wasm
@@ -27,6 +28,10 @@ links are collected at the bottom of this file.
 
 ### Changed
 
+- `THIRD_PARTY_LICENSES.txt` is Markdown: a table of the crates with their
+  versions, licenses and sources, then each crate's license files word for
+  word, in code blocks. The name stays, and the text still reads as plain
+  text.
 - The JS bundles no longer start with a `/*! @license */` comment. The
   notices it listed are in the wasm now, which has them in full. Before,
   bundlers such as Vite dropped the comment, and the notices with it.
