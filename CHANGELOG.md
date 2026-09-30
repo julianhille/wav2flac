@@ -68,10 +68,6 @@ links are collected at the bottom of this file.
 - Cancelling the output of a worker encoder's `encodeStream()` with a reason
   now passes that reason to the input stream, as `encodeStream()` on the main
   thread does. Before, the input stream was cancelled with `undefined`.
-- `thirdPartyLicenses()` can no longer hang on a stalled wasm download, or
-  keep that download alive after every `encode()` waiting on it gave up.
-  Before, it started the load without a signal, so the load could not be
-  cancelled and later `encode()` calls kept waiting on the same stalled fetch.
 
 ## [1.0.0-rc.4] - 2026-09-30
 
