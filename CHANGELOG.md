@@ -40,6 +40,7 @@ links are collected at the bottom of this file.
   string conversion) still settles on the client, instead of never settling.
 - `createWorkerEncoder()` no longer loads the wasm on the calling thread when
   its worker could not start.
+- A worker that loses several messages tells the client it failed only once.
 - The docs no longer promise that resampled output is byte-identical to a
   native build of the Rust crate. The wasm gives the same bytes on every host,
   but natively rubato uses the CPU's SIMD and the platform's libm, so a

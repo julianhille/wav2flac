@@ -49,6 +49,8 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
   let fatal: unknown;
   /** Set once the port closed: nothing sent arrives any more. */
   let closed = false;
+  /** Whether a lost message made this worker give up and tell the client. */
+  let gaveUp = false;
 
   const send = (msg: FromWorker, data?: Uint8Array): void => {
     if (closed) throw new DOMException('wav2flac worker: the port closed', 'AbortError');
@@ -97,6 +99,9 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
    */
   const lost = (e: Error): void => {
     fatal ??= e;
+    // Once is enough: the client fails everything on the first `fatal`.
+    if (gaveUp) return;
+    gaveUp = true;
     send({ t: 'fatal', error: serializeError(e) });
     for (const job of jobs.values()) stop(job, e);
   };

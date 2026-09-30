@@ -599,6 +599,22 @@ describe('worker protocol', () => {
     await expect(w.wasmMemoryBytes()).rejects.toThrow('lost');
   });
 
+  it('tells the client only once when several messages are lost', async () => {
+    const ch = new MessageChannel();
+    const sent: FromWorker[] = [];
+    serve(wrap<ToWorker, FromWorker>(ch.port2, sent));
+    ch.port2.emit('messageerror', new Error('first'));
+    ch.port2.emit('messageerror', new Error('second'));
+    expect(sent).toEqual([
+      { t: 'fatal', error: expect.objectContaining({ name: 'Error', message: 'first' }) },
+    ]);
+    // Jobs still fail with the first reason.
+    ch.port1.postMessage({ t: 'stats', id: 1 });
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1]).toMatchObject({ t: 'error', id: 1, error: { message: 'first' } });
+    ch.port1.close();
+  });
+
   it('frees the encoder when the host cannot post a stream chunk', async () => {
     const ch = new MessageChannel();
     const inner = wrap<ToWorker, FromWorker>(ch.port2);
