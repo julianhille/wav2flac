@@ -46,8 +46,8 @@ links are collected at the bottom of this file.
   `__filename`, `document.currentScript` or `location`, so the default wasm or
   worker URL can't be resolved. `init()` rejects and `encodeStream()` errors
   its stream, saying to pass the wasm to `init()`. The worker encoder fails
-  every call, as it does when its worker can't start for any other reason,
-  such as a relative `url` in Node.
+  every call, saying to pass its `url`, as it fails when its worker can't
+  start for any other reason, such as a relative `url` in Node.
 - `node scripts/release.ts prepare X.Y.Z` runs on a `release/vX.Y.Z` branch
   started from `origin/main`, as the release workflow describes, and prints
   the matching push command. It used to run only on `main`.

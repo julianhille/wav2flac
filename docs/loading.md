@@ -15,6 +15,15 @@ package's JS:
   `new URL('../wav2flac.wasm', import.meta.url)`, which bundlers detect and
   emit as an asset.
 
+The CommonJS build has no `import.meta.url`, so it finds its own location
+another way: from `__filename` in Node, and elsewhere from the `src` of the
+`<script>` that loaded it, or else from the page URL (`location.href`). In
+that last case the default `.wasm` and worker resolve against the page, not
+the package, so pass `init()` a source and `createWorkerEncoder()` a `url`.
+Where none of these exist, as in a CommonJS bundle run in a sandbox,
+`init()` rejects and the worker encoder fails every call, both with an error
+that asks for the location.
+
 To host it yourself, call `init()` before anything encodes. It takes a URL or
 path, the bytes, a compiled `WebAssembly.Module`, or a `Response` (or a
 promise of one):

@@ -238,8 +238,9 @@ describe('installed package', () => {
       await expect(collect(api.encodeStream(wav))).rejects.toThrow(lost);
       await expect(api.encode(wav)).rejects.toThrow(lost);
       const w = api.createWorkerEncoder();
-      await expect(w.encode(wav)).rejects.toThrow(TypeError);
-      await expect(w.probe(wav)).rejects.toThrow(TypeError);
+      const noWorker = /can't find its worker script; pass its URL to createWorkerEncoder/;
+      await expect(w.encode(wav)).rejects.toThrow(noWorker);
+      await expect(w.probe(wav)).rejects.toThrow(noWorker);
       w.terminate();
       // A source passed explicitly still loads.
       await api.init(readFileSync(join(installed, 'pkg/wav2flac.wasm')));

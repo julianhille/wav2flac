@@ -128,6 +128,14 @@ function nodePort(w: NodeWorker): Port<FromWorker, ToWorker> {
  * @returns The port to the new worker.
  */
 function spawn(url: URL | string | undefined): Port<FromWorker, ToWorker> {
+  // Undefined in the CommonJS build bundled without __filename, document.currentScript
+  // or location (see build-js.ts).
+  if (url === undefined && typeof import.meta.url !== 'string') {
+    throw new Error(
+      "wav2flac: can't tell where this bundle was loaded from, so can't find its " +
+        'worker script; pass its URL to createWorkerEncoder({ url })',
+    );
+  }
   if (isNode()) {
     const { Worker } = builtin<typeof import('node:worker_threads')>('worker_threads');
     // Node treats a string as a file path; accept `file:` URL strings as in browsers.
