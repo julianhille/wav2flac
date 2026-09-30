@@ -56,6 +56,9 @@ const flac = await encode(wavBytes); // Uint8Array in, Uint8Array (a .flac file)
 npm install wav2flac
 ```
 
+The type declarations need TypeScript 5.7 or newer: they use the
+`Uint8Array<ArrayBuffer>` form of the typed arrays.
+
 The wasm binary is found automatically: next to the JS in Node, and via
 `new URL(…, import.meta.url)` in browsers and in bundlers such as Vite and
 webpack. To host it yourself, call `init(urlOrBytes)` first. The binary
