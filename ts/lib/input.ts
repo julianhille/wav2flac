@@ -127,7 +127,9 @@ export function* slices(bytes: Uint8Array, size = SLICE_BYTES): Generator<Uint8A
 /**
  * Iterates any {@link Input} as byte slices. Streams are read one chunk at a
  * time; if iteration stops early, or `signal` aborts (even while a read is
- * pending), the stream is cancelled.
+ * pending), the stream is cancelled. When iteration fails, because reading
+ * fails or the consumer passes its error to `throw()`, the stream is
+ * cancelled with that error.
  * @param input The input.
  * @param size Largest slice.
  * @param signal Cancels a stream input when aborted.
@@ -149,6 +151,7 @@ export async function* chunks(
     void reader.cancel(signal?.reason).catch(ignore);
   };
   signal?.addEventListener('abort', onAbort, { once: true });
+  let reason: unknown;
   try {
     for (;;) {
       signal?.throwIfAborted();
@@ -160,9 +163,12 @@ export async function* chunks(
       }
       yield* slices(toBytes(r.value, 'stream chunk'), size);
     }
+  } catch (e) {
+    reason = e;
+    throw e;
   } finally {
     signal?.removeEventListener('abort', onAbort);
-    if (!done) await reader.cancel(signal?.reason).catch(ignore);
+    if (!done) await reader.cancel(reason).catch(ignore);
     reader.releaseLock();
   }
 }

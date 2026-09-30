@@ -271,6 +271,22 @@ describe('worker protocol', () => {
     await vi.waitFor(() => expect(b.cancelled()).toBe(reason));
   });
 
+  it('cancels a stream input with the error that fails a buffered encode', async () => {
+    const { w } = pair();
+    let cancelled: unknown;
+    const bad = new ReadableStream<Uint8Array>({
+      pull(c) {
+        c.enqueue(new Uint8Array(8192).fill(0x55));
+      },
+      cancel(r) {
+        cancelled = r;
+      },
+    });
+    await expect(w.encode(bad)).rejects.toMatchObject({ code: 'INVALID_WAV' });
+    await vi.waitFor(() => expect(cancelled).toBeInstanceOf(Wav2FlacError));
+    expect(cancelled).toMatchObject({ code: 'INVALID_WAV' });
+  });
+
   it('removes its abort listeners from a long-lived signal', async () => {
     const { w } = pair();
     const signal = new AbortController().signal;

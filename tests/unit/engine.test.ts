@@ -9,6 +9,7 @@ import {
   Session,
 } from '../../ts/lib/engine.js';
 import { normalizeOptions } from '../../ts/lib/options.js';
+import { makeWav } from '../helpers/wav.js';
 
 describe('engine internals', () => {
   it('assembles header, parts and tail in one buffer', () => {
@@ -115,5 +116,34 @@ describe('engine internals', () => {
     const out = runStream(input(), normalizeOptions({}, true), { signal: ac.signal });
     await expect(out.getReader().read()).rejects.toThrow('stop');
     expect(cancelled).toHaveLength(3);
+  });
+
+  it('cancels a stream input with the error that fails a buffered run', async () => {
+    let cancelled: unknown;
+    /** An endless stream that starts with `head`, recording its cancel reason. */
+    const input = (head: Uint8Array): ReadableStream<Uint8Array> => {
+      let first = true;
+      return new ReadableStream({
+        pull(c) {
+          c.enqueue(first ? head : new Uint8Array(4096));
+          first = false;
+        },
+        cancel: (r) => void (cancelled = r),
+      });
+    };
+    const args = normalizeOptions({}, false);
+
+    const bad = runBuffered(input(new Uint8Array(4096).fill(0x55)), args, {});
+    await expect(bad).rejects.toMatchObject({ code: 'INVALID_WAV' });
+    expect(cancelled).toBe(await bad.catch((e: unknown) => e));
+
+    cancelled = undefined;
+    const boom = new Error('progress failed');
+    const wav = makeWav({ frames: 4096 });
+    const onProgress = (): void => {
+      throw boom;
+    };
+    await expect(runBuffered(input(wav), args, { onProgress })).rejects.toBe(boom);
+    expect(cancelled).toBe(boom);
   });
 });

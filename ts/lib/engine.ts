@@ -241,11 +241,14 @@ export async function runBuffered(
   }
   const rep = new Reporter(hooks.onProgress);
   const pacer = new Pacer();
+  const it = chunks(input, undefined, hooks.signal);
   try {
     const parts: Uint8Array[] = [];
-    for await (const piece of chunks(input, undefined, hooks.signal)) {
+    // Not `for await`: it would close the input with return() on a failure,
+    // which cancels a stream input without the error.
+    for (let r = await it.next(); r.done !== true; r = await it.next()) {
       hooks.signal?.throwIfAborted();
-      const out = s.push(piece);
+      const out = s.push(r.value);
       if (out.length > 0) parts.push(out);
       rep.update(s);
       await pacer.maybeYield();
@@ -255,6 +258,10 @@ export async function runBuffered(
     const { tail, header } = s.finish();
     rep.update(s, true);
     return assemble(header, parts, tail);
+  } catch (e) {
+    // Hand the failure to the input, so a stream input is cancelled with it.
+    await it.throw(e).catch(ignore);
+    throw e;
   } finally {
     s.free();
   }

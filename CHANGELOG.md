@@ -23,6 +23,9 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- When `encode()` fails partway through a stream input, for example on
+  invalid WAV data or an `onProgress` callback that throws, the input stream
+  is now cancelled with that error. It used to be cancelled with `undefined`.
 - A WAV whose odd-sized chunk lacks its pad byte and is followed by a chunk
   with an unknown id is read correctly also when that chunk's length starts
   with a printable byte (such as 32). It used to be read one byte late and
