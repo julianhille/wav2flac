@@ -1,3 +1,6 @@
 # Markdown keeps its hand-made tables and aligned comments.
 *.md
 package-lock.json
+# Other checkouts inside the main one (hidden from git by .git/info/exclude).
+/worktree-*/
+/.claude/
