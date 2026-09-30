@@ -325,7 +325,7 @@ describe('worker protocol', () => {
     expect(big.length).toBeGreaterThan(junk); // still attached: only prefixes were copied
   });
 
-  it('probes a Buffer by posting copies of its prefix, not views of it', async () => {
+  it('probes a Buffer by transferring copies of its prefix, not views of it', async () => {
     const { w, toHost } = pair();
     const big = Buffer.alloc(2 * 1024 * 1024);
     big.set(wav.subarray(0, 44));
@@ -334,8 +334,9 @@ describe('worker protocol', () => {
     await expect(w.probe(big)).resolves.toMatchObject({ channels: 2 });
     const probes = toHost.filter((m) => m.t === 'probe');
     expect(probes.length).toBeGreaterThan(0);
-    // A view would structured-clone the whole 2 MiB backing buffer.
-    for (const m of probes) expect(m.data.buffer.byteLength).toBe(m.data.byteLength);
+    // Each prefix is a copy the client owns, so it is transferred (detached
+    // here), not cloned again; a view would have cloned the whole 2 MiB.
+    for (const m of probes) expect(m.data.buffer.byteLength).toBe(0);
     expect(big.length).toBe(2 * 1024 * 1024);
   });
 

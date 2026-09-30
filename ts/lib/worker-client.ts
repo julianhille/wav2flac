@@ -409,11 +409,13 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
    * Sends a request expecting a single reply.
    * @param msg Builds the request for an id.
    * @param pick Extracts the result from the reply.
+   * @param data Bytes of the request to transfer, if it owns them.
    * @returns The result.
    */
   const request = <T>(
     msg: (id: number) => ToWorker,
     pick: (m: FromWorker) => T | undefined,
+    data?: Uint8Array,
   ): Promise<T> => {
     const id = nextId++;
     return new Promise<T>((resolve, reject) => {
@@ -430,7 +432,7 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
       // A load that failed, or a message that cannot be posted, fails it.
       ready
         .then(() => {
-          if (jobs.has(id)) post(msg(id));
+          if (jobs.has(id)) post(msg(id), data);
         })
         .catch((e: unknown) => {
           if (!jobs.has(id)) return;
@@ -520,11 +522,13 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
       // Only the header is read, so copy growing prefixes, not the whole file.
       for (let n = Math.min(PROBE_FIRST_TRY, bytes.length); ; n = Math.min(n * 4, bytes.length)) {
         // A copy, not a Buffer view that would clone the whole backing buffer.
+        // It is ours, so it is transferred rather than cloned again.
         const data = new Uint8Array(bytes.subarray(0, n));
         try {
           return await request(
             (id) => ({ t: 'probe', id, data }),
             (m) => (m.t === 'probe' ? m.info : undefined),
+            data,
           );
         } catch (e) {
           if (!(e instanceof Wav2FlacError && e.code === 'TRUNCATED' && n < bytes.length)) throw e;
