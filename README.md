@@ -7,7 +7,7 @@
 
 **Turn WAV files or raw audio samples into FLAC, in the browser or in
 Node.js.** No native modules, no ffmpeg, no server round trip. The package is
-one small WebAssembly encoder (~70 KB gzipped) plus typed JavaScript. The
+one small WebAssembly encoder (~90 KB gzipped) plus typed JavaScript. The
 encoder is a bit-exact Rust port of libFLAC 1.4.3. It runs in Chrome,
 Firefox, Safari, Node ≥ 22.12, Deno, Bun and workers.
 

@@ -52,6 +52,8 @@ links are collected at the bottom of this file.
   configured. The retry now rejects with an error asking for a new
   `Response`, unless an earlier `init()` gave a URL, path, bytes or module,
   which it then loads from as before.
+- Docs: the README gives the wasm as ~90 KB gzipped, its size since the
+  license notices are in it. It said ~70 KB.
 
 ## [1.0.0-rc.4] - 2026-09-30
 

@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { inspect } from 'node:util';
+import { gzipSync } from 'node:zlib';
 import { afterAll, describe, expect, it } from 'vitest';
 import { NOTICES_SECTION, readLeb128 } from '../../scripts/wasm-section.js';
 import { collect, makeWav } from '../helpers/wav.js';
@@ -173,6 +174,18 @@ describe('installed package', () => {
       NOTICES_SECTION,
     );
     expect(sections.map((b) => Buffer.from(b))).toEqual([notices]);
+  });
+
+  it('states the gzipped size of the wasm in the README', () => {
+    const wasm = readFileSync(join(installed, 'pkg/wav2flac.wasm'));
+    const actual = gzipSync(wasm, { level: 9 }).length / 1000;
+    const claim = /\(~(\d+) KB gzipped\)/.exec(readFileSync(join(installed, 'README.md'), 'utf8'));
+    expect(claim, 'README has a "(~NN KB gzipped)" claim').not.toBeNull();
+    const stated = Number(claim![1]);
+    expect(
+      Math.abs(actual - stated) / actual,
+      `README says ~${stated} KB, the wasm is ${actual.toFixed(1)} KB gzipped`,
+    ).toBeLessThan(0.1);
   });
 
   it('lists every component in a Markdown table, with its notices in code blocks', () => {
