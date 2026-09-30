@@ -613,6 +613,53 @@ describe('init', () => {
     await expect(again).rejects.toMatchObject({ name: 'AbortError' });
   });
 
+  it('encodeStream releases its input when cancelled while the wasm loads', async () => {
+    vi.resetModules();
+    const real = process;
+    const reads: AbortSignal[] = [];
+    vi.stubGlobal(
+      'process',
+      new Proxy(real, {
+        get: (t, k) =>
+          k === 'getBuiltinModule'
+            ? (id: string) =>
+                id === 'fs'
+                  ? {
+                      promises: {
+                        // The default file never arrives until the read is aborted.
+                        readFile: (_: URL, o: { signal: AbortSignal }) => {
+                          reads.push(o.signal);
+                          return new Promise((_, reject) =>
+                            o.signal.addEventListener('abort', () => reject(o.signal.reason)),
+                          );
+                        },
+                      },
+                    }
+                  : real.getBuiltinModule(id)
+            : Reflect.get(t, k),
+      }),
+    );
+    const api = await import('../../ts/index.js');
+    const cancels: unknown[] = [];
+    const input = (): ReadableStream<Uint8Array> =>
+      new ReadableStream<Uint8Array>({ cancel: (why) => void cancels.push(why) });
+
+    // No signal: the cancel alone releases the input and abandons the load.
+    const reason = new Error('not needed');
+    await api.encodeStream(input()).cancel(reason);
+    await vi.waitFor(() => expect(cancels).toEqual([reason]));
+    expect(reads).toHaveLength(1);
+    expect(reads[0]!.aborted).toBe(true);
+
+    // A plain init() keeps the load going; the cancelled stream still lets go.
+    void api.init();
+    const other = new Error('gone');
+    await api.encodeStream(input()).cancel(other);
+    await vi.waitFor(() => expect(cancels).toEqual([reason, other]));
+    expect(reads).toHaveLength(2);
+    expect(reads[1]!.aborted).toBe(false);
+  });
+
   it('initSync accepts bytes or a Module', async () => {
     let w = await fresh();
     w.initSync(bytes);

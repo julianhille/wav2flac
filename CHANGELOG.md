@@ -23,6 +23,10 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- Cancelling the stream that `encodeStream()` returned while the wasm is
+  still loading now cancels the input stream with the cancel reason and
+  stops waiting for the load. The input used to stay open until the load
+  finished, and forever if the download stalled.
 - When `encode()` fails partway through a stream input, for example on
   invalid WAV data or an `onProgress` callback that throws, the input stream
   is now cancelled with that error. It used to be cancelled with `undefined`.

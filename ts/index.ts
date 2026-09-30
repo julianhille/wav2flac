@@ -116,13 +116,34 @@ export function encodeStream(
   const hooks = { signal: options?.signal, onProgress: options?.onProgress };
   if (isReady()) return runStream(bytes, args, hooks);
   const { readable, writable } = new TransformStream<Bytes, Bytes>();
-  init(undefined, { signal: options?.signal })
+  // Stops waiting for the load on the caller's abort or the consumer's cancel.
+  // Always a signal: waiting without one would pin a stalled load, and with it
+  // the input, even after the consumer gave up.
+  const stop = new AbortController();
+  const signal = options?.signal;
+  const onAbort = (): void => stop.abort(signal?.reason);
+  if (signal?.aborted === true) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
+  // Cancelling the readable errors the writable with the cancel reason.
+  const writer = writable.getWriter();
+  let loading = true;
+  writer.closed.catch((reason: unknown) => {
+    if (loading) stop.abort(reason);
+  });
+  init(undefined, { signal: stop.signal })
     .then(
-      () => runStream(bytes, args, hooks).pipeTo(writable),
+      () => {
+        loading = false;
+        signal?.removeEventListener('abort', onAbort);
+        writer.releaseLock();
+        return runStream(bytes, args, hooks).pipeTo(writable);
+      },
       (e: unknown) => {
+        loading = false;
+        signal?.removeEventListener('abort', onAbort);
         // The input is never read, so release it like a failed encode would.
         if (isStream(bytes)) void bytes.cancel(e).catch(ignore);
-        return writable.abort(e);
+        return writer.abort(e);
       },
     )
     .catch(ignore);
