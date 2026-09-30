@@ -11,7 +11,11 @@ export function load(app) {
     for (const r of Object.values(context.project.reflections)) {
       for (const tag of r.comment?.blockTags ?? []) {
         if (tag.tag !== '@throws' || tag.typeAnnotation === undefined) continue;
-        const types = tag.typeAnnotation.replace(/^\{|\}$/g, '').split('|').map((t) => t.trim()).filter(Boolean);
+        const types = tag.typeAnnotation
+          .replace(/^\{|\}$/g, '')
+          .split('|')
+          .map((t) => t.trim())
+          .filter(Boolean);
         const type = types.flatMap((t, i) => [
           ...(i === 0 ? [] : [{ kind: 'text', text: i === types.length - 1 ? ' or ' : ', ' }]),
           { kind: 'code', text: `\`${t}\`` },

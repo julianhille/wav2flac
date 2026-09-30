@@ -48,7 +48,8 @@ export function isNode(): boolean {
  */
 export function builtin<T>(id: string): T {
   const get = nodeProcess()?.getBuiltinModule;
-  if (get === undefined) throw new Error(`wav2flac: Node built-in "${id}" is unavailable (needs Node ≥ 22.12)`);
+  if (get === undefined)
+    throw new Error(`wav2flac: Node built-in "${id}" is unavailable (needs Node ≥ 22.12)`);
   return get(id) as T;
 }
 
@@ -68,14 +69,25 @@ type Yielder = () => Promise<void>;
  */
 function pickYielder(): Yielder {
   const si = (globalThis as { setImmediate?: (cb: () => void) => unknown }).setImmediate;
-  if (typeof si === 'function') return () => new Promise<void>((r) => { si(r); });
+  if (typeof si === 'function')
+    return () =>
+      new Promise<void>((r) => {
+        si(r);
+      });
   if (typeof MessageChannel === 'function') {
     const ch = new MessageChannel();
     const queue: (() => void)[] = [];
     ch.port1.onmessage = () => queue.shift()?.();
-    return () => new Promise<void>((r) => { queue.push(r); ch.port2.postMessage(0); });
+    return () =>
+      new Promise<void>((r) => {
+        queue.push(r);
+        ch.port2.postMessage(0);
+      });
   }
-  return () => new Promise<void>((r) => { setTimeout(r, 0); });
+  return () =>
+    new Promise<void>((r) => {
+      setTimeout(r, 0);
+    });
 }
 
 let yielder: Yielder | undefined;

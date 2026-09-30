@@ -33,7 +33,8 @@ export const tier = readTier();
  */
 export function has(cmd: string): boolean {
   const ok = spawnSync(cmd, ['--version'], { stdio: 'ignore' }).status === 0;
-  if (!ok && requireTools) throw new Error(`required tool "${cmd}" is missing (WAV2FLAC_REQUIRE_TOOLS=1)`);
+  if (!ok && requireTools)
+    throw new Error(`required tool "${cmd}" is missing (WAV2FLAC_REQUIRE_TOOLS=1)`);
   if (!ok && !warned.has(cmd)) {
     warned.add(cmd);
     console.warn(`wav2flac tests: "${cmd}" not installed, its checks are skipped`);
@@ -65,7 +66,9 @@ function nativeProblem(): string | null {
   const built = statSync(NATIVE).mtimeMs;
   const sources = [
     ...readdirSync('src', { recursive: true, encoding: 'utf8' }).map((f) => join('src', f)),
-    'examples/encode.rs', 'Cargo.toml', 'Cargo.lock',
+    'examples/encode.rs',
+    'Cargo.toml',
+    'Cargo.lock',
   ];
   // A binary older than the sources would compare the wasm against old code.
   return sources.some((f) => statSync(f).mtimeMs > built) ? 'out of date' : null;

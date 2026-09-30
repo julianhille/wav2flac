@@ -44,4 +44,6 @@ async function run() {
   window.result = out;
 }
 
-run().catch((e) => { window.result = { error: String(e && e.stack || e) }; });
+run().catch((e) => {
+  window.result = { error: String((e && e.stack) || e) };
+});

@@ -15,29 +15,78 @@ const bad = (o: unknown): unknown => {
 describe('normalizeOptions', () => {
   it('has lossless level-5 defaults', () => {
     expect(normalizeOptions(undefined, false)).toEqual({
-      level: 5, blockSize: 0, sampleRate: 0, quality: 1, bits: 0, dither: true, seed: 0x5eedf1ac,
-      tagsEnabled: true, tagKeys: [], tagValues: [], seekPointInterval: 10, padding: 8192,
-      maxInputBytes: -1, streaming: false, pcmFormat: 0, pcmChannels: 0, pcmRate: 0, pcmTotalBytes: -1,
+      level: 5,
+      blockSize: 0,
+      sampleRate: 0,
+      quality: 1,
+      bits: 0,
+      dither: true,
+      seed: 0x5eedf1ac,
+      tagsEnabled: true,
+      tagKeys: [],
+      tagValues: [],
+      seekPointInterval: 10,
+      padding: 8192,
+      maxInputBytes: -1,
+      streaming: false,
+      pcmFormat: 0,
+      pcmChannels: 0,
+      pcmRate: 0,
+      pcmTotalBytes: -1,
     });
     expect(normalizeOptions(null, true).streaming).toBe(true);
   });
 
   it('maps every option', () => {
-    const a = normalizeOptions({
-      compressionLevel: 8, blockSize: 4096, sampleRate: 48000, resampleQuality: 'best', bitsPerSample: 16,
-      dither: 'none', ditherSeed: 7, tags: { TITLE: 't', ARTIST: '' }, seekPointInterval: 2.5, padding: 0,
-      maxInputBytes: 1000, signal: new AbortController().signal, onProgress: () => undefined, copy: true,
-    }, false);
+    const a = normalizeOptions(
+      {
+        compressionLevel: 8,
+        blockSize: 4096,
+        sampleRate: 48000,
+        resampleQuality: 'best',
+        bitsPerSample: 16,
+        dither: 'none',
+        ditherSeed: 7,
+        tags: { TITLE: 't', ARTIST: '' },
+        seekPointInterval: 2.5,
+        padding: 0,
+        maxInputBytes: 1000,
+        signal: new AbortController().signal,
+        onProgress: () => undefined,
+        copy: true,
+      },
+      false,
+    );
     expect(a).toMatchObject({
-      level: 8, blockSize: 4096, sampleRate: 48000, quality: 2, bits: 16, dither: false, seed: 7,
-      tagKeys: ['TITLE', 'ARTIST'], tagValues: ['t', ''], seekPointInterval: 2.5, padding: 0, maxInputBytes: 1000,
+      level: 8,
+      blockSize: 4096,
+      sampleRate: 48000,
+      quality: 2,
+      bits: 16,
+      dither: false,
+      seed: 7,
+      tagKeys: ['TITLE', 'ARTIST'],
+      tagValues: ['t', ''],
+      seekPointInterval: 2.5,
+      padding: 0,
+      maxInputBytes: 1000,
     });
-    expect(normalizeOptions({ resampleQuality: 'fast', tags: false }, false)).toMatchObject({ quality: 0, tagsEnabled: false });
+    expect(normalizeOptions({ resampleQuality: 'fast', tags: false }, false)).toMatchObject({
+      quality: 0,
+      tagsEnabled: false,
+    });
     expect(normalizeOptions({ pcm: { sampleRate: 16000, channels: 1 } }, false)).toMatchObject({
-      pcmFormat: -1, pcmChannels: 1, pcmRate: 16000, pcmTotalBytes: -1,
+      pcmFormat: -1,
+      pcmChannels: 1,
+      pcmRate: 16000,
+      pcmTotalBytes: -1,
     });
-    expect(normalizeOptions({ pcm: { sampleRate: 8000, channels: 2, format: 'f32' } }, false)).toMatchObject({
-      pcmFormat: 5, pcmChannels: 2, pcmRate: 8000,
+    expect(
+      normalizeOptions({ pcm: { sampleRate: 8000, channels: 2, format: 'f32' } }, false),
+    ).toMatchObject({
+      pcmFormat: 5,
+      pcmChannels: 2,
+      pcmRate: 8000,
     });
   });
 
@@ -90,18 +139,29 @@ describe('normalizeOptions', () => {
   });
 
   it('accepts the range limits and null-prototype tags', () => {
-    expect(normalizeOptions({ compressionLevel: 0, blockSize: 16, bitsPerSample: 4 }, false))
-      .toMatchObject({ level: 0, blockSize: 16, bits: 4 });
-    expect(normalizeOptions({ compressionLevel: 8, blockSize: 65535, bitsPerSample: 32 }, false))
-      .toMatchObject({ level: 8, blockSize: 65535, bits: 32 });
+    expect(
+      normalizeOptions({ compressionLevel: 0, blockSize: 16, bitsPerSample: 4 }, false),
+    ).toMatchObject({ level: 0, blockSize: 16, bits: 4 });
+    expect(
+      normalizeOptions({ compressionLevel: 8, blockSize: 65535, bitsPerSample: 32 }, false),
+    ).toMatchObject({ level: 8, blockSize: 65535, bits: 32 });
     const tags = Object.assign(Object.create(null) as Record<string, string>, { TITLE: 't' });
-    expect(normalizeOptions({ tags }, false)).toMatchObject({ tagKeys: ['TITLE'], tagValues: ['t'] });
+    expect(normalizeOptions({ tags }, false)).toMatchObject({
+      tagKeys: ['TITLE'],
+      tagValues: ['t'],
+    });
   });
 
   it('rejects null, arrays, fake signals and infinite intervals', () => {
     for (const o of [
-      { resampleQuality: null }, { dither: null }, { seekPointInterval: null }, { seekPointInterval: Infinity },
-      { signal: { aborted: false } }, { tags: ['a'] }, { pcm: [16000, 1] }, [],
+      { resampleQuality: null },
+      { dither: null },
+      { seekPointInterval: null },
+      { seekPointInterval: Infinity },
+      { signal: { aborted: false } },
+      { tags: ['a'] },
+      { pcm: [16000, 1] },
+      [],
     ]) {
       expect(bad(o), JSON.stringify(o)).toMatchObject({ code: 'INVALID_OPTIONS' });
     }
@@ -109,7 +169,9 @@ describe('normalizeOptions', () => {
 
   it('accepts signals and plain objects from another realm', async () => {
     const { runInNewContext } = await import('node:vm');
-    const o = runInNewContext('({ tags: { TITLE: "x" }, pcm: { sampleRate: 8000, channels: 1 } })') as Options;
+    const o = runInNewContext(
+      '({ tags: { TITLE: "x" }, pcm: { sampleRate: 8000, channels: 1 } })',
+    ) as Options;
     expect(normalizeOptions(o, false)).toMatchObject({ tagKeys: ['TITLE'], pcmRate: 8000 });
     expect(bad({ signal: AbortSignal.timeout(1000) })).toBeUndefined();
   });

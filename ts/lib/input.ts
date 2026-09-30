@@ -76,7 +76,9 @@ export function isDetached(x: unknown): boolean {
  * @returns `true` for readable streams.
  */
 export function isStream(x: unknown): x is ReadableStream<Uint8Array> {
-  return typeof x === 'object' && x !== null && typeof (x as ReadableStream).getReader === 'function';
+  return (
+    typeof x === 'object' && x !== null && typeof (x as ReadableStream).getReader === 'function'
+  );
 }
 
 /**
@@ -88,13 +90,23 @@ export function isStream(x: unknown): x is ReadableStream<Uint8Array> {
  * @returns A view of the bytes.
  * @throws {TypeError} For any other type.
  */
-export function toBytes(input: unknown, what = 'input', accepted = 'a Uint8Array, ArrayBuffer or ReadableStream<Uint8Array>'): Uint8Array {
+export function toBytes(
+  input: unknown,
+  what = 'input',
+  accepted = 'a Uint8Array, ArrayBuffer or ReadableStream<Uint8Array>',
+): Uint8Array {
   if (isDetached(input)) {
-    throw new TypeError(`wav2flac: ${what} was transferred (detached) by an earlier worker call; pass \`copy: true\` to keep it`);
+    throw new TypeError(
+      `wav2flac: ${what} was transferred (detached) by an earlier worker call; pass \`copy: true\` to keep it`,
+    );
   }
   if (input instanceof Uint8Array) return input;
   if (isBuffer(input)) return new Uint8Array(input);
-  if (ArrayBuffer.isView(input) && typeTag(input) !== 'DataView' && (input as Uint8Array).BYTES_PER_ELEMENT === 1) {
+  if (
+    ArrayBuffer.isView(input) &&
+    typeTag(input) !== 'DataView' &&
+    (input as Uint8Array).BYTES_PER_ELEMENT === 1
+  ) {
     return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
   }
   throw new TypeError(`wav2flac: ${what} must be ${accepted}`);
@@ -122,7 +134,11 @@ export function* slices(bytes: Uint8Array, size = SLICE_BYTES): Generator<Uint8A
  * @yields Byte slices of at most `size` bytes.
  * @throws {TypeError} For unsupported inputs or non-byte stream chunks.
  */
-export async function* chunks(input: Input, size = ASYNC_SLICE_BYTES, signal?: AbortSignal): AsyncGenerator<Uint8Array> {
+export async function* chunks(
+  input: Input,
+  size = ASYNC_SLICE_BYTES,
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array> {
   if (!isStream(input)) {
     yield* slices(toBytes(input), size);
     return;
@@ -188,7 +204,9 @@ function interleave(planes: readonly PcmSamples[]): PcmSamples {
   const ch = planes.length;
   for (const p of planes) {
     if (p.constructor !== ctor || impliedFormat(p) === undefined) {
-      throw invalidOption('planar pcm arrays must all be Int16Array, Int32Array or Float32Array of one type');
+      throw invalidOption(
+        'planar pcm arrays must all be Int16Array, Int32Array or Float32Array of one type',
+      );
     }
     if (p.length !== n) throw invalidOption('planar pcm arrays must have equal lengths');
   }
@@ -213,7 +231,9 @@ function interleave(planes: readonly PcmSamples[]): PcmSamples {
  */
 function pcmBytes(x: unknown, format: PcmSampleFormat, what: string): Uint8Array {
   if (isDetached(x)) {
-    throw new TypeError(`wav2flac: ${what} was transferred (detached) by an earlier worker call; pass \`copy: true\` to keep it`);
+    throw new TypeError(
+      `wav2flac: ${what} was transferred (detached) by an earlier worker call; pass \`copy: true\` to keep it`,
+    );
   }
   const implied = impliedFormat(x);
   if (implied !== undefined && implied !== format) {
@@ -222,7 +242,9 @@ function pcmBytes(x: unknown, format: PcmSampleFormat, what: string): Uint8Array
   const tag = typeTag(x);
   if (implied === undefined && tag !== 'Uint8Array' && tag !== 'DataView' && !isBuffer(x)) {
     if (ArrayBuffer.isView(x)) {
-      throw invalidOption(`${what} must be Int16Array, Int32Array, Float32Array, Uint8Array or ArrayBuffer`);
+      throw invalidOption(
+        `${what} must be Int16Array, Int32Array, Float32Array, Uint8Array or ArrayBuffer`,
+      );
     }
     throw new TypeError(`wav2flac: ${what} must be a typed array or ArrayBuffer`);
   }
@@ -238,31 +260,37 @@ function pcmBytes(x: unknown, format: PcmSampleFormat, what: string): Uint8Array
  * @param format The sample format.
  * @returns A byte stream; cancelling it cancels the source.
  */
-function byteStream(source: ReadableStream<unknown>, format: PcmSampleFormat): ReadableStream<Uint8Array> {
+function byteStream(
+  source: ReadableStream<unknown>,
+  format: PcmSampleFormat,
+): ReadableStream<Uint8Array> {
   let reader: ReadableStreamDefaultReader<unknown> | undefined;
-  return new ReadableStream<Uint8Array>({
-    async pull(c) {
-      reader ??= source.getReader();
-      const r = await reader.read();
-      if (r.done) {
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(c) {
+        reader ??= source.getReader();
+        const r = await reader.read();
+        if (r.done) {
+          reader.releaseLock();
+          c.close();
+          return;
+        }
+        try {
+          c.enqueue(pcmBytes(r.value, format, 'stream chunk'));
+        } catch (e) {
+          await reader.cancel(e).catch(ignore);
+          reader.releaseLock();
+          throw e;
+        }
+      },
+      async cancel(reason) {
+        if (reader === undefined) return source.cancel(reason);
+        await reader.cancel(reason);
         reader.releaseLock();
-        c.close();
-        return;
-      }
-      try {
-        c.enqueue(pcmBytes(r.value, format, 'stream chunk'));
-      } catch (e) {
-        await reader.cancel(e).catch(ignore);
-        reader.releaseLock();
-        throw e;
-      }
+      },
     },
-    async cancel(reason) {
-      if (reader === undefined) return source.cancel(reason);
-      await reader.cancel(reason);
-      reader.releaseLock();
-    },
-  }, { highWaterMark: 0 });
+    { highWaterMark: 0 },
+  );
 }
 
 /**
@@ -284,30 +312,43 @@ export function preparePcm(input: unknown, args: EncoderArgs): { input: Input; a
     }
     format ??= implied;
     if (format === undefined) {
-      throw invalidOption(`pcm.format is required for ${what}; it is only inferred from Int16Array, Int32Array and Float32Array`);
+      throw invalidOption(
+        `pcm.format is required for ${what}; it is only inferred from Int16Array, Int32Array and Float32Array`,
+      );
     }
     return PCM_FORMATS.indexOf(format) + 1;
   };
   if (isStream(input)) {
     const pcmFormat = resolve(undefined, 'streams');
-    return { input: byteStream(input, format as PcmSampleFormat), args: { ...args, pcmFormat, pcmTotalBytes: -1 } };
+    return {
+      input: byteStream(input, format as PcmSampleFormat),
+      args: { ...args, pcmFormat, pcmTotalBytes: -1 },
+    };
   }
   let samples: unknown = input;
   if (isDetached(input) || (Array.isArray(input) && input.some(isDetached))) {
-    throw new TypeError('wav2flac: pcm input was transferred (detached) by an earlier worker call; pass `copy: true` to keep it');
+    throw new TypeError(
+      'wav2flac: pcm input was transferred (detached) by an earlier worker call; pass `copy: true` to keep it',
+    );
   }
   if (Array.isArray(input)) {
     if (input.length !== args.pcmChannels) {
-      throw invalidOption(`planar pcm input has ${input.length} arrays for ${args.pcmChannels} channels`);
+      throw invalidOption(
+        `planar pcm input has ${input.length} arrays for ${args.pcmChannels} channels`,
+      );
     }
     samples = interleave(input as readonly PcmSamples[]);
   }
   if (!(ArrayBuffer.isView(samples) && typeTag(samples) !== 'DataView') && !isBuffer(samples)) {
-    throw new TypeError('wav2flac: pcm input must be a typed array, an array of them, an ArrayBuffer or a ReadableStream');
+    throw new TypeError(
+      'wav2flac: pcm input must be a typed array, an array of them, an ArrayBuffer or a ReadableStream',
+    );
   }
   const implied = impliedFormat(samples);
   if (implied === undefined && typeTag(samples) !== 'Uint8Array' && !isBuffer(samples)) {
-    throw invalidOption('pcm input must be Int16Array, Int32Array, Float32Array, Uint8Array or ArrayBuffer');
+    throw invalidOption(
+      'pcm input must be Int16Array, Int32Array, Float32Array, Uint8Array or ArrayBuffer',
+    );
   }
   const pcmFormat = resolve(implied, implied === undefined ? 'byte input' : typeTag(samples));
   const bytes = pcmBytes(samples, format as PcmSampleFormat, 'pcm input');

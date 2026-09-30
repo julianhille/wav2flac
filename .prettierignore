@@ -1,0 +1,3 @@
+# Markdown keeps its hand-made tables and aligned comments.
+*.md
+package-lock.json

@@ -17,8 +17,15 @@ export type ErrorCode =
   | 'INTERNAL';
 
 const CODES: ReadonlySet<string> = new Set<ErrorCode>([
-  'INVALID_WAV', 'UNSUPPORTED_FORMAT', 'UNSUPPORTED_BIT_DEPTH', 'TOO_MANY_CHANNELS',
-  'TRUNCATED', 'INVALID_OPTIONS', 'ENCODER_STATE', 'LIMIT_EXCEEDED', 'INTERNAL',
+  'INVALID_WAV',
+  'UNSUPPORTED_FORMAT',
+  'UNSUPPORTED_BIT_DEPTH',
+  'TOO_MANY_CHANNELS',
+  'TRUNCATED',
+  'INVALID_OPTIONS',
+  'ENCODER_STATE',
+  'LIMIT_EXCEEDED',
+  'INTERNAL',
 ]);
 
 /**
@@ -118,7 +125,8 @@ export function serializeError(e: unknown): SerializedError {
  * @internal
  */
 export function reviveError(e: SerializedError): Error {
-  if (e.name === 'Wav2FlacError' && isErrorCode(e.code)) return new Wav2FlacError(e.code, e.message);
+  if (e.name === 'Wav2FlacError' && isErrorCode(e.code))
+    return new Wav2FlacError(e.code, e.message);
   if (e.name === 'AbortError' || e.name === 'TimeoutError') return abortError(e.message, e.name);
   const err = e.name === 'TypeError' ? new TypeError(e.message) : new Error(e.message);
   return err;

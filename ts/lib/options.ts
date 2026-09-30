@@ -140,8 +140,20 @@ export interface EncoderArgs {
 export const PCM_FORMATS: readonly PcmSampleFormat[] = ['u8', 's16', 's24', 's32', 'f32'];
 
 const KNOWN: ReadonlySet<string> = new Set<keyof Options>([
-  'compressionLevel', 'blockSize', 'sampleRate', 'resampleQuality', 'bitsPerSample', 'dither',
-  'ditherSeed', 'tags', 'seekPointInterval', 'padding', 'maxInputBytes', 'signal', 'onProgress', 'copy',
+  'compressionLevel',
+  'blockSize',
+  'sampleRate',
+  'resampleQuality',
+  'bitsPerSample',
+  'dither',
+  'ditherSeed',
+  'tags',
+  'seekPointInterval',
+  'padding',
+  'maxInputBytes',
+  'signal',
+  'onProgress',
+  'copy',
   'pcm',
 ]);
 
@@ -157,7 +169,13 @@ const QUALITY: Readonly<Record<ResampleQuality, number>> = { fast: 0, balanced: 
  * accepted from the user, the default covers it).
  * @returns The value.
  */
-function uint(o: Record<string, unknown>, key: string, dflt: number, max = 2 ** 32 - 1, min = 0): number {
+function uint(
+  o: Record<string, unknown>,
+  key: string,
+  dflt: number,
+  max = 2 ** 32 - 1,
+  min = 0,
+): number {
   const v = o[key];
   if (v === undefined) return dflt;
   if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) {
@@ -176,8 +194,11 @@ function uint(o: Record<string, unknown>, key: string, dflt: number, max = 2 ** 
 export function isSignal(s: unknown): boolean {
   if (typeof s !== 'object' || s === null || !('aborted' in s)) return false;
   const o = s as Record<string, unknown>;
-  return typeof o['addEventListener'] === 'function' && typeof o['removeEventListener'] === 'function'
-    && typeof o['throwIfAborted'] === 'function';
+  return (
+    typeof o['addEventListener'] === 'function' &&
+    typeof o['removeEventListener'] === 'function' &&
+    typeof o['throwIfAborted'] === 'function'
+  );
 }
 
 /**
@@ -188,9 +209,13 @@ export function isSignal(s: unknown): boolean {
  * @throws {Wav2FlacError} `INVALID_OPTIONS` for unknown or wrongly typed options.
  * @internal
  */
-export function normalizeOptions(opts: Options | undefined | null, streaming: boolean): EncoderArgs {
+export function normalizeOptions(
+  opts: Options | undefined | null,
+  streaming: boolean,
+): EncoderArgs {
   if (opts === undefined || opts === null) opts = {};
-  if (typeof opts !== 'object' || !isPlainObject(opts)) throw invalidOption('options must be an object');
+  if (typeof opts !== 'object' || !isPlainObject(opts))
+    throw invalidOption('options must be an object');
   const o = opts as Record<string, unknown>;
   for (const k of Object.keys(o)) {
     if (!KNOWN.has(k)) throw invalidOption(`unknown option "${k}"`);
@@ -200,7 +225,8 @@ export function normalizeOptions(opts: Options | undefined | null, streaming: bo
     throw invalidOption('resampleQuality must be "fast", "balanced" or "best"');
   }
   const dither = o['dither'] === undefined ? 'tpdf' : o['dither'];
-  if (dither !== 'tpdf' && dither !== 'none') throw invalidOption('dither must be "tpdf" or "none"');
+  if (dither !== 'tpdf' && dither !== 'none')
+    throw invalidOption('dither must be "tpdf" or "none"');
   const tagKeys: string[] = [];
   const tagValues: string[] = [];
   const tags = o['tags'] === undefined ? {} : o['tags'];
@@ -225,7 +251,8 @@ export function normalizeOptions(opts: Options | undefined | null, streaming: bo
   if (o['onProgress'] !== undefined && typeof o['onProgress'] !== 'function') {
     throw invalidOption('onProgress must be a function');
   }
-  if (o['copy'] !== undefined && typeof o['copy'] !== 'boolean') throw invalidOption('copy must be a boolean');
+  if (o['copy'] !== undefined && typeof o['copy'] !== 'boolean')
+    throw invalidOption('copy must be a boolean');
   const pcm = normalizePcm(o['pcm']);
   return {
     level: uint(o, 'compressionLevel', 5, 8),
@@ -252,12 +279,16 @@ export function normalizeOptions(opts: Options | undefined | null, streaming: bo
  * @returns The PCM constructor arguments (all zero for WAV input).
  * @throws {Wav2FlacError} `INVALID_OPTIONS` for a malformed `pcm` object.
  */
-function normalizePcm(v: unknown): Pick<EncoderArgs, 'pcmFormat' | 'pcmChannels' | 'pcmRate' | 'pcmTotalBytes'> {
+function normalizePcm(
+  v: unknown,
+): Pick<EncoderArgs, 'pcmFormat' | 'pcmChannels' | 'pcmRate' | 'pcmTotalBytes'> {
   if (v === undefined) return { pcmFormat: 0, pcmChannels: 0, pcmRate: 0, pcmTotalBytes: -1 };
-  if (typeof v !== 'object' || v === null || !isPlainObject(v)) throw invalidOption('pcm must be a plain object');
+  if (typeof v !== 'object' || v === null || !isPlainObject(v))
+    throw invalidOption('pcm must be a plain object');
   const p = v as Record<string, unknown>;
   for (const k of Object.keys(p)) {
-    if (k !== 'sampleRate' && k !== 'channels' && k !== 'format') throw invalidOption(`unknown pcm option "${k}"`);
+    if (k !== 'sampleRate' && k !== 'channels' && k !== 'format')
+      throw invalidOption(`unknown pcm option "${k}"`);
   }
   for (const k of ['sampleRate', 'channels']) {
     const n = p[k];
@@ -271,5 +302,10 @@ function normalizePcm(v: unknown): Pick<EncoderArgs, 'pcmFormat' | 'pcmChannels'
     pcmFormat = PCM_FORMATS.indexOf(f as PcmSampleFormat) + 1;
     if (pcmFormat === 0) throw invalidOption(`pcm.format must be one of ${PCM_FORMATS.join(', ')}`);
   }
-  return { pcmFormat, pcmChannels: p['channels'] as number, pcmRate: p['sampleRate'] as number, pcmTotalBytes: -1 };
+  return {
+    pcmFormat,
+    pcmChannels: p['channels'] as number,
+    pcmRate: p['sampleRate'] as number,
+    pcmTotalBytes: -1,
+  };
 }

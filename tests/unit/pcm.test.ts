@@ -8,7 +8,15 @@ import { runInNewContext } from 'node:vm';
 import fc from 'fast-check';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  encode, encodeStream, encodeSync, init, Wav2FlacError, wasmMemoryBytes, type Options, type PcmSampleFormat, type Progress,
+  encode,
+  encodeStream,
+  encodeSync,
+  init,
+  Wav2FlacError,
+  wasmMemoryBytes,
+  type Options,
+  type PcmSampleFormat,
+  type Progress,
 } from '../../ts/index.js';
 import type { FromWorker, Port, ToWorker } from '../../ts/lib/protocol.js';
 import { connect, type WorkerEncoder } from '../../ts/lib/worker-client.js';
@@ -31,13 +39,24 @@ const WIDTH: Record<PcmSampleFormat, number> = { u8: 1, s16: 2, s24: 3, s32: 4, 
  * @param rate Sample rate.
  * @returns The WAV file.
  */
-function wavOf(raw: Uint8Array, format: PcmSampleFormat, channels: number, rate: number): Uint8Array {
+function wavOf(
+  raw: Uint8Array,
+  format: PcmSampleFormat,
+  channels: number,
+  rate: number,
+): Uint8Array {
   const w = WIDTH[format];
   const out = new Uint8Array(44 + raw.length + (raw.length & 1));
   const v = new DataView(out.buffer);
-  out.set([...'RIFF'].map((c) => c.charCodeAt(0)), 0);
+  out.set(
+    [...'RIFF'].map((c) => c.charCodeAt(0)),
+    0,
+  );
   v.setUint32(4, out.length - 8, true);
-  out.set([...'WAVEfmt '].map((c) => c.charCodeAt(0)), 8);
+  out.set(
+    [...'WAVEfmt '].map((c) => c.charCodeAt(0)),
+    8,
+  );
   v.setUint32(16, 16, true);
   v.setUint16(20, format === 'f32' ? 3 : 1, true);
   v.setUint16(22, channels, true);
@@ -45,7 +64,10 @@ function wavOf(raw: Uint8Array, format: PcmSampleFormat, channels: number, rate:
   v.setUint32(28, rate * channels * w, true);
   v.setUint16(32, channels * w, true);
   v.setUint16(34, w * 8, true);
-  out.set([...'data'].map((c) => c.charCodeAt(0)), 36);
+  out.set(
+    [...'data'].map((c) => c.charCodeAt(0)),
+    36,
+  );
   v.setUint32(40, raw.length, true);
   out.set(raw, 44);
   return out;
@@ -78,7 +100,12 @@ function noise(format: PcmSampleFormat, samples: number, seed: number): Uint8Arr
  * @param explicit Whether to pass `format` explicitly.
  * @returns Encoder options.
  */
-function pcmOpts(format: PcmSampleFormat, channels: number, rate: number, explicit = true): Options {
+function pcmOpts(
+  format: PcmSampleFormat,
+  channels: number,
+  rate: number,
+  explicit = true,
+): Options {
   return {
     pcm: explicit ? { sampleRate: rate, channels, format } : { sampleRate: rate, channels },
     ...(format === 'f32' ? { bitsPerSample: 24 } : {}),
@@ -118,7 +145,10 @@ async function codeOf(f: () => unknown): Promise<string> {
 function wrap<I, O>(p: MessagePort): Port<I, O> {
   return {
     post: (m, t) => p.postMessage(m, t as never),
-    listen: (on, onErr) => { p.on('message', on); p.on('messageerror', onErr); },
+    listen: (on, onErr) => {
+      p.on('message', on);
+      p.on('messageerror', onErr);
+    },
     ref: (k) => (k ? p.ref() : p.unref()),
     close: () => p.close(),
   };
@@ -156,7 +186,11 @@ describe('pcm input equals the WAV-wrapped input', () => {
   });
 
   it('infers the format from Int16Array, Int32Array and Float32Array, including offset views', () => {
-    const cases = [['s16', Int16Array], ['s32', Int32Array], ['f32', Float32Array]] as const;
+    const cases = [
+      ['s16', Int16Array],
+      ['s32', Int32Array],
+      ['f32', Float32Array],
+    ] as const;
     for (const [format, Ctor] of cases) {
       const raw = noise(format, 3000, 9);
       const ref = refOf(wavOf(raw, format, 2, 48000), pcmOpts(format, 2, 48000));
@@ -167,7 +201,9 @@ describe('pcm input equals the WAV-wrapped input', () => {
       big.set(typed, 4);
       expect(encodeSync(big.subarray(4), pcmOpts(format, 2, 48000, false))).toEqual(ref);
       // Typed arrays from another realm (iframe, vm context) infer the same.
-      const foreign = runInNewContext(`new ${Ctor.name}(b)`, { b: raw.slice().buffer }) as typeof typed;
+      const foreign = runInNewContext(`new ${Ctor.name}(b)`, {
+        b: raw.slice().buffer,
+      }) as typeof typed;
       expect(foreign instanceof Ctor).toBe(false);
       expect(encodeSync(foreign, pcmOpts(format, 2, 48000, false))).toEqual(ref);
     }
@@ -207,7 +243,10 @@ describe('pcm input equals the WAV-wrapped input', () => {
   it('accepts streams of byte, DataView, ArrayBuffer and matching typed-array chunks', async () => {
     const f = new Float32Array(noise('f32', 4000, 4).buffer);
     const ref = encodeSync(f, pcmOpts('f32', 1, 16000, false));
-    const chunks: (ArrayBufferView | ArrayBuffer)[] = [f.subarray(0, 1000), new Uint8Array(f.buffer, 4000, 3)];
+    const chunks: (ArrayBufferView | ArrayBuffer)[] = [
+      f.subarray(0, 1000),
+      new Uint8Array(f.buffer, 4000, 3),
+    ];
     chunks.push(new DataView(f.buffer, 4003, 5), f.slice(1002).buffer);
     const s = new ReadableStream<ArrayBufferView | ArrayBuffer>({
       pull(c) {
@@ -220,13 +259,14 @@ describe('pcm input equals the WAV-wrapped input', () => {
   });
 
   it('checks stream chunks against the format and unlocks the source', async () => {
-    const src = (chunks: unknown[]): ReadableStream<unknown> => new ReadableStream({
-      pull(c) {
-        const x = chunks.shift();
-        if (x === undefined) c.close();
-        else c.enqueue(x);
-      },
-    });
+    const src = (chunks: unknown[]): ReadableStream<unknown> =>
+      new ReadableStream({
+        pull(c) {
+          const x = chunks.shift();
+          if (x === undefined) c.close();
+          else c.enqueue(x);
+        },
+      });
     const ok = src([new Int16Array(8)]);
     await encode(ok as never, pcmOpts('s16', 1, 8000));
     expect(ok.locked).toBe(false);
@@ -250,9 +290,13 @@ describe('pcm input equals the WAV-wrapped input', () => {
     let cancelled: unknown;
     const src = new ReadableStream<Int16Array>({
       pull: (c) => c.enqueue(s),
-      cancel: (why) => { cancelled = why; },
+      cancel: (why) => {
+        cancelled = why;
+      },
     });
-    await expect(encode(src, pcmOpts('s16', 1, 8000))).rejects.toThrow(/stream chunk was transferred/);
+    await expect(encode(src, pcmOpts('s16', 1, 8000))).rejects.toThrow(
+      /stream chunk was transferred/,
+    );
     expect(cancelled).toBeInstanceOf(TypeError);
   });
 
@@ -281,16 +325,24 @@ describe('pcm input equals the WAV-wrapped input', () => {
   });
 
   it('property: random spec, samples and chunking match the WAV path', async () => {
-    await fc.assert(fc.asyncProperty(
-      fc.constantFrom(...FORMATS), fc.integer({ min: 1, max: 8 }), fc.constantFrom(8000, 16000, 44100, 96000),
-      fc.integer({ min: 0, max: 5000 }), fc.integer(), fc.integer({ min: 1, max: 5000 }), fc.boolean(),
-      async (format, ch, rate, frames, seed, chunk, streamIn) => {
-        const raw = noise(format, frames * ch, seed);
-        const opts = pcmOpts(format, ch, rate);
-        const ref = refOf(wavOf(raw, format, ch, rate), opts);
-        expect(await encode(streamIn ? streamOf(raw, chunk) : raw, opts)).toEqual(ref);
-      },
-    ), params(20));
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom(...FORMATS),
+        fc.integer({ min: 1, max: 8 }),
+        fc.constantFrom(8000, 16000, 44100, 96000),
+        fc.integer({ min: 0, max: 5000 }),
+        fc.integer(),
+        fc.integer({ min: 1, max: 5000 }),
+        fc.boolean(),
+        async (format, ch, rate, frames, seed, chunk, streamIn) => {
+          const raw = noise(format, frames * ch, seed);
+          const opts = pcmOpts(format, ch, rate);
+          const ref = refOf(wavOf(raw, format, ch, rate), opts);
+          expect(await encode(streamIn ? streamOf(raw, chunk) : raw, opts)).toEqual(ref);
+        },
+      ),
+      params(20),
+    );
   });
 });
 
@@ -299,9 +351,16 @@ describe('pcm semantics', () => {
     const want = new Int16Array(16000 * 5);
     for (let i = 0; i < want.length; i++) want[i] = Math.round(12000 * Math.sin(i / 7)) + (i % 3);
     const f = Float32Array.from(want, (v) => v / 32768);
-    const flac = encodeSync(f, { pcm: { sampleRate: 16000, channels: 1 }, bitsPerSample: 16, dither: 'none' });
-    const d = spawnSync('flac', ['-d', '-s', '-c', '--force-raw-format', '--endian=little', '--sign=signed', '-'],
-      { input: flac });
+    const flac = encodeSync(f, {
+      pcm: { sampleRate: 16000, channels: 1 },
+      bitsPerSample: 16,
+      dither: 'none',
+    });
+    const d = spawnSync(
+      'flac',
+      ['-d', '-s', '-c', '--force-raw-format', '--endian=little', '--sign=signed', '-'],
+      { input: flac },
+    );
     expect(d.status).toBe(0);
     expect(new Int16Array(d.stdout.buffer, d.stdout.byteOffset, d.stdout.length / 2)).toEqual(want);
   });
@@ -312,7 +371,10 @@ describe('pcm semantics', () => {
     await encode(raw, { ...pcmOpts('s16', 1, 16000), onProgress: (p) => seen.push(p) });
     expect(seen.at(-1)?.fraction).toBe(1);
     const streamed: Progress[] = [];
-    await encode(streamOf(raw, 65536), { ...pcmOpts('s16', 1, 16000), onProgress: (p) => streamed.push(p) });
+    await encode(streamOf(raw, 65536), {
+      ...pcmOpts('s16', 1, 16000),
+      onProgress: (p) => streamed.push(p),
+    });
     expect(streamed.length).toBeGreaterThan(0);
     expect(streamed.every((p) => p.fraction === null)).toBe(true);
     expect(streamed.at(-1)?.samplesOut).toBe(200_000);
@@ -322,30 +384,86 @@ describe('pcm semantics', () => {
 describe('pcm errors', () => {
   const s16 = new Int16Array(100);
   const mono = (format?: PcmSampleFormat): Options => ({
-    pcm: format === undefined ? { sampleRate: 16000, channels: 1 } : { sampleRate: 16000, channels: 1, format },
+    pcm:
+      format === undefined
+        ? { sampleRate: 16000, channels: 1 }
+        : { sampleRate: 16000, channels: 1, format },
   });
 
   it.each<[string, () => unknown, string]>([
     ['typed array contradicts format', () => encodeSync(s16, mono('s24')), 'INVALID_OPTIONS'],
     ['bytes without format', () => encodeSync(new Uint8Array(4), mono()), 'INVALID_OPTIONS'],
     ['ArrayBuffer without format', () => encodeSync(new ArrayBuffer(4), mono()), 'INVALID_OPTIONS'],
-    ['stream without format', () => encode(streamOf(new Uint8Array(4), 1), mono()), 'INVALID_OPTIONS'],
-    ['unsupported typed array', () => encodeSync(new Uint16Array(4) as never, mono('s16')), 'INVALID_OPTIONS'],
-    ['DataView', () => encodeSync(new DataView(new ArrayBuffer(4)) as never, mono('s16')), 'TypeError'],
+    [
+      'stream without format',
+      () => encode(streamOf(new Uint8Array(4), 1), mono()),
+      'INVALID_OPTIONS',
+    ],
+    [
+      'unsupported typed array',
+      () => encodeSync(new Uint16Array(4) as never, mono('s16')),
+      'INVALID_OPTIONS',
+    ],
+    [
+      'DataView',
+      () => encodeSync(new DataView(new ArrayBuffer(4)) as never, mono('s16')),
+      'TypeError',
+    ],
     ['string', () => encodeSync('abc' as never, mono('s16')), 'TypeError'],
     ['planar count ≠ channels', () => encodeSync([s16, s16], mono()), 'INVALID_OPTIONS'],
-    ['planar unequal lengths', () =>
-      encodeSync([s16, new Int16Array(3)], { pcm: { sampleRate: 8000, channels: 2 } }), 'INVALID_OPTIONS'],
-    ['planar mixed types', () =>
-      encodeSync([s16, new Float32Array(100)] as never, { pcm: { sampleRate: 8000, channels: 2 } }), 'INVALID_OPTIONS'],
-    ['planar numbers', () => encodeSync([[1], [2]] as never, { pcm: { sampleRate: 8000, channels: 2 } }), 'INVALID_OPTIONS'],
-    ['empty planar', () => encodeSync([], { pcm: { sampleRate: 8000, channels: 0 } } as never), 'INVALID_OPTIONS'],
+    [
+      'planar unequal lengths',
+      () => encodeSync([s16, new Int16Array(3)], { pcm: { sampleRate: 8000, channels: 2 } }),
+      'INVALID_OPTIONS',
+    ],
+    [
+      'planar mixed types',
+      () =>
+        encodeSync([s16, new Float32Array(100)] as never, {
+          pcm: { sampleRate: 8000, channels: 2 },
+        }),
+      'INVALID_OPTIONS',
+    ],
+    [
+      'planar numbers',
+      () => encodeSync([[1], [2]] as never, { pcm: { sampleRate: 8000, channels: 2 } }),
+      'INVALID_OPTIONS',
+    ],
+    [
+      'empty planar',
+      () => encodeSync([], { pcm: { sampleRate: 8000, channels: 0 } } as never),
+      'INVALID_OPTIONS',
+    ],
     ['partial frame (buffer)', () => encodeSync(new Uint8Array(3), mono('s16')), 'INVALID_OPTIONS'],
-    ['partial frame (stream)', () => encode(streamOf(new Uint8Array(3), 1), mono('s16')), 'TRUNCATED'],
-    ['9 channels', () => encodeSync(new Int16Array(900), { pcm: { sampleRate: 8000, channels: 9 } }), 'TOO_MANY_CHANNELS'],
-    ['rate above FLAC max', () => encodeSync(s16, { pcm: { sampleRate: 2_000_000, channels: 1 } }), 'INVALID_OPTIONS'],
-    ['stream of non-bytes', () => encode(new ReadableStream({ start(c) { c.enqueue('x' as never); c.close(); } }),
-      mono('s16')), 'TypeError'],
+    [
+      'partial frame (stream)',
+      () => encode(streamOf(new Uint8Array(3), 1), mono('s16')),
+      'TRUNCATED',
+    ],
+    [
+      '9 channels',
+      () => encodeSync(new Int16Array(900), { pcm: { sampleRate: 8000, channels: 9 } }),
+      'TOO_MANY_CHANNELS',
+    ],
+    [
+      'rate above FLAC max',
+      () => encodeSync(s16, { pcm: { sampleRate: 2_000_000, channels: 1 } }),
+      'INVALID_OPTIONS',
+    ],
+    [
+      'stream of non-bytes',
+      () =>
+        encode(
+          new ReadableStream({
+            start(c) {
+              c.enqueue('x' as never);
+              c.close();
+            },
+          }),
+          mono('s16'),
+        ),
+      'TypeError',
+    ],
     ['typed array without pcm', () => encodeSync(s16 as never), 'TypeError'],
   ])('%s', async (_name, f, code) => {
     expect(await codeOf(f)).toBe(code);
@@ -367,10 +485,20 @@ describe('pcm errors', () => {
 
   it('cancels a PCM stream on bad chunks and when the output is cancelled', async () => {
     let cancelled: unknown;
-    const src = (chunks: unknown[]): ReadableStream<unknown> => new ReadableStream<unknown>({
-      pull(c) { const v = chunks.shift(); if (v === undefined) return; c.enqueue(v); },
-      cancel(r) { cancelled = r; },
-    }, { highWaterMark: 0 });
+    const src = (chunks: unknown[]): ReadableStream<unknown> =>
+      new ReadableStream<unknown>(
+        {
+          pull(c) {
+            const v = chunks.shift();
+            if (v === undefined) return;
+            c.enqueue(v);
+          },
+          cancel(r) {
+            cancelled = r;
+          },
+        },
+        { highWaterMark: 0 },
+      );
     const opts = { pcm: { sampleRate: 8000, channels: 1, format: 's16' as const } };
     await expect(encode(src([new Int16Array(4), 'x']) as never, opts)).rejects.toThrow(TypeError);
     expect(cancelled).toBeInstanceOf(TypeError);
@@ -389,14 +517,17 @@ describe('pcm errors', () => {
   it('rejects on the worker path too', async () => {
     const w = worker();
     expect(await codeOf(() => w.encode(new Uint8Array(4), mono()))).toBe('INVALID_OPTIONS');
-    expect(await codeOf(() => w.encode(streamOf(new Uint8Array(3), 1), mono('s16')))).toBe('TRUNCATED');
+    expect(await codeOf(() => w.encode(streamOf(new Uint8Array(3), 1), mono('s16')))).toBe(
+      'TRUNCATED',
+    );
   });
 });
 
 describe('pcm aborts', () => {
   const raw = new Int16Array(200_000).map((_, i) => (i * 37) & 0x7fff);
   const opts = (signal?: AbortSignal): Options => ({
-    pcm: { sampleRate: 16000, channels: 1, format: 's16' }, ...(signal && { signal }),
+    pcm: { sampleRate: 16000, channels: 1, format: 's16' },
+    ...(signal && { signal }),
   });
   const stream = (): ReadableStream<Uint8Array> => streamOf(new Uint8Array(raw.buffer), 4096);
   const reason = new Error('stop');
@@ -429,8 +560,9 @@ describe('pcm aborts', () => {
       });
     };
     const ac = new AbortController();
-    await expect(encode(tracked(), { ...opts(ac.signal), onProgress: () => ac.abort(reason) }))
-      .rejects.toBe(reason);
+    await expect(
+      encode(tracked(), { ...opts(ac.signal), onProgress: () => ac.abort(reason) }),
+    ).rejects.toBe(reason);
     expect(cancelled).toBe(reason);
     expect(liveSessions()).toBe(0);
 
@@ -443,8 +575,9 @@ describe('pcm aborts', () => {
 
     const w = worker();
     const ac3 = new AbortController();
-    await expect(w.encode(stream(), { ...opts(ac3.signal), onProgress: () => ac3.abort(reason) }))
-      .rejects.toBe(reason);
+    await expect(
+      w.encode(stream(), { ...opts(ac3.signal), onProgress: () => ac3.abort(reason) }),
+    ).rejects.toBe(reason);
     // The worker survives and still encodes PCM.
     expect(await w.encode(raw.slice(), opts())).toEqual(encodeSync(raw, opts()));
   });
@@ -457,7 +590,9 @@ describe('pcm aborts', () => {
     const before = wasmMemoryBytes();
     for (let i = 0; i < 5; i++) {
       const a = new AbortController();
-      await encode(stream(), { ...opts(a.signal), onProgress: () => a.abort(reason) }).catch(() => 0);
+      await encode(stream(), { ...opts(a.signal), onProgress: () => a.abort(reason) }).catch(
+        () => 0,
+      );
     }
     expect(wasmMemoryBytes()).toBe(before);
   });

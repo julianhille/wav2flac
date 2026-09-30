@@ -8,10 +8,28 @@
  * `window.runBenchmark(config)`.
  * @module
  */
-import { type BenchInput, type OnRun, loadLib, runBrowserBench, uaMemoryAvailable } from './browser-run.ts';
 import {
-  type BenchConfig, type BenchReport, type Mode,
-  columns, describe, fmtBytes, MODE_LABEL, parseConfig, PRESETS, preset, presetWav, summarize, SUMMARY_HEADERS, toMarkdown,
+  type BenchInput,
+  type OnRun,
+  loadLib,
+  runBrowserBench,
+  uaMemoryAvailable,
+} from './browser-run.ts';
+import {
+  type BenchConfig,
+  type BenchReport,
+  type Mode,
+  columns,
+  describe,
+  fmtBytes,
+  MODE_LABEL,
+  parseConfig,
+  PRESETS,
+  preset,
+  presetWav,
+  summarize,
+  SUMMARY_HEADERS,
+  toMarkdown,
 } from './shared.ts';
 
 /** A line of the server's NDJSON response. */
@@ -38,7 +56,11 @@ function $<T extends HTMLElement>(id: string): T {
  * @param children Child nodes or text.
  * @returns The element.
  */
-function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]): HTMLElementTagNameMap[K] {
+function h<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  props: Partial<HTMLElementTagNameMap[K]> = {},
+  ...children: (Node | string)[]
+): HTMLElementTagNameMap[K] {
   const e = Object.assign(document.createElement(tag), props);
   e.append(...children);
   return e;
@@ -63,7 +85,9 @@ function modeBoxes(): HTMLInputElement[] {
  * @returns `browser` or `node`.
  */
 function where(): 'browser' | 'node' {
-  return form.querySelector<HTMLInputElement>('input[name=where]:checked')?.value === 'node' ? 'node' : 'browser';
+  return form.querySelector<HTMLInputElement>('input[name=where]:checked')?.value === 'node'
+    ? 'node'
+    : 'browser';
 }
 
 /**
@@ -96,7 +120,9 @@ function readForm(): BenchConfig {
     input: String(f.get('input')) as BenchConfig['input'],
     output: f.get('output') === 'stream' ? 'stream' : 'buffer',
     transcode: String(f.get('transcode')) as BenchConfig['transcode'],
-    modes: modeBoxes().filter((b) => b.checked && !b.disabled).map((b) => b.value as Mode),
+    modes: modeBoxes()
+      .filter((b) => b.checked && !b.disabled)
+      .map((b) => b.value as Mode),
     warmup: $<HTMLInputElement>('warmup').checked,
   });
 }
@@ -133,7 +159,11 @@ async function readInput(c: BenchConfig): Promise<BenchInput> {
   if (file !== undefined) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const info = await (await loadLib()).probe(bytes);
-    return { bytes, label: `${file.name} (${info.sampleRate} Hz, ${info.bitsPerSample}-bit, ${info.channels} ch)`, seconds: info.durationSec };
+    return {
+      bytes,
+      label: `${file.name} (${info.sampleRate} Hz, ${info.bitsPerSample}-bit, ${info.channels} ch)`,
+      seconds: info.durationSec,
+    };
   }
   const p = preset(c.preset);
   status.textContent = `Generating ${p.label}…`;
@@ -148,7 +178,11 @@ async function readInput(c: BenchConfig): Promise<BenchInput> {
  * @throws {Error} If the server fails.
  */
 async function runOnServer(c: BenchConfig): Promise<BenchReport> {
-  const res = await fetch('/api/node-bench', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(c) });
+  const res = await fetch('/api/node-bench', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(c),
+  });
   if (!res.ok || res.body === null) throw new Error(`server: ${res.status} ${await res.text()}`);
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buf = '';
@@ -160,7 +194,8 @@ async function runOnServer(c: BenchConfig): Promise<BenchReport> {
     while ((nl = buf.indexOf('\n')) >= 0) {
       const line = JSON.parse(buf.slice(0, nl)) as ServerLine;
       buf = buf.slice(nl + 1);
-      if ('progress' in line) showProgress('Node', line.progress.mode, line.progress.done, line.progress.total);
+      if ('progress' in line)
+        showProgress('Node', line.progress.mode, line.progress.done, line.progress.total);
       else if ('report' in line) return line.report;
       else throw new Error(line.error);
     }
@@ -198,36 +233,114 @@ function download(name: string, text: string, type: string): void {
 function render(r: BenchReport): void {
   const rows = summarize(r);
   const keys = columns(rows);
-  const table = h('table', {},
+  const table = h(
+    'table',
+    {},
     h('thead', {}, h('tr', {}, ...keys.map((k) => h('th', { scope: 'col' }, SUMMARY_HEADERS[k])))),
-    h('tbody', {}, ...rows.map((row, i) => {
-      const err = r.results[i]!.error;
-      return h('tr', {}, ...(err === null
-        ? keys.map((k) => h('td', {}, row[k]))
-        : [h('td', {}, row.mode), h('td', { className: 'error', colSpan: keys.length - 1 }, err)]));
-    })),
+    h(
+      'tbody',
+      {},
+      ...rows.map((row, i) => {
+        const err = r.results[i]!.error;
+        return h(
+          'tr',
+          {},
+          ...(err === null
+            ? keys.map((k) => h('td', {}, row[k]))
+            : [
+                h('td', {}, row.mode),
+                h('td', { className: 'error', colSpan: keys.length - 1 }, err),
+              ]),
+        );
+      }),
+    ),
   );
   const md = toMarkdown(r);
-  const copy = h('button', { type: 'button', onclick: () => {
-    void navigator.clipboard.writeText(md).then(() => { copy.textContent = 'Copied'; });
-  } }, 'Copy Markdown');
-  const save = h('button', { type: 'button', onclick: () => download(`wav2flac-bench-${r.date.replace(/[:.]/g, '-')}.json`, JSON.stringify(r, null, 2), 'application/json') }, 'Download JSON');
+  const copy = h(
+    'button',
+    {
+      type: 'button',
+      onclick: () => {
+        void navigator.clipboard.writeText(md).then(() => {
+          copy.textContent = 'Copied';
+        });
+      },
+    },
+    'Copy Markdown',
+  );
+  const save = h(
+    'button',
+    {
+      type: 'button',
+      onclick: () =>
+        download(
+          `wav2flac-bench-${r.date.replace(/[:.]/g, '-')}.json`,
+          JSON.stringify(r, null, 2),
+          'application/json',
+        ),
+    },
+    'Download JSON',
+  );
   const extras = r.results.flatMap((m) => [
-    ...(m.startupMs === null ? [] : [`${MODE_LABEL[m.mode]} start-up: ${m.startupMs.toFixed(0)} ms`]),
-    ...(m.uaMemoryBytes === null ? [] : [`${MODE_LABEL[m.mode]} UA memory: ${fmtBytes(m.uaMemoryBytes)}`]),
+    ...(m.startupMs === null
+      ? []
+      : [`${MODE_LABEL[m.mode]} start-up: ${m.startupMs.toFixed(0)} ms`]),
+    ...(m.uaMemoryBytes === null
+      ? []
+      : [`${MODE_LABEL[m.mode]} UA memory: ${fmtBytes(m.uaMemoryBytes)}`]),
   ]);
-  const perRun = h('details', {}, h('summary', {}, 'Per-run samples'),
-    h('div', { className: 'table-wrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ...['Mode', '#', 'ms', 'Longest block', 'Max RSS', 'Wasm', 'Heap'].map((t) => h('th', {}, t)))),
-      h('tbody', {}, ...r.results.flatMap((m) => m.samples.map((s, i) => h('tr', {},
-        h('td', {}, MODE_LABEL[m.mode]), h('td', {}, String(i + 1)), h('td', {}, s.ms.toFixed(1)),
-        h('td', {}, s.maxBlockMs === null ? '–' : `${s.maxBlockMs.toFixed(0)} ms`),
-        h('td', {}, s.maxRssKb === null ? '–' : fmtBytes(s.maxRssKb * 1024)),
-        h('td', {}, fmtBytes(s.wasmBytes)), h('td', {}, fmtBytes(s.heapBytes)),
-      )))),
-    )));
-  const card = h('section', { className: 'card' },
-    h('div', { className: 'report-head' }, h('h2', {}, r.environment), h('div', { className: 'report-tools' }, copy, save)),
+  const perRun = h(
+    'details',
+    {},
+    h('summary', {}, 'Per-run samples'),
+    h(
+      'div',
+      { className: 'table-wrap' },
+      h(
+        'table',
+        {},
+        h(
+          'thead',
+          {},
+          h(
+            'tr',
+            {},
+            ...['Mode', '#', 'ms', 'Longest block', 'Max RSS', 'Wasm', 'Heap'].map((t) =>
+              h('th', {}, t),
+            ),
+          ),
+        ),
+        h(
+          'tbody',
+          {},
+          ...r.results.flatMap((m) =>
+            m.samples.map((s, i) =>
+              h(
+                'tr',
+                {},
+                h('td', {}, MODE_LABEL[m.mode]),
+                h('td', {}, String(i + 1)),
+                h('td', {}, s.ms.toFixed(1)),
+                h('td', {}, s.maxBlockMs === null ? '–' : `${s.maxBlockMs.toFixed(0)} ms`),
+                h('td', {}, s.maxRssKb === null ? '–' : fmtBytes(s.maxRssKb * 1024)),
+                h('td', {}, fmtBytes(s.wasmBytes)),
+                h('td', {}, fmtBytes(s.heapBytes)),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  const card = h(
+    'section',
+    { className: 'card' },
+    h(
+      'div',
+      { className: 'report-head' },
+      h('h2', {}, r.environment),
+      h('div', { className: 'report-tools' }, copy, save),
+    ),
     h('p', { className: 'muted' }, `${describe(r)} · ${new Date(r.date).toLocaleTimeString()}`),
     h('div', { className: 'table-wrap' }, table),
     ...(extras.length > 0 ? [h('p', { className: 'muted' }, extras.join(' · '))] : []),
@@ -244,7 +357,10 @@ function render(r: BenchReport): void {
  * @param extra.onRun Also report progress here.
  * @returns The report.
  */
-async function runBenchmark(raw: Partial<BenchConfig> = {}, extra: { uaMemory?: boolean; onRun?: OnRun } = {}): Promise<BenchReport> {
+async function runBenchmark(
+  raw: Partial<BenchConfig> = {},
+  extra: { uaMemory?: boolean; onRun?: OnRun } = {},
+): Promise<BenchReport> {
   const c = parseConfig(raw);
   const input = await readInput(c);
   const r = await runBrowserBench(c, input, { uaMemory: extra.uaMemory ?? false }, (m, d, t) => {
@@ -275,7 +391,9 @@ async function onSubmit(e: Event): Promise<void> {
     status.textContent = `Done in ${((performance.now() - t) / 1000).toFixed(1)} s.`;
   } catch (err) {
     status.innerHTML = '';
-    status.append(h('span', { className: 'warn' }, err instanceof Error ? err.message : String(err)));
+    status.append(
+      h('span', { className: 'warn' }, err instanceof Error ? err.message : String(err)),
+    );
   } finally {
     start.disabled = false;
   }
@@ -301,7 +419,8 @@ function setup(): void {
   const presetSel = $<HTMLSelectElement>('preset');
   for (const p of PRESETS) presetSel.add(new Option(p.label, p.id));
   const levelSel = $<HTMLSelectElement>('level');
-  for (let l = 0; l <= 8; l++) levelSel.add(new Option(`${l}${l === 5 ? ' (default)' : ''}`, String(l)));
+  for (let l = 0; l <= 8; l++)
+    levelSel.add(new Option(`${l}${l === 5 ? ' (default)' : ''}`, String(l)));
 
   const q = new URLSearchParams(location.search);
   const raw: Partial<BenchConfig> = {};
@@ -325,10 +444,19 @@ function setup(): void {
   syncControls();
   animate();
   loadLib().then(
-    (l) => { if (status.textContent === '') status.textContent = `${l.version()} ready${crossOriginIsolated ? ' · cross-origin isolated' : ''}.`; },
+    (l) => {
+      if (status.textContent === '')
+        status.textContent = `${l.version()} ready${crossOriginIsolated ? ' · cross-origin isolated' : ''}.`;
+    },
     (err: unknown) => {
       status.innerHTML = '';
-      status.append(h('span', { className: 'warn' }, `Couldn't load /pkg/esm/index.js (run npm run build): ${err instanceof Error ? err.message : String(err)}`));
+      status.append(
+        h(
+          'span',
+          { className: 'warn' },
+          `Couldn't load /pkg/esm/index.js (run npm run build): ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
       start.disabled = true;
     },
   );

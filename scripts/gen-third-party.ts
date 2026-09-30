@@ -17,7 +17,10 @@ const out = process.argv[2] ?? 'docs/third-party.md';
  */
 function spdxLinks(expr: string): string {
   return expr.replace(/[A-Za-z0-9.+-]+/g, (id) =>
-    ['AND', 'OR', 'WITH'].includes(id) ? id : `[${id}](https://spdx.org/licenses/${id.replace(/\+$/, '')}.html)`);
+    ['AND', 'OR', 'WITH'].includes(id)
+      ? id
+      : `[${id}](https://spdx.org/licenses/${id.replace(/\+$/, '')}.html)`,
+  );
 }
 
 const rows = shippedCrates().map((c) => {
@@ -32,8 +35,10 @@ const rows = shippedCrates().map((c) => {
   return `| [${c.name}](https://crates.io/crates/${c.name}/${c.version}) | ${c.version} | ${license} | ${source} |`;
 });
 for (const p of STD_PARTS) {
-  rows.push(`| Rust standard library: ${p.name} | ${rustVersion()} | ${spdxLinks(p.license)} | ` +
-    `[repository](${p.repository}) |`);
+  rows.push(
+    `| Rust standard library: ${p.name} | ${rustVersion()} | ${spdxLinks(p.license)} | ` +
+      `[repository](${p.repository}) |`,
+  );
 }
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
@@ -56,7 +61,11 @@ function pick(text: string, re: RegExp, what: string): string {
   if (m === undefined) throw new Error(`gen-third-party: ${what} not found`);
   return m;
 }
-const bindgen = pick(cargoToml, /^wasm-bindgen = "=([^"]+)"/m, 'wasm-bindgen version in Cargo.toml');
+const bindgen = pick(
+  cargoToml,
+  /^wasm-bindgen = "=([^"]+)"/m,
+  'wasm-bindgen version in Cargo.toml',
+);
 const binaryen = pick(ciTools, /^BINARYEN=(\d+)/m, 'BINARYEN in scripts/ci-tools.sh');
 /**
  * Pinned version of a dev dependency.
@@ -88,9 +97,13 @@ ${rows.join('\n')}
 
 ## npm dependencies
 
-${npmDeps.length === 0
+${
+  npmDeps.length === 0
     ? 'None. The package has no runtime `dependencies`.'
-    : npmDeps.map(([name, range]) => `- [${name}](https://www.npmjs.com/package/${name}) ${range}`).join('\n')}
+    : npmDeps
+        .map(([name, range]) => `- [${name}](https://www.npmjs.com/package/${name}) ${range}`)
+        .join('\n')
+}
 
 ## Build tools (not shipped)
 

@@ -81,7 +81,9 @@ function versions(): Record<string, string | undefined> {
     'package-lock.json': lock.version,
     'package-lock.json (root package)': lock.packages?.['']?.version,
     'Cargo.toml': /^version = "([^"]+)"/m.exec(read('Cargo.toml'))?.[1],
-    'Cargo.lock': /\[\[package\]\]\nname = "wav2flac"\nversion = "([^"]+)"/.exec(read('Cargo.lock'))?.[1],
+    'Cargo.lock': /\[\[package\]\]\nname = "wav2flac"\nversion = "([^"]+)"/.exec(
+      read('Cargo.lock'),
+    )?.[1],
   };
 }
 
@@ -100,7 +102,8 @@ function section(log: string, v: string): string {
   // reference links of their own, so only trailing version links are cut.
   const lines = (end < 0 ? rest : rest.slice(0, end)).split('\n');
   const versionLink = new RegExp(`^\\[(Unreleased|\\d[^\\]]*)\\]: ${escape(REPO)}/`);
-  while (lines.length > 0 && (lines.at(-1)!.trim() === '' || versionLink.test(lines.at(-1)!))) lines.pop();
+  while (lines.length > 0 && (lines.at(-1)!.trim() === '' || versionLink.test(lines.at(-1)!)))
+    lines.pop();
   const body = lines.join('\n').trim();
   if (body === '') fail(`the CHANGELOG.md section for ${v} is empty`);
   if (!new RegExp(`^\\[${escape(v)}\\]: ${escape(REPO)}/`, 'm').test(log)) {
@@ -131,7 +134,10 @@ function check(tag: string, notes?: string): void {
  */
 function prepare(v: string): void {
   if (!SEMVER.test(v)) fail(`${v} is not X.Y.Z[-pre]`);
-  if (execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' }) !== '') {
+  if (
+    execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' }) !==
+    ''
+  ) {
     fail('the working tree has uncommitted changes');
   }
   const git = (...args: string[]): string => execFileSync('git', args, { encoding: 'utf8' }).trim();
@@ -150,7 +156,9 @@ function prepare(v: string): void {
     fail(`CHANGELOG.md already has ${v}`);
   }
   try {
-    execFileSync('git', ['rev-parse', '--quiet', '--verify', `refs/tags/v${v}`], { stdio: 'ignore' });
+    execFileSync('git', ['rev-parse', '--quiet', '--verify', `refs/tags/v${v}`], {
+      stdio: 'ignore',
+    });
     fail(`tag v${v} already exists`);
   } catch (e) {
     if (e instanceof ReleaseError) throw e;
@@ -158,13 +166,17 @@ function prepare(v: string): void {
   // The local date: the day the release is made where it is made.
   const now = new Date();
   const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()]
-    .map((n, i) => String(n).padStart(i === 0 ? 4 : 2, '0')).join('-');
+    .map((n, i) => String(n).padStart(i === 0 ? 4 : 2, '0'))
+    .join('-');
   const unreleased = /^## \[Unreleased\]$/m;
   if (!unreleased.test(log)) fail('CHANGELOG.md has no "## [Unreleased]" section');
   if (!/^\[Unreleased\]: /m.test(log)) fail('CHANGELOG.md has no "[Unreleased]: …" link');
   const links = log
-    .replace(/^\[Unreleased\]: .*$/m, `[Unreleased]: ${REPO}/compare/v${v}...HEAD\n` +
-      `[${v}]: ${prev !== undefined ? `${REPO}/compare/v${prev}...v${v}` : `${REPO}/releases/tag/v${v}`}`)
+    .replace(
+      /^\[Unreleased\]: .*$/m,
+      `[Unreleased]: ${REPO}/compare/v${v}...HEAD\n` +
+        `[${v}]: ${prev !== undefined ? `${REPO}/compare/v${prev}...v${v}` : `${REPO}/releases/tag/v${v}`}`,
+    )
     .replace(unreleased, `## [Unreleased]\n\n## [${v}] - ${date}`);
   section(links, v);
 
@@ -174,8 +186,11 @@ function prepare(v: string): void {
     writeFileSync('package.json', pkg);
     const cargo = read('Cargo.toml').replace(/^version = "[^"]+"/m, `version = "${v}"`);
     writeFileSync('Cargo.toml', cargo);
-    execFileSync('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'],
-      { stdio: 'inherit' });
+    execFileSync(
+      'npm',
+      ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'],
+      { stdio: 'inherit' },
+    );
     execFileSync('cargo', ['update', '--workspace', '--quiet'], { stdio: 'inherit' });
     check(`v${v}`);
     execFileSync('git', ['commit', '--quiet', '-am', `Release ${v}`], { stdio: 'inherit' });
@@ -184,7 +199,9 @@ function prepare(v: string): void {
     execFileSync('git', ['checkout', '--', ...EDITED], { stdio: 'inherit' });
     throw e;
   }
-  console.log(`release: committed. Review, then:\n  git tag -a v${v} -m v${v}\n  git push origin main v${v}`);
+  console.log(
+    `release: committed. Review, then:\n  git tag -a v${v} -m v${v}\n  git push origin main v${v}`,
+  );
 }
 
 const [cmd, arg, notes] = process.argv.slice(2);

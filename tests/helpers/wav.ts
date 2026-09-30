@@ -81,7 +81,10 @@ export function makeWav(spec: WavSpec): Uint8Array<ArrayBuffer> {
     v.setUint32(40, spec.channelMask!, true);
     // KSDATAFORMAT_SUBTYPE_PCM / _IEEE_FLOAT GUID
     v.setUint16(44, fmtTag, true);
-    buf.set([0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71], 46);
+    buf.set(
+      [0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71],
+      46,
+    );
   }
   tag(12 + 8 + fmtLen, 'data');
   v.setUint32(12 + 8 + fmtLen + 4, dataLen, true);
@@ -95,13 +98,23 @@ export function makeWav(spec: WavSpec): Uint8Array<ArrayBuffer> {
     for (let c = 0; c < ch; c++) {
       let x: number;
       switch (signal) {
-        case 'silence': x = 0; break;
-        case 'sine': x = 0.5 * Math.sin(w * 997 * (c + 1) * i); break;
-        case 'noise': x = rnd() * 2 - 1; break;
+        case 'silence':
+          x = 0;
+          break;
+        case 'sine':
+          x = 0.5 * Math.sin(w * 997 * (c + 1) * i);
+          break;
+        case 'noise':
+          x = rnd() * 2 - 1;
+          break;
         default: {
           const env = 0.6 + 0.4 * Math.sin(w * 0.5 * i);
-          x = env * (0.3 * Math.sin(w * 220 * (c + 1) * i) + 0.15 * Math.sin(w * 660 * i + c) + 0.08 * Math.sin(w * 3520 * i))
-            + 0.02 * (rnd() * 2 - 1);
+          x =
+            env *
+              (0.3 * Math.sin(w * 220 * (c + 1) * i) +
+                0.15 * Math.sin(w * 660 * i + c) +
+                0.08 * Math.sin(w * 3520 * i)) +
+            0.02 * (rnd() * 2 - 1);
         }
       }
       if (float) v.setFloat32(o, x, true);

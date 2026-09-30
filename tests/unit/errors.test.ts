@@ -1,12 +1,23 @@
 // SPDX-License-Identifier: 0BSD
 import { describe, expect, it } from 'vitest';
-import { abortError, fromWasmError, invalidOption, reviveError, serializeError, Wav2FlacError } from '../../ts/lib/errors.js';
+import {
+  abortError,
+  fromWasmError,
+  invalidOption,
+  reviveError,
+  serializeError,
+  Wav2FlacError,
+} from '../../ts/lib/errors.js';
 
 describe('errors', () => {
   it('parses "[CODE] message" from wasm', () => {
     const e = fromWasmError(new Error('[INVALID_WAV] no RIFF header'));
     expect(e).toBeInstanceOf(Wav2FlacError);
-    expect(e).toMatchObject({ code: 'INVALID_WAV', message: 'no RIFF header', name: 'Wav2FlacError' });
+    expect(e).toMatchObject({
+      code: 'INVALID_WAV',
+      message: 'no RIFF header',
+      name: 'Wav2FlacError',
+    });
   });
 
   it('keeps multi-line messages', () => {
@@ -41,6 +52,8 @@ describe('errors', () => {
     expect(g.message).toBe('r');
 
     expect(serializeError(42)).toEqual({ name: 'Error', message: '42' });
-    expect(reviveError({ name: 'Wav2FlacError', code: 'BOGUS', message: 'm' })).not.toBeInstanceOf(Wav2FlacError);
+    expect(reviveError({ name: 'Wav2FlacError', code: 'BOGUS', message: 'm' })).not.toBeInstanceOf(
+      Wav2FlacError,
+    );
   });
 });

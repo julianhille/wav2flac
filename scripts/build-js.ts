@@ -5,7 +5,15 @@
 // by scripts/build.sh (Node ≥ 22.18 strips types).
 import { build, type Plugin } from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 const banner = '// SPDX-License-Identifier: 0BSD';
@@ -88,8 +96,10 @@ for (const min of [false, true]) {
   const entryPoints = { [`index${suffix}`]: 'ts/index.ts', [`worker${suffix}`]: 'ts/worker.ts' };
   const opts = { ...common, entryPoints, minify: min };
   // The normal ESM build needs no plugin: its worker URLs are right as written.
-  const plugins = (cjs: boolean): Plugin[] =>
-    [...(min || cjs ? [workerUrls(min, cjs)] : []), ...(min ? [errorName] : [])];
+  const plugins = (cjs: boolean): Plugin[] => [
+    ...(min || cjs ? [workerUrls(min, cjs)] : []),
+    ...(min ? [errorName] : []),
+  ];
   await build({ ...opts, outdir: 'pkg/esm', format: 'esm', plugins: plugins(false) });
   await build({
     ...opts,
@@ -127,7 +137,8 @@ function walk(dir: string): string[] {
 for (const f of walk('build/types')) {
   if (f === 'worker.d.ts') continue;
   const src = readFileSync(join('build/types', f), 'utf8');
-  if (src.includes('build/bindgen')) throw new Error(`declaration ${f} leaks wasm-bindgen internals`);
+  if (src.includes('build/bindgen'))
+    throw new Error(`declaration ${f} leaks wasm-bindgen internals`);
   const esm = join('pkg/esm', f);
   mkdirSync(join(esm, '..'), { recursive: true });
   cpSync(join('build/types', f), esm);

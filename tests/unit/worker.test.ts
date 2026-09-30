@@ -27,8 +27,14 @@ const wav = makeWav({ frames: 44100 * 2, seed: 5 });
  */
 function wrap<I, O>(p: MessagePort, log: O[] = []): Port<I, O> {
   return {
-    post: (m, t) => { log.push(m); p.postMessage(m, t as never); },
-    listen: (on, onErr) => { p.on('message', on); p.on('messageerror', onErr); },
+    post: (m, t) => {
+      log.push(m);
+      p.postMessage(m, t as never);
+    },
+    listen: (on, onErr) => {
+      p.on('message', on);
+      p.on('messageerror', onErr);
+    },
     ref: (k) => (k ? p.ref() : p.unref()),
     close: () => p.close(),
   };
@@ -41,7 +47,12 @@ afterEach(() => {
 });
 
 /** A client/host pair over a fresh channel. */
-function pair(): { w: WorkerEncoder; toHost: ToWorker[]; toClient: FromWorker[]; hostPort: MessagePort } {
+function pair(): {
+  w: WorkerEncoder;
+  toHost: ToWorker[];
+  toClient: FromWorker[];
+  hostPort: MessagePort;
+} {
   const ch = new MessageChannel();
   const toHost: ToWorker[] = [];
   const toClient: FromWorker[] = [];
@@ -90,7 +101,14 @@ describe('worker protocol', () => {
       if (r.done) break;
       rest.push(r.value);
     }
-    const all = await collect(new ReadableStream({ start(c) { rest.forEach((x) => c.enqueue(x)); c.close(); } }));
+    const all = await collect(
+      new ReadableStream({
+        start(c) {
+          rest.forEach((x) => c.enqueue(x));
+          c.close();
+        },
+      }),
+    );
     const ref = await collect((await import('../../ts/index.js')).encodeStream(long));
     expect(all).toEqual(ref);
   });
@@ -101,18 +119,36 @@ describe('worker protocol', () => {
     await w.encode(wav.slice(), { onProgress: (p) => seen.push(p.fraction ?? -1) });
     expect(seen.at(-1)).toBe(1);
     await expect(w.encode(new Uint8Array(64))).rejects.toBeInstanceOf(Wav2FlacError);
-    await expect(collect(w.encodeStream(new Uint8Array(64)))).rejects.toMatchObject({ code: 'INVALID_WAV' });
-    await expect(w.encode(wav.slice(), { compressionLevel: 42 })).rejects.toMatchObject({ code: 'INVALID_OPTIONS' });
+    await expect(collect(w.encodeStream(new Uint8Array(64)))).rejects.toMatchObject({
+      code: 'INVALID_WAV',
+    });
+    await expect(w.encode(wav.slice(), { compressionLevel: 42 })).rejects.toMatchObject({
+      code: 'INVALID_OPTIONS',
+    });
     await expect(w.encode(wav, { bogus: true } as never)).rejects.toThrow(Wav2FlacError);
     const boom = new Error('cb');
-    await expect(w.encode(wav.slice(), { onProgress: () => { throw boom; } })).rejects.toBe(boom);
+    await expect(
+      w.encode(wav.slice(), {
+        onProgress: () => {
+          throw boom;
+        },
+      }),
+    ).rejects.toBe(boom);
   });
 
   it('rejects bad stream chunks and stream errors', async () => {
     const { w } = pair();
-    const bad = new ReadableStream<unknown>({ start(c) { c.enqueue('x'); } }) as ReadableStream<Uint8Array>;
+    const bad = new ReadableStream<unknown>({
+      start(c) {
+        c.enqueue('x');
+      },
+    }) as ReadableStream<Uint8Array>;
     await expect(w.encode(bad)).rejects.toThrow(TypeError);
-    const err = new ReadableStream<Uint8Array>({ pull(c) { c.error(new Error('src')); } });
+    const err = new ReadableStream<Uint8Array>({
+      pull(c) {
+        c.error(new Error('src'));
+      },
+    });
     await expect(w.encode(err)).rejects.toThrow('src');
     // The worker stays usable.
     expect((await w.encode(wav.slice())).length).toBeGreaterThan(0);
@@ -123,12 +159,19 @@ describe('worker protocol', () => {
     const reason = new Error('why');
     await expect(w.encode(wav.slice(), { signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
     const ac = new AbortController();
-    const p = w.encode(streamOf(wav, 1000), { signal: ac.signal, onProgress: () => ac.abort(reason) });
+    const p = w.encode(streamOf(wav, 1000), {
+      signal: ac.signal,
+      onProgress: () => ac.abort(reason),
+    });
     await expect(p).rejects.toBe(reason);
     expect(toHost.some((m) => m.t === 'abort')).toBe(true);
 
     const ac2 = new AbortController();
-    const r = w.encodeStream(streamOf(makeWav({ frames: 44100 * 5, signal: 'noise' }), 8192), { signal: ac2.signal }).getReader();
+    const r = w
+      .encodeStream(streamOf(makeWav({ frames: 44100 * 5, signal: 'noise' }), 8192), {
+        signal: ac2.signal,
+      })
+      .getReader();
     await r.read();
     ac2.abort(reason);
     await expect(r.read()).rejects.toBe(reason);
@@ -140,7 +183,11 @@ describe('worker protocol', () => {
     // The host ends every stopped job with an error and frees its encoder.
     const stopped = toHost.flatMap((m) => (m.t === 'abort' ? [m.id] : []));
     expect(stopped).toHaveLength(3);
-    for (const id of stopped) expect(toClient.some((m) => m.t === 'error' && m.id === id), `job ${id}`).toBe(true);
+    for (const id of stopped)
+      expect(
+        toClient.some((m) => m.t === 'error' && m.id === id),
+        `job ${id}`,
+      ).toBe(true);
     expect(liveSessions()).toBe(0);
     expect(await w.wasmMemoryBytes()).toBeGreaterThan(0);
   });
@@ -203,7 +250,9 @@ describe('worker protocol', () => {
     let fire: (e: Error) => void = () => undefined;
     const port: Port<FromWorker, ToWorker> = {
       post: () => undefined,
-      listen: (_on, onErr) => { fire = onErr; },
+      listen: (_on, onErr) => {
+        fire = onErr;
+      },
       ref: () => undefined,
       close: vi.fn(),
     };
@@ -220,7 +269,9 @@ describe('worker protocol', () => {
     let fire: (e: Error) => void = () => undefined;
     const port: Port<FromWorker, ToWorker> = {
       post: () => undefined,
-      listen: (_on, onErr) => { fire = onErr; },
+      listen: (_on, onErr) => {
+        fire = onErr;
+      },
       ref: () => undefined,
       close: () => undefined,
     };
@@ -272,17 +323,20 @@ describe('worker protocol', () => {
     serve(wrap<ToWorker, FromWorker>(ch.port2));
     const inner = wrap<FromWorker, ToWorker>(ch.port1);
     let held = false;
-    const w = connect({
-      ...inner,
-      post: (m, t) => {
-        if (m.t === 'stats') throw new Error('cannot post');
-        inner.post(m, t);
+    const w = connect(
+      {
+        ...inner,
+        post: (m, t) => {
+          if (m.t === 'stats') throw new Error('cannot post');
+          inner.post(m, t);
+        },
+        ref: (keep) => {
+          held = keep;
+          inner.ref(keep);
+        },
       },
-      ref: (keep) => {
-        held = keep;
-        inner.ref(keep);
-      },
-    }, wasm);
+      wasm,
+    );
     open.push(w);
     await expect(w.wasmMemoryBytes()).rejects.toThrow('cannot post');
     // Nothing is pending, so the port no longer keeps the process alive.
@@ -306,21 +360,52 @@ describe('worker protocol', () => {
     host.serve(wrap<ToWorker, FromWorker>(ch.port2));
     const client = wrap<FromWorker, ToWorker>(ch.port1);
     const inbox: FromWorker[] = [];
-    client.listen((m) => inbox.push(m), () => undefined);
+    client.listen(
+      (m) => inbox.push(m),
+      () => undefined,
+    );
     // A module importing a function the glue does not provide cannot be instantiated.
-    const bad = new WebAssembly.Module(new Uint8Array([
-      0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, // magic, version
-      1, 4, 1, 0x60, 0, 0, // type section: () -> ()
-      2, 9, 1, 3, 0x65, 0x6e, 0x76, 1, 0x66, 0, 0, // import section: env.f
-    ]));
+    const bad = new WebAssembly.Module(
+      new Uint8Array([
+        0,
+        0x61,
+        0x73,
+        0x6d,
+        1,
+        0,
+        0,
+        0, // magic, version
+        1,
+        4,
+        1,
+        0x60,
+        0,
+        0, // type section: () -> ()
+        2,
+        9,
+        1,
+        3,
+        0x65,
+        0x6e,
+        0x76,
+        1,
+        0x66,
+        0,
+        0, // import section: env.f
+      ]),
+    );
     client.post({ t: 'init', module: bad }, []);
     client.post({ t: 'probe', id: 1, data: wav.slice(0, 64) }, []);
     const args = normalizeOptions(undefined, false);
-    client.post({ t: 'job', id: 2, args, input: wav.slice(), progress: false, window: OUTPUT_WINDOW }, []);
+    client.post(
+      { t: 'job', id: 2, args, input: wav.slice(), progress: false, window: OUTPUT_WINDOW },
+      [],
+    );
     // So wasmMemoryBytes() tells a caller that this worker cannot encode.
     client.post({ t: 'stats', id: 3 }, []);
     await vi.waitFor(() => expect(inbox).toHaveLength(3));
-    for (const m of inbox) expect(m).toMatchObject({ t: 'error', error: { message: expect.stringMatching(/env/) } });
+    for (const m of inbox)
+      expect(m).toMatchObject({ t: 'error', error: { message: expect.stringMatching(/env/) } });
     ch.port1.close();
   });
 
@@ -329,7 +414,8 @@ describe('worker protocol', () => {
     hostPort.postMessage({ t: 'out', id: 999, data: new Uint8Array(1) });
     const ch = new MessageChannel();
     serve(wrap<ToWorker, FromWorker>(ch.port2));
-    for (const t of ['ack', 'abort', 'chunk', 'end'] as const) ch.port1.postMessage({ t, id: 12345, data: new Uint8Array(1) });
+    for (const t of ['ack', 'abort', 'chunk', 'end'] as const)
+      ch.port1.postMessage({ t, id: 12345, data: new Uint8Array(1) });
     expect((await w.encode(wav.slice())).length).toBeGreaterThan(0);
     ch.port1.close();
   });
@@ -342,7 +428,10 @@ describe('worker protocol', () => {
   });
 
   it('spawns a real worker by URL', async () => {
-    const w = createWorkerEncoder({ url: new URL('../pkg-worker-missing.js', import.meta.url), wasm });
+    const w = createWorkerEncoder({
+      url: new URL('../pkg-worker-missing.js', import.meta.url),
+      wasm,
+    });
     open.push(w);
     await expect(w.encode(wav.slice())).rejects.toThrow(/Cannot find module/);
   });
@@ -351,7 +440,10 @@ describe('worker protocol', () => {
     const dir = mkdtempSync(join(tmpdir(), 'wav2flac-'));
     const script = join(dir, 'exit.mjs');
     // Exits once the client's init message arrives, like a crash mid-job.
-    writeFileSync(script, "import { parentPort } from 'node:worker_threads';\nparentPort.on('message', () => process.exit(3));\n");
+    writeFileSync(
+      script,
+      "import { parentPort } from 'node:worker_threads';\nparentPort.on('message', () => process.exit(3));\n",
+    );
     try {
       const w = createWorkerEncoder({ url: pathToFileURL(script), wasm });
       open.push(w);

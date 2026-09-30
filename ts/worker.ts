@@ -21,11 +21,15 @@ interface WorkerScope {
  * @returns The port.
  */
 function parent(): Port<ToWorker, FromWorker> {
-  const pp = isNode() ? builtin<typeof import('node:worker_threads')>('worker_threads').parentPort : null;
+  const pp = isNode()
+    ? builtin<typeof import('node:worker_threads')>('worker_threads').parentPort
+    : null;
   if (pp !== null) {
     return {
       post: (msg, transfer) => pp.postMessage(msg, transfer as never),
-      listen: (onMessage) => { pp.on('message', onMessage); },
+      listen: (onMessage) => {
+        pp.on('message', onMessage);
+      },
       ref: ignore,
       close: () => pp.close(),
     };
@@ -33,7 +37,9 @@ function parent(): Port<ToWorker, FromWorker> {
   const scope = globalThis as unknown as WorkerScope;
   return {
     post: (msg, transfer) => scope.postMessage(msg, transfer),
-    listen: (onMessage) => { scope.onmessage = (e: MessageEvent<ToWorker>) => onMessage(e.data); },
+    listen: (onMessage) => {
+      scope.onmessage = (e: MessageEvent<ToWorker>) => onMessage(e.data);
+    },
     ref: ignore,
     close: () => scope.close(),
   };

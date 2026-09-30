@@ -19,7 +19,8 @@ function readSeed(): number | undefined {
   const v = process.env['FC_SEED'] ?? '';
   if (v === '') return undefined;
   const n = Number(v);
-  if (!Number.isSafeInteger(n)) throw new Error(`FC_SEED must be an integer, not ${JSON.stringify(v)}`);
+  if (!Number.isSafeInteger(n))
+    throw new Error(`FC_SEED must be an integer, not ${JSON.stringify(v)}`);
   return n;
 }
 
