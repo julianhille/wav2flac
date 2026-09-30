@@ -267,6 +267,39 @@ fn bit_depth_reduction_and_dither() {
 }
 
 #[test]
+fn lowest_output_bit_depths_decode() {
+    // 4..=7 bits exist only in STREAMINFO (no frame-header code), so the
+    // decoder must take the depth from there. Full-scale noise also hits the clamp.
+    let s = signal(Signal::Noise, 16, 2, 5000, 1);
+    let w = wav(2, 44100, 16, &s);
+    for bits in 4u32..=7 {
+        let o = |dither| Options {
+            bits_per_sample: Some(bits),
+            dither,
+            ..Options::default()
+        };
+        let d = decode(&encode(&w, o(Dither::None)));
+        assert_eq!(d.bits, bits);
+        assert_eq!(d.samples.len(), s.len(), "{bits}-bit: not sample-verified");
+        let step = f64::from(1u32 << (16 - bits));
+        let (lo, hi) = (-(1i32 << (bits - 1)), (1i32 << (bits - 1)) - 1);
+        let expect: Vec<i32> = s
+            .iter()
+            .map(|v| ((f64::from(*v) / step).round() as i32).clamp(lo, hi))
+            .collect();
+        assert_eq!(d.samples, expect, "{bits}-bit");
+        // TPDF dither stays within range and ~1.5 LSB of the input.
+        let d = decode(&encode(&w, o(Dither::Tpdf)));
+        assert_eq!(d.samples.len(), s.len());
+        for (q, v) in d.samples.iter().zip(&s) {
+            assert!((lo..=hi).contains(q), "{bits}-bit: {q} out of range");
+            let e = f64::from(*q) - (f64::from(*v) / step).clamp(f64::from(lo), f64::from(hi));
+            assert!(e.abs() <= 1.5, "{bits}-bit dither error {e}");
+        }
+    }
+}
+
+#[test]
 fn bit_depth_increase_is_exact_shift() {
     let s = signal(Signal::Noise, 16, 2, 5000, 1);
     let d = decode(&encode(
