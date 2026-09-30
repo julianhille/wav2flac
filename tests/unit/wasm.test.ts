@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NOTICES_SECTION, withFirstSection } from '../../scripts/wasm-section.js';
 
 const WASM = 'build/bindgen/wav2flac_bg.wasm';
 const bytes = readFileSync(WASM);
@@ -449,6 +450,23 @@ describe('init', () => {
     const api = await import('../../ts/index.js');
     expect(() => api.encodeSync(new Uint8Array(1))).toThrow(/not initialized/);
     expect(() => api.version()).toThrow(/not initialized/);
+  });
+
+  it('thirdPartyLicenses returns the license section, initializing on first use', async () => {
+    vi.resetModules();
+    const api = await import('../../ts/index.js');
+    // The default URL (ts/wav2flac.wasm) does not exist next to the sources.
+    await expect(api.thirdPartyLicenses()).rejects.toThrow(/ENOENT/);
+    const text = '# Notices\n\n| a | b |\n| --- | --- |\n| ü | → |\n';
+    await api.init(withFirstSection(Uint8Array.from(bytes), NOTICES_SECTION, new TextEncoder().encode(text)));
+    await expect(api.thirdPartyLicenses()).resolves.toBe(text);
+  });
+
+  it('thirdPartyLicenses rejects a wasm without the license section', async () => {
+    vi.resetModules();
+    const api = await import('../../ts/index.js');
+    await api.init(bytes);
+    await expect(api.thirdPartyLicenses()).rejects.toThrow(/no "license" section/);
   });
 
   it('encodeStream initializes lazily and reports init failures', async () => {

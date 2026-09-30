@@ -21,6 +21,8 @@ links are collected at the bottom of this file.
   copy the wasm as it is, so the notices go wherever the wasm goes, with
   nothing to configure. The wasm grows from 165 KB to 426 KB, or from 72 KB
   to 87 KB gzipped.
+- `thirdPartyLicenses()` returns the license notices from the loaded wasm, as
+  Markdown. It initializes the wasm on first use and fetches nothing else.
 - `wav2flac/THIRD_PARTY_LICENSES.txt` resolves to the notices file in the
   package, for tools and docs that want the text.
 - Docs: a page on the license notices when bundling or hosting the wasm

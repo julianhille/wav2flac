@@ -16,7 +16,7 @@ import { normalizeOptions, type Options } from './lib/options.js';
 import { ignore } from './lib/platform.js';
 import { probeBytes, type WavInfo } from './lib/probe.js';
 import { vendor } from '../build/bindgen/wav2flac.js';
-import { init, isReady, notReady } from './lib/wasm.js';
+import { init, isReady, notReady, wasmModule } from './lib/wasm.js';
 
 export { Wav2FlacError, type ErrorCode } from './lib/errors.js';
 export type { Bytes } from './lib/engine.js';
@@ -150,4 +150,26 @@ export async function probe(input: Uint8Array | ArrayBuffer): Promise<WavInfo> {
 export function version(): string {
   if (!isReady()) throw notReady();
   return vendor();
+}
+
+/**
+ * The license notices of the third-party code in the wasm, as Markdown: a
+ * table of the Rust crates, then each crate's license files word for word.
+ * Initializes the wasm on first use, and reads the notices from its `license`
+ * section, so nothing else is fetched.
+ *
+ * @example
+ * ```ts
+ * console.log(await thirdPartyLicenses());
+ * ```
+ * @returns The same text as `wav2flac/THIRD_PARTY_LICENSES.txt`.
+ * @throws {Error} If the wasm was loaded from a copy without its `license` section.
+ */
+export async function thirdPartyLicenses(): Promise<string> {
+  await init();
+  const [section] = WebAssembly.Module.customSections(wasmModule(), 'license');
+  if (section === undefined) {
+    throw new Error('wav2flac: the wasm has no "license" section; see wav2flac/THIRD_PARTY_LICENSES.txt');
+  }
+  return new TextDecoder().decode(section);
 }

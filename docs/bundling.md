@@ -33,6 +33,16 @@ is there in full, even where other crates have the same text.
 
 ## Reading the notices
 
+In code, `thirdPartyLicenses()` returns the text. It loads the wasm like
+`encode()` does, if that hasn't happened yet, and reads the section from it,
+so it fetches nothing else:
+
+```js
+import { thirdPartyLicenses } from 'wav2flac';
+
+const markdown = await thirdPartyLicenses();
+```
+
 From a shell, on the file or on the URL it is served from:
 
 ```sh
@@ -46,8 +56,8 @@ write binary data to a terminal.
 
 The browser's developer tools don't show it: for a `.wasm` response, the
 Network tab shows a disassembly of the code, not the bytes of the file, and
-custom sections aren't part of it. Read the section with code instead, for
-example in the console of the page:
+custom sections aren't part of it. Read the section with code instead. Without
+wav2flac's API, for example in the console of the page:
 
 ```js
 const module = await WebAssembly.compileStreaming(fetch('/assets/wav2flac.wasm'));

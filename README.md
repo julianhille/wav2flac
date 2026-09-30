@@ -180,6 +180,7 @@ const info = await probe(wav);
 | `probe(input)` | → `Promise<WavInfo>`. Reads the WAV header only. |
 | `init(source?, { signal? })` / `initSync(source?)` | Loads the wasm. `encode`, `encodeStream`, `probe` and the worker encoder do this for you. A `signal` (e.g. `AbortSignal.timeout(10_000)`) gives up on a stalled download. Once every caller waiting on the load has given up, or the load failed, the next call retries: from its own source, or else from the last one; a caller without a signal, such as `probe()`, keeps the load going. |
 | `version()` | The encoder's version string. |
+| `thirdPartyLicenses()` | → `Promise<string>`. The license notices of the crates in the wasm, as Markdown. |
 | `wasmMemoryBytes()` | Size of the wasm linear memory in bytes (for diagnostics and leak checks). |
 
 `input` is a `Uint8Array`, an `ArrayBuffer` or a `ReadableStream<Uint8Array>`
@@ -256,8 +257,9 @@ redistribute the `.wasm`, keep their notices.
 `wav2flac.wasm` carries their notices in full: its first section, which
 engines ignore, holds the text of `THIRD_PARTY_LICENSES.txt` as plain text,
 so `head -c 3000 wav2flac.wasm` shows it as the first lines of the file.
-`WebAssembly.Module.customSections(module, 'license')` returns it. Bundlers
-copy the wasm as it is, so the notices go wherever the wasm goes. The package also has
+`thirdPartyLicenses()` returns it, as does
+`WebAssembly.Module.customSections(module, 'license')`. Bundlers copy the
+wasm as it is, so the notices go wherever the wasm goes. The package also has
 the text as a file, `pkg/THIRD_PARTY_LICENSES.txt` (`wav2flac/THIRD_PARTY_LICENSES.txt`). See
 [Bundling and license
 notices](https://github.com/julianhille/wav2flac/blob/main/docs/bundling.md).

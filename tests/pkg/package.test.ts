@@ -136,6 +136,11 @@ describe('installed package', () => {
     expect(text.match(/^```$/gm)?.length).toBe(text.match(/^```text$/gm)?.length);
   });
 
+  it.each([['ESM', esm], ['CJS', cjs]])('returns the notices from the wasm (%s)', async (_, api) => {
+    const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
+    await expect(api.thirdPartyLicenses()).resolves.toBe(text);
+  });
+
   it('keeps license comments out of the bundles', () => {
     for (const f of ['esm/index.js', 'esm/worker.js', 'cjs/index.cjs', 'cjs/worker.cjs']) {
       const text = readFileSync(join(installed, 'pkg', f), 'utf8');
