@@ -588,9 +588,11 @@ pub(crate) fn is_chunk_id(id: &[u8]) -> bool {
 /// and some fill it with garbage, even printable garbage such as a space.
 /// Both positions are looked at: a zero byte is always a pad; otherwise the
 /// position whose four bytes look like a chunk id wins. If both do, a
-/// well-known id at `end` means the pad is missing, and so does a length of
+/// well-known id at `end` means the pad is missing. So does a length of
 /// 16 MiB or more at `end + 1` (its top byte would be the first body byte)
-/// when the length at `end` is smaller. Otherwise the pad is assumed.
+/// when the length at `end` is smaller, unless the id at `end + 1` is a
+/// well-known one: a real chunk that large, behind a printable pad, has such
+/// lengths too. Otherwise the pad is assumed.
 ///
 /// Needs five bytes after `end` to decide; with fewer there is no next chunk
 /// either way. The lengths are only compared when nine bytes are there.
@@ -599,8 +601,9 @@ fn after_pad(buf: &[u8], end: usize) -> usize {
     let huge = |at: usize| buf.get(at + 7).is_some_and(|top| *top != 0);
     match (buf.get(end), id(end), id(end + 1)) {
         (Some(0), _, _) | (_, None, _) => end + 1,
-        (_, Some(here), Some(_))
-            if !KNOWN_IDS.contains(&here) && !(huge(end + 1) && !huge(end)) =>
+        (_, Some(here), Some(next))
+            if !KNOWN_IDS.contains(&here)
+                && (KNOWN_IDS.contains(&next) || !(huge(end + 1) && !huge(end))) =>
         {
             end + 1
         }

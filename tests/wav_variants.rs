@@ -277,6 +277,58 @@ fn printable_pad_after_odd_data_keeps_trailing_tags() {
 }
 
 #[test]
+fn printable_pad_before_well_known_chunk_of_16_mib() {
+    // A space pad, then a JUNK chunk of 16 MiB + 16 bytes: shifted back by
+    // the pad, its length's zero third byte is the top byte of the length
+    // read at the pad, which alone would look like a missing pad byte.
+    const JUNK: u32 = 0x0100_0010;
+    let junk = |f: &mut Vec<u8>| {
+        f.extend_from_slice(b"JUNK");
+        f.extend_from_slice(&JUNK.to_le_bytes());
+        f.resize(f.len() + JUNK as usize, 0);
+    };
+    let s = signal(Signal::Noise, 8, 1, 1001, 5);
+    let b = WavBuilder::pcm(1, 8000, 8);
+    let data = b.pack_int(&s);
+    let list = info_list(&[(b"INAM", b"after")]);
+
+    // Before the data chunk.
+    let mut head = b"RIFF\0\0\0\0WAVE".to_vec();
+    head.extend_from_slice(b"odd \x03\0\0\0abc "); // space pad
+    junk(&mut head);
+    head.extend_from_slice(b"fmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x40\x1f\0\0\x01\0\x08\0");
+    head.extend_from_slice(b"data");
+    head.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    head.extend_from_slice(&data);
+    head.push(0);
+
+    // After the (odd-sized) data chunk, with tags behind it.
+    let mut tail = b.build(&s);
+    *tail.last_mut().unwrap() = b' '; // the builder's zero pad
+    junk(&mut tail);
+
+    for (what, mut f) in [("head", head), ("tail", tail)] {
+        f.extend_from_slice(b"LIST");
+        f.extend_from_slice(&(list.len() as u32).to_le_bytes());
+        f.extend_from_slice(&list);
+        let n = (f.len() - 8) as u32;
+        f[4..8].copy_from_slice(&n.to_le_bytes());
+        for chunks in [&[usize::MAX][..], &[4099][..]] {
+            let flac = encode_chunked(&f, Options::default(), chunks)
+                .unwrap_or_else(|e| panic!("{what} {chunks:?}: {e}"));
+            let (blocks, _) = metadata_blocks(&flac);
+            let vc = blocks.iter().find(|b| b.0 == 4).expect("vorbis comment");
+            let (_, tags) = parse_vorbis(&vc.2);
+            assert!(
+                tags.contains(&("TITLE".into(), "after".into())),
+                "{what} {chunks:?}: {tags:?}"
+            );
+            assert_eq!(decode(&flac).samples, s, "{what} {chunks:?}");
+        }
+    }
+}
+
+#[test]
 fn extensible_fmt_longer_than_40() {
     // Odd and even sizes; cbSize grows with the chunk (above 22).
     for size in [41u32, 42, 47, 64] {
