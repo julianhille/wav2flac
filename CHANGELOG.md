@@ -10,6 +10,8 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+## [1.0.0-rc.4] - 2026-09-30
+
 ### Added
 
 - `wav2flac.wasm` carries the license notices of the Rust crates in it: the
@@ -244,7 +246,8 @@ links are collected at the bottom of this file.
 - Documentation site on Read the Docs (MkDocs): the README plus the raw PCM
   and benchmark guides, at <https://wav2flac.readthedocs.io/>.
 
-[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.3...HEAD
+[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.4...HEAD
+[1.0.0-rc.4]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.3...v1.0.0-rc.4
 [1.0.0-rc.3]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.2...v1.0.0-rc.3
 [1.0.0-rc.2]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.1...v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/julianhille/wav2flac/tree/v1.0.0-rc.1
