@@ -63,7 +63,9 @@ function run(cmd: string, args: string[], cwd: string, input?: Uint8Array): Buff
 // Pack and install once; every test below uses the installed copy.
 const consumer = mkdtempSync(join(tmpdir(), 'wav2flac-consumer-'));
 afterAll(() => rmSync(consumer, { recursive: true, force: true }));
-const packArgs = ['pack', '--json', '--ignore-scripts', '--pack-destination', consumer];
+// `--force` turns the devEngines check (Node ≥ 22.18 to build) into a warning,
+// so the package can be packed and tested on the minimum Node too.
+const packArgs = ['pack', '--json', '--ignore-scripts', '--force', '--pack-destination', consumer];
 const [packed] = JSON.parse(String(run('npm', packArgs, root))) as {
   filename: string;
   files: { path: string }[];
