@@ -272,6 +272,8 @@ fn lowest_output_bit_depths_decode() {
     // decoder must take the depth from there. Full-scale noise also hits the clamp.
     let s = signal(Signal::Noise, 16, 2, 5000, 1);
     let w = wav(2, 44100, 16, &s);
+    // Panics under WAV2FLAC_REQUIRE_TOOLS=1 when missing.
+    let ffmpeg = have_tool("ffmpeg");
     for bits in 4u32..=7 {
         let o = |dither| Options {
             bits_per_sample: Some(bits),
@@ -280,6 +282,10 @@ fn lowest_output_bit_depths_decode() {
         };
         let d = decode(&encode(&w, o(Dither::None)));
         assert_eq!(d.bits, bits);
+        // Only ffmpeg decodes these depths; without it there are no samples to check.
+        if !ffmpeg {
+            continue;
+        }
         assert_eq!(d.samples.len(), s.len(), "{bits}-bit: not sample-verified");
         let step = f64::from(1u32 << (16 - bits));
         let (lo, hi) = (-(1i32 << (bits - 1)), (1i32 << (bits - 1)) - 1);
