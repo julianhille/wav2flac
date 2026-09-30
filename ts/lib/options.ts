@@ -4,7 +4,7 @@
  * Types are checked here; value ranges are checked by the Rust core.
  * @module
  */
-import { invalidOption } from './errors.js';
+import { invalidOption, Wav2FlacError } from './errors.js';
 
 /**
  * Whether a value is an object literal (or `Object.create(null)`), as opposed
@@ -294,7 +294,6 @@ function normalizePcm(
     if (k !== 'sampleRate' && k !== 'channels' && k !== 'format')
       throw invalidOption(`unknown pcm option "${k}"`);
   }
-  // Channel counts above 8 pass on to the core, which reports TOO_MANY_CHANNELS.
   for (const [k, max] of [
     ['sampleRate', 2 ** 32 - 1],
     ['channels', Number.MAX_SAFE_INTEGER],
@@ -303,6 +302,13 @@ function normalizePcm(
     if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > max) {
       throw invalidOption(`pcm.${k} must be a positive integer`);
     }
+  }
+  // Any count above 8 gets the code and message of a WAV file with too many channels.
+  if ((p['channels'] as number) > 8) {
+    throw new Wav2FlacError(
+      'TOO_MANY_CHANNELS',
+      `${String(p['channels'])} channels (FLAC supports at most 8)`,
+    );
   }
   const f = p['format'];
   let pcmFormat = -1;

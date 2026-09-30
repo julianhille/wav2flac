@@ -73,7 +73,8 @@ describe('engine internals', () => {
   });
 
   it.each([9, 65536, 2 ** 32])('reports TOO_MANY_CHANNELS for %d pcm channels', (channels) => {
-    const args = normalizeOptions({ pcm: { sampleRate: 8000, channels, format: 's16' } }, false);
+    const base = normalizeOptions({ pcm: { sampleRate: 8000, channels: 1, format: 's16' } }, false);
+    const args = { ...base, pcmChannels: channels };
     expect(() => new Session(args)).toThrow(
       expect.objectContaining({
         code: 'TOO_MANY_CHANNELS',
