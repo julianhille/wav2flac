@@ -255,7 +255,7 @@ and Apache-2.0 with the LLVM exception for `compiler_builtins`. If you
 redistribute the `.wasm`, keep their notices.
 
 `wav2flac.wasm` carries their notices in full: its first section, which
-engines ignore, holds the text of `THIRD_PARTY_LICENSES.txt` as plain text,
+engines ignore, holds the text of `THIRD_PARTY_LICENSES.txt` uncompressed,
 so `head -c 3000 wav2flac.wasm` shows it as the first lines of the file.
 `thirdPartyLicenses()` returns it, as does
 `WebAssembly.Module.customSections(module, 'license')`. Bundlers copy the

@@ -14,7 +14,7 @@ links are collected at the bottom of this file.
 
 - `wav2flac.wasm` carries the license notices of the Rust crates in it: the
   text of `THIRD_PARTY_LICENSES.txt`, as a custom section named `license` at
-  the start of the file. It is plain text, so `head` or `strings` shows it as
+  the start of the file. It isn't compressed, so `head` or `strings` shows it as
   the first lines of the file, and
   `WebAssembly.Module.customSections(module, 'license')` returns it. Engines
   ignore the section. Every license file is there in full. Vite and webpack
