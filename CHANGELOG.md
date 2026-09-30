@@ -25,6 +25,8 @@ links are collected at the bottom of this file.
   `ReadableStream` input passed to `encode()` or `encodeStream()`, like every
   other failed encode. Before, the stream was left open, so a `fetch()` body
   kept its HTTP connection.
+- `encode()` and `encodeStream()` on the main thread cancel a `ReadableStream`
+  input when the options are invalid, as the worker encoder already did.
 
 ## [1.0.0-rc.4] - 2026-09-30
 

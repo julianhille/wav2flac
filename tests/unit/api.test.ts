@@ -218,6 +218,21 @@ describe('encode / encodeSync / encodeStream', () => {
     await expect(encode('x' as never)).rejects.toThrow(TypeError);
   });
 
+  it('cancels a stream input when the options are invalid', async () => {
+    const cancelled: unknown[] = [];
+    const input = (): ReadableStream<Uint8Array> =>
+      new ReadableStream({ cancel: (r) => void cancelled.push(r) });
+    const bad = { compressionLevel: 99 };
+    await expect(encode(input(), bad)).rejects.toMatchObject({ code: 'INVALID_OPTIONS' });
+    await expect(collect(encodeStream(input(), bad))).rejects.toMatchObject({
+      code: 'INVALID_OPTIONS',
+    });
+    expect(cancelled).toEqual([
+      expect.objectContaining({ code: 'INVALID_OPTIONS' }),
+      expect.objectContaining({ code: 'INVALID_OPTIONS' }),
+    ]);
+  });
+
   it('rejects unsupported bit depths with UNSUPPORTED_BIT_DEPTH', async () => {
     // WAVE_FORMAT_EXTENSIBLE with 3 valid bits in a 16-bit container.
     const f = makeWav({ frames: 100, channels: 1, bits: 16, channelMask: 0x4 });

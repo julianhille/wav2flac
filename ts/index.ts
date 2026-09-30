@@ -69,7 +69,14 @@ export {
  * ```
  */
 export async function encode(input: Input | PcmInput, options?: Options): Promise<Bytes> {
-  const p = preparePcm(input, normalizeOptions(options, false));
+  let p: ReturnType<typeof preparePcm>;
+  try {
+    p = preparePcm(input, normalizeOptions(options, false));
+  } catch (e) {
+    // Bad options fail the encode, so a stream input is cancelled too.
+    if (isStream(input) && !input.locked) void input.cancel(e).catch(ignore);
+    throw e;
+  }
   await init(undefined, { signal: options?.signal }).catch((e: unknown) => {
     // As for any failed encode, a stream input is cancelled.
     if (isStream(p.input)) void p.input.cancel(e).catch(ignore);
@@ -102,6 +109,7 @@ export function encodeStream(
   try {
     prepared = preparePcm(input, normalizeOptions(options, true));
   } catch (e) {
+    if (isStream(input) && !input.locked) void input.cancel(e).catch(ignore);
     return new ReadableStream<Bytes>({ start: (c) => c.error(e) });
   }
   const { input: bytes, args } = prepared;
