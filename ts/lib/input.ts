@@ -46,7 +46,7 @@ export const BUFFER_INPUT = 'a Uint8Array or ArrayBuffer';
  * @param x Candidate.
  * @returns The tag, e.g. `ArrayBuffer` or `Int16Array`.
  */
-function typeTag(x: unknown): string {
+export function typeTag(x: unknown): string {
   return Object.prototype.toString.call(x).slice(8, -1);
 }
 

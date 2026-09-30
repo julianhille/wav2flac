@@ -27,6 +27,13 @@ links are collected at the bottom of this file.
   kept its HTTP connection.
 - `encode()` and `encodeStream()` on the main thread cancel a `ReadableStream`
   input when the options are invalid, as the worker encoder already did.
+- `init()` and `initSync()` accept a `WebAssembly.Module` of another realm,
+  such as one a parent page compiled and handed to an iframe, or one from a
+  Node `vm` context; `init()` also accepts a `URL` of another realm. Before,
+  they failed with a `TypeError` that said a Module or URL was needed.
+- `initSync()` with something other than wasm bytes or a `WebAssembly.Module`
+  throws a `TypeError` that says so, instead of the engine's "Argument 0 must
+  be a buffer source". Both `init()` and `initSync()` name the type they got.
 - `copy: true` on the worker encoder copies a Node `Buffer`. Before, it used
   `Buffer#slice()`, which returns a view: a Buffer from `fs.readFile()` was
   still transferred (detached), so encoding it a second time failed, and a

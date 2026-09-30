@@ -4,7 +4,7 @@
  * @module
  */
 import initGlue, { initSync as initGlueSync } from '../../build/bindgen/wav2flac.js';
-import { isBuffer, isDetached } from './input.js';
+import { isBuffer, isDetached, typeTag } from './input.js';
 import { isSignal } from './options.js';
 import { builtin, ignore, isNode } from './platform.js';
 
@@ -64,6 +64,38 @@ export function defaultWasmUrl(): URL {
 }
 
 /**
+ * Checks for a `URL`, also one from another realm (iframe, `vm` context).
+ * @param x Candidate.
+ * @returns `true` for URLs.
+ */
+function isUrl(x: unknown): x is URL {
+  return x instanceof URL || typeTag(x) === 'URL';
+}
+
+/**
+ * Takes a `WebAssembly.Module`, also one from another realm, as a module of
+ * this realm: the glue checks with `instanceof`. A clone shares the compiled
+ * code, so it costs no recompile.
+ * @param x Candidate.
+ * @returns The module, or `undefined` for anything else.
+ */
+function asModule(x: unknown): WebAssembly.Module | undefined {
+  if (x instanceof WebAssembly.Module) return x;
+  if (typeTag(x) === 'WebAssembly.Module') return structuredClone(x as WebAssembly.Module);
+  return undefined;
+}
+
+/**
+ * Names the type of a value for an error message.
+ * @param x The value.
+ * @returns E.g. `number`, `null` or `Blob`.
+ */
+function kind(x: unknown): string {
+  if (x === null) return 'null';
+  return typeof x === 'object' ? typeTag(x) : typeof x;
+}
+
+/**
  * Reads a `file:` URL with Node's `fs`.
  * @param url File URL.
  * @returns The file contents.
@@ -81,7 +113,8 @@ async function readFileUrl(url: URL, signal: AbortSignal): Promise<Uint8Array<Ar
  * @throws {TypeError} For strings that are neither.
  */
 function toUrl(source: string | URL): URL {
-  if (source instanceof URL) return source;
+  // A URL of another realm is copied into this one; its string is its href.
+  if (typeof source !== 'string') return source instanceof URL ? source : new URL(String(source));
   if (typeof location === 'object' && location !== null) return new URL(source, location.href);
   // A Windows drive path ("C:\\x.wasm") parses as a URL with scheme "c"; only
   // schemes of two or more characters count as URLs in Node.
@@ -120,11 +153,12 @@ function isResponse(source: WasmSource): source is Response | PromiseLike<Respon
  * @returns The compiled module.
  */
 async function compile(source: WasmSource, signal: AbortSignal): Promise<WebAssembly.Module> {
-  if (source instanceof WebAssembly.Module) return source;
+  const mod = asModule(source);
+  if (mod !== undefined) return mod;
   if (ArrayBuffer.isView(source) || isBuffer(source))
     return WebAssembly.compile(bufferSource(source));
   let res: Response | PromiseLike<Response>;
-  if (typeof source === 'string' || source instanceof URL) {
+  if (typeof source === 'string' || isUrl(source)) {
     const url = toUrl(source);
     if (url.protocol === 'file:' && isNode())
       return WebAssembly.compile(await readFileUrl(url, signal));
@@ -133,7 +167,8 @@ async function compile(source: WasmSource, signal: AbortSignal): Promise<WebAsse
     res = source;
   } else {
     throw new TypeError(
-      'wav2flac: init() needs wasm bytes, a WebAssembly.Module, a URL, a path or a Response',
+      'wav2flac: init() needs wasm bytes, a WebAssembly.Module, a URL, a path or a Response,' +
+        ` got ${kind(source)}`,
     );
   }
   const r = await res;
@@ -314,9 +349,10 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
  * @throws {TypeError} For detached bytes, or a string that is no URL.
  */
 function retrySource(source: WasmSource): WasmSource | undefined {
-  if (source instanceof WebAssembly.Module) return source;
+  const mod = asModule(source);
+  if (mod !== undefined) return mod;
   if (typeof source === 'string') return toUrl(source);
-  if (source instanceof URL) return new URL(source.href);
+  if (isUrl(source)) return new URL(source.href);
   if (!ArrayBuffer.isView(source) && !isBuffer(source)) return undefined;
   if (isDetached(source))
     throw new TypeError('wav2flac: init() got wasm bytes that were transferred (detached)');
@@ -346,8 +382,13 @@ export function initSync(source?: BufferSource | WebAssembly.Module): void {
     );
   }
   const bytes = source ?? builtin<typeof import('node:fs')>('fs').readFileSync(defaultWasmUrl());
-  const mod =
-    bytes instanceof WebAssembly.Module ? bytes : new WebAssembly.Module(bufferSource(bytes));
+  let mod = asModule(bytes);
+  if (mod === undefined && (ArrayBuffer.isView(bytes) || isBuffer(bytes)))
+    mod = new WebAssembly.Module(bufferSource(bytes));
+  if (mod === undefined)
+    throw new TypeError(
+      `wav2flac: initSync() needs wasm bytes or a WebAssembly.Module, got ${kind(bytes)}`,
+    );
   const out = initGlueSync({ module: mod });
   compiled = mod;
   memory = out.memory;

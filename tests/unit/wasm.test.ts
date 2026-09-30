@@ -21,6 +21,20 @@ afterEach(() => {
 const collectAll = async (s: ReadableStream<Uint8Array>): Promise<Uint8Array> =>
   new Uint8Array(await new Response(s).arrayBuffer());
 
+/** A compiled module of another realm, e.g. from an iframe's parent. */
+const foreignModule = (): WebAssembly.Module => {
+  const mod = runInNewContext('new WebAssembly.Module(bytes)', { bytes }) as WebAssembly.Module;
+  expect(mod).not.toBeInstanceOf(WebAssembly.Module);
+  return mod;
+};
+
+/**
+ * Stands in for a `URL` of another realm, which a `vm` context has no class
+ * for: only the brand and the string are there, as seen from this realm.
+ */
+const foreignUrl = (href: string): URL =>
+  ({ [Symbol.toStringTag]: 'URL', href, toString: () => href }) as unknown as URL;
+
 const fresh = async (): Promise<typeof import('../../ts/lib/wasm.js')> => {
   vi.resetModules();
   return import('../../ts/lib/wasm.js');
@@ -58,8 +72,10 @@ describe('init', () => {
     ['bytes', () => bytes],
     ['ArrayBuffer', () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)],
     ['Module', () => new WebAssembly.Module(bytes)],
+    ['Module of another realm', foreignModule],
     ['file URL', () => pathToFileURL(WASM)],
     ['file URL string', () => pathToFileURL(WASM).href],
+    ['file URL of another realm', () => foreignUrl(pathToFileURL(WASM).href)],
     ['file path', () => WASM],
     [
       'SharedArrayBuffer',
@@ -138,7 +154,7 @@ describe('init', () => {
       w.init(new Response('nope', { status: 404, statusText: 'Not Found' })),
     ).rejects.toThrow(/404/);
     await expect(w.init(new Uint8Array([1, 2, 3]))).rejects.toThrow(WebAssembly.CompileError);
-    await expect(w.init(42 as never)).rejects.toThrow(/needs wasm bytes/);
+    await expect(w.init(42 as never)).rejects.toThrow(/needs wasm bytes.*, got number$/);
     await w.init(bytes);
     expect(w.isReady()).toBe(true);
   });
@@ -588,6 +604,22 @@ describe('init', () => {
     w.initSync(new WebAssembly.Module(bytes));
     expect(w.wasmMemoryBytes()).toBeGreaterThan(0);
     await w.init();
+    w = await fresh();
+    w.initSync(foreignModule());
+    expect(w.wasmModule()).toBeInstanceOf(WebAssembly.Module);
+  });
+
+  it('initSync names what it got instead of bytes or a Module', async () => {
+    const w = await fresh();
+    for (const [src, got] of [
+      [42, 'number'],
+      [{}, 'Object'],
+      [pathToFileURL(WASM), 'URL'],
+    ] as const)
+      expect(() => w.initSync(src as never)).toThrow(
+        new TypeError(`wav2flac: initSync() needs wasm bytes or a WebAssembly.Module, got ${got}`),
+      );
+    expect(w.isReady()).toBe(false);
   });
 
   it('points the default URL next to the bundle', async () => {
