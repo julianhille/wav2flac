@@ -46,8 +46,9 @@ export interface WorkerEncoder {
 /** Options for {@link createWorkerEncoder}. */
 export interface WorkerEncoderOptions {
   /**
-   * Worker script URL. Default: the package's `worker.js`. In Node a string
-   * is a file path unless it starts with `file:`.
+   * Worker script URL. Default: the package's worker from the same build,
+   * `worker.min.js` for the minified bundles. In Node a string is a file path
+   * unless it starts with `file:`.
    */
   url?: URL | string | undefined;
   /** Where the main thread loads the wasm from (see `init`). It is compiled once and shared. */
