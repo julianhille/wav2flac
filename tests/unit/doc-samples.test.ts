@@ -230,14 +230,17 @@ describe('parallel-encoding.md', () => {
     expect(status).toEqual(files.map((f) => (f === 'crash' || f === 'bad' ? 'rejected' : 'fulfilled')));
   });
 
-  it('rejects waiting jobs on terminate, and replaces nothing after it', async () => {
+  it('rejects running and waiting jobs on terminate, and replaces nothing after it', async () => {
     const pool = await createEncoderPool(1);
-    const running = pool.encode('crash');
+    const running = pool.encode('vanish');
     const waiting = pool.encode('a');
+    await vi.waitFor(() => expect(StubWorker.started).toEqual(['vanish']));
     pool.terminate();
-    await expect(running).rejects.toThrow('exited');
-    await expect(waiting).rejects.toThrow('terminated');
-    await expect(pool.encode('b')).rejects.toThrow('terminated');
+    await expect(running).rejects.toThrow('The worker was terminated.');
+    await expect(waiting).rejects.toThrow('The pool was terminated.');
+    await expect(pool.encode('b')).rejects.toThrow('The pool was terminated.');
+    // The failed job's check finds the worker dead, but the pool is closed.
+    await new Promise((r) => setTimeout(r, 10));
     expect(StubWorker.all).toHaveLength(1);
   });
 });
