@@ -53,24 +53,38 @@ fn sinc_len(q: ResampleQuality, ratio: f64) -> usize {
     base * stretch
 }
 
+/// Sinc table oversampling factor of each preset.
+fn oversampling(q: ResampleQuality) -> usize {
+    match q {
+        ResampleQuality::Fast => 64,
+        ResampleQuality::Balanced => 128,
+        ResampleQuality::Best => 256,
+    }
+}
+
 /// Filter parameters for a quality preset.
 fn parameters(q: ResampleQuality, ratio: f64) -> SincInterpolationParameters {
     let len = sinc_len(q, ratio);
-    match q {
+    let params = match q {
         ResampleQuality::Fast => SincInterpolationParameters::new(len, WindowFunction::Hann2)
-            .oversampling_factor(64)
             .interpolation(SincInterpolationType::Linear),
-        ResampleQuality::Balanced => {
+        ResampleQuality::Balanced | ResampleQuality::Best => {
             SincInterpolationParameters::new(len, WindowFunction::BlackmanHarris2)
-                .oversampling_factor(128)
                 .interpolation(SincInterpolationType::Cubic)
         }
-        ResampleQuality::Best => {
-            SincInterpolationParameters::new(len, WindowFunction::BlackmanHarris2)
-                .oversampling_factor(256)
-                .interpolation(SincInterpolationType::Cubic)
-        }
-    }
+    };
+    params.oversampling_factor(oversampling(q))
+}
+
+/// The filter's group delay in output frames at `ratio` (may be negative).
+///
+/// rubato starts at input position `1 / ratio - (len - 1)` and centres the
+/// sinc `len / 2 - 1 + 1 / oversampling` input frames after it, so output
+/// frame `k` lands on input `(k + 1) / ratio - len / 2 + 1 / oversampling`.
+/// Its own `output_delay()` truncates `len * ratio / 2` and misses both
+/// corrections, which grow to several frames at large upsampling ratios.
+fn group_delay(q: ResampleQuality, ratio: f64) -> f64 {
+    sinc_len(q, ratio) as f64 * ratio / 2.0 - 1.0 - ratio / oversampling(q) as f64
 }
 
 /// A streaming resampler for interleaved `f64` samples.
@@ -81,7 +95,7 @@ pub struct Resample {
     from: u32,
     /// Output rate.
     to: u32,
-    /// Interleaved input not yet processed.
+    /// Interleaved input not yet processed (starts with the lead-in silence).
     pending: Vec<f64>,
     /// Frames pushed in total.
     frames_in: u64,
@@ -136,17 +150,22 @@ impl Resample {
             FixedAsync::Input,
         )
         .map_err(|e| Error::new(ErrorCode::UnsupportedFormat, format!("resampler: {e}")))?;
-        // The filter's group delay in output frames. rubato's `output_delay()`
-        // truncates `len * ratio / 2`, which is about one frame too late; trim
-        // the true delay rounded to the nearest frame.
-        let delay = sinc_len(quality, ratio) as f64 * ratio / 2.0 - 1.0;
-        let to_trim = delay.round().max(0.0) as usize;
+        // Trim the group delay rounded to the nearest frame. At strong
+        // downsampling it is negative (the output starts early), so lead in
+        // with just enough silence to make it non-negative first.
+        let delay = group_delay(quality, ratio);
+        let lead_in = if delay < 0.0 {
+            (-delay / ratio).ceil() as usize
+        } else {
+            0
+        };
+        let to_trim = (delay + lead_in as f64 * ratio).round().max(0.0) as usize;
         Ok(Self {
             inner,
             channels,
             from,
             to,
-            pending: Vec::new(),
+            pending: vec![0.0; lead_in * channels],
             frames_in: 0,
             frames_out: 0,
             to_trim,
@@ -252,42 +271,94 @@ impl Resample {
 mod tests {
     use super::*;
 
+    /// Offset (output frames) of the output against the ideal timing, from
+    /// a least-squares fit of a low tone. The filter has linear phase, so
+    /// this is its uncorrected delay at any ratio, even where an impulse
+    /// response is too narrow or too wide to locate.
+    fn measured_offset(from: u32, to: u32, q: ResampleQuality) -> f64 {
+        let tone = 0.05 * f64::from(from.min(to));
+        let n_in = ((8.0 * f64::from(from) / tone) as usize).max(16 * CHUNK_FRAMES);
+        let w_in = std::f64::consts::TAU * tone / f64::from(from);
+        let x: Vec<f64> = (0..n_in).map(|j| (w_in * j as f64).sin()).collect();
+        let mut r = Resample::new(from, to, 1, q).unwrap();
+        let mut out = Vec::new();
+        r.push(&x, &mut out).unwrap();
+        r.finish(&mut out).unwrap();
+        // Skip the filter's run-in and run-out at both ends.
+        let ratio = f64::from(to) / f64::from(from);
+        let edge = (sinc_len(q, ratio) as f64 * ratio).ceil() as usize + 2;
+        let w = std::f64::consts::TAU * tone / f64::from(to);
+        let (mut ss, mut sc, mut cc, mut ys, mut yc) = (0.0, 0.0, 0.0, 0.0, 0.0);
+        for (n, y) in out.iter().enumerate().take(out.len() - edge).skip(edge) {
+            let (s, c) = (w * n as f64).sin_cos();
+            ss += s * s;
+            sc += s * c;
+            cc += c * c;
+            ys += y * s;
+            yc += y * c;
+        }
+        // y ~ a sin(wn) + b cos(wn) = sin(w (n - off)) with a delay `off`.
+        let det = ss * cc - sc * sc;
+        let a = (ys * cc - yc * sc) / det;
+        let b = (yc * ss - ys * sc) / det;
+        -b.atan2(a) / w
+    }
+
     #[test]
-    fn impulse_stays_on_time() {
+    fn output_stays_on_time_at_any_ratio() {
         let qualities = [
             ResampleQuality::Fast,
             ResampleQuality::Balanced,
             ResampleQuality::Best,
         ];
-        let rates = [
+        let mut rates = vec![
             (44100u32, 48000u32),
             (48000, 44100),
             (48000, 16000),
             (16000, 48000),
             (44100, 22050),
             (8000, 8001),
+            // Stretch 4 (`sinc_len == CHUNK_FRAMES` for Best) and its edges.
+            (192000, 16000),
+            (48000, 12000),
+            (48001, 12000),
+            // Largest upsampling, where the sub-sample term reaches frames.
+            (8000, 192000),
+            (1000, 256000),
+            // Largest downsampling, where the delay is negative.
+            (384000, 6),
+            (6 * MAX_DOWNSAMPLE_RATIO, 6),
         ];
+        // Pseudo-random rates across the whole supported range.
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |n: u32| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % u64::from(n)) as u32
+        };
+        for _ in 0..12 {
+            let from = 1000 + next(383_000);
+            let log2 = f64::from(next(2400)) / 100.0 - 16.0;
+            let to = ((f64::from(from) * log2.exp2()) as u32).clamp(from / 65536 + 1, from * 256);
+            rates.push((from, to));
+        }
         for q in qualities {
-            for (from, to) in rates {
-                let k = 5000usize;
-                let mut x = vec![0.0; 20000];
-                x[k] = 1.0;
-                let mut r = Resample::new(from, to, 1, q).unwrap();
-                let mut out = Vec::new();
-                r.push(&x, &mut out).unwrap();
-                r.finish(&mut out).unwrap();
-                // Energy centroid of the response around its peak.
-                let peak = (0..out.len())
-                    .max_by(|&a, &b| out[a].abs().total_cmp(&out[b].abs()))
-                    .unwrap();
-                let (mut sum, mut weight) = (0.0, 0.0);
-                for (i, v) in out.iter().enumerate().take(peak + 40).skip(peak - 40) {
-                    sum += v * v * i as f64;
-                    weight += v * v;
-                }
-                let want = k as f64 * f64::from(to) / f64::from(from);
-                let off = sum / weight - want;
-                assert!(off.abs() <= 0.5, "{q:?} {from}->{to}: {off:+.3} frames");
+            for &(from, to) in &rates {
+                let ratio = f64::from(to) / f64::from(from);
+                let delay = group_delay(q, ratio);
+                let lead_in = if delay < 0.0 {
+                    (-delay / ratio).ceil()
+                } else {
+                    0.0
+                };
+                let shifted = delay + lead_in * ratio;
+                let want = shifted - shifted.round();
+                let off = measured_offset(from, to, q);
+                assert!(
+                    off.abs() <= 0.5 + 1e-3 && (off - want).abs() <= 0.02,
+                    "{q:?} {from}->{to}: {off:+.4} frames, predicted {want:+.4}"
+                );
             }
         }
     }

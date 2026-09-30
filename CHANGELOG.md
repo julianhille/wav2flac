@@ -23,6 +23,16 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- Resampled output stays aligned with the input at every supported ratio. At
+  large upsampling ratios it used to start up to 4 frames early (for example
+  1 kHz to 256 kHz at `resampleQuality: 'fast'`), and at the largest
+  downsampling ratios about one frame early.
+- When a message to or from a `createWorkerEncoder()` worker can't be
+  deserialized, for example a wasm module that the browser can't share with
+  the worker, every pending and later call now fails with an error that says
+  so, and the worker is stopped. The first job used to fail with an obscure
+  `TypeError` from inside the worker, or wait forever. In Node, a message from
+  the worker that couldn't be deserialized used to be ignored.
 - Cancelling the stream that `encodeStream()` returned while the wasm is
   still loading now cancels the input stream with the cancel reason and
   stops waiting for the load. The input used to stay open until the load
