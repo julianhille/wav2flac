@@ -403,7 +403,14 @@ fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
     let pcm_bits = le_u16(raw, 14);
     let odd_pcm_width = tag == 0x0001 && pcm_bits % 8 != 0;
     if odd_pcm_width {
-        mini[34..36].copy_from_slice(&pcm_bits.next_multiple_of(8).to_le_bytes());
+        // Near u16::MAX there is no larger multiple of 8 that fits.
+        let Some(container_bits) = pcm_bits.checked_next_multiple_of(8) else {
+            return err(
+                ErrorCode::UnsupportedBitDepth,
+                format!("unsupported sample width: {pcm_bits} bits per sample"),
+            );
+        };
+        mini[34..36].copy_from_slice(&container_bits.to_le_bytes());
     }
     let reader = hound::WavReader::new(Cursor::new(&mini[..])).map_err(map_hound)?;
     let mut spec = reader.spec();

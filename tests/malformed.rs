@@ -2,7 +2,7 @@
 //! Broken and unsupported inputs produce the right error code and never panic.
 mod common;
 use common::*;
-use wav2flac::{encode_all, Encoder, ErrorCode, Options};
+use wav2flac::{encode_all, probe, Encoder, ErrorCode, Options};
 
 fn code(w: &[u8]) -> ErrorCode {
     encode_all(w, Options::default()).unwrap_err().code()
@@ -144,6 +144,20 @@ fn unsupported_bit_depths() {
             ErrorCode::UnsupportedBitDepth
         };
         assert_eq!(e.code(), expected, "{container_bits}-bit container: {e}");
+    }
+    // Plain PCM widths that are not a multiple of 8 and have no multiple of 8
+    // above them in a u16 fail instead of overflowing. 65527 still has one
+    // (65528), which is too wide for the 2-byte samples.
+    for (bits, expected) in [
+        (65527u16, ErrorCode::InvalidWav),
+        (65529, ErrorCode::UnsupportedBitDepth),
+        (65535, ErrorCode::UnsupportedBitDepth),
+    ] {
+        let mut f = WavBuilder::pcm(1, 8000, 16).build_raw(&[0; 40]);
+        f[34..36].copy_from_slice(&bits.to_le_bytes());
+        let e = encode_all(&f, Options::default()).unwrap_err();
+        assert_eq!(e.code(), expected, "{bits} bits: {e}");
+        assert_eq!(probe(&f).unwrap_err().code(), expected, "{bits} bits");
     }
 }
 
