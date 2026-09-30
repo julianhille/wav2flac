@@ -194,6 +194,62 @@ fn garbage_pad_byte_is_skipped() {
 }
 
 #[test]
+fn missing_pad_before_unknown_chunk_with_printable_length() {
+    // No pad byte after an odd chunk, and the next chunk's id is unknown and
+    // its length's low byte is printable (0x20), so the id shifted by one
+    // byte ("bcd ") looks like a chunk id too. Its length would be the
+    // three zero bytes plus the first body byte, 16 MiB or more. (A body
+    // starting with a zero byte stays ambiguous; the pad is assumed then.)
+    let s = signal(Signal::Noise, 16, 1, 100, 6);
+    let data = WavBuilder::pcm(1, 8000, 16).pack_int(&s);
+    for body in [[b'x'; 32], [0xFF; 32], [1; 32]] {
+        let mut f = b"RIFF\0\0\0\0WAVE".to_vec();
+        f.extend_from_slice(b"odd \x03\0\0\0abc"); // no pad byte
+        f.extend_from_slice(b"abcd\x20\0\0\0");
+        f.extend_from_slice(&body);
+        f.extend_from_slice(b"fmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0");
+        f.extend_from_slice(b"data");
+        f.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        f.extend_from_slice(&data);
+        let n = (f.len() - 8) as u32;
+        f[4..8].copy_from_slice(&n.to_le_bytes());
+        for chunks in [&[usize::MAX][..], &[1][..], &[7][..]] {
+            let what = format!("body {:#x}, chunks {chunks:?}", body[0]);
+            let flac = encode_chunked(&f, Options::default(), chunks).expect(&what);
+            assert_eq!(decode(&flac).samples, s, "{what}");
+        }
+    }
+}
+
+#[test]
+fn missing_pad_after_odd_data_before_unknown_chunk_keeps_trailing_tags() {
+    // As above, after the data chunk: the unknown chunk must be skipped by its
+    // real length for the LIST behind it to be found.
+    let s = signal(Signal::Noise, 8, 1, 1001, 5);
+    let mut f = WavBuilder::pcm(1, 8000, 8).build(&s);
+    f.pop(); // the builder's pad byte
+    f.extend_from_slice(b"abcd\x20\0\0\0");
+    f.extend_from_slice(&[b'x'; 32]);
+    let list = info_list(&[(b"INAM", b"after")]);
+    f.extend_from_slice(b"LIST");
+    f.extend_from_slice(&(list.len() as u32).to_le_bytes());
+    f.extend_from_slice(&list);
+    let n = (f.len() - 8) as u32;
+    f[4..8].copy_from_slice(&n.to_le_bytes());
+    for chunks in [&[usize::MAX][..], &[1][..], &[7][..]] {
+        let flac = encode_chunked(&f, Options::default(), chunks).unwrap();
+        let (blocks, _) = metadata_blocks(&flac);
+        let vc = blocks.iter().find(|b| b.0 == 4).expect("vorbis comment");
+        let (_, tags) = parse_vorbis(&vc.2);
+        assert!(
+            tags.contains(&("TITLE".into(), "after".into())),
+            "{chunks:?}: {tags:?}"
+        );
+        assert_eq!(decode(&flac).samples, s);
+    }
+}
+
+#[test]
 fn printable_pad_after_odd_data_keeps_trailing_tags() {
     // 8-bit mono with an odd sample count: the data chunk is padded with a
     // space, and a LIST follows.

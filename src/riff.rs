@@ -230,6 +230,11 @@ impl HeaderParser {
             // this chunk, which must not be processed twice.
             let mut next = end;
             if len % 2 == 1 {
+                // Nine bytes let `after_pad` compare the lengths, too; at the
+                // end of the input five will do.
+                if buf.len() < end + 9 && !eof {
+                    return self.need_more(end + 9, eof, "chunk padding");
+                }
                 if buf.len() < end + 5 {
                     return self.need_more(end + 5, eof, "chunk padding");
                 }
@@ -575,14 +580,23 @@ pub(crate) fn is_chunk_id(id: &[u8]) -> bool {
 /// RIFF requires a pad byte after odd-sized chunks. Some writers omit it,
 /// and some fill it with garbage, even printable garbage such as a space.
 /// Both positions are looked at: a zero byte is always a pad; otherwise the
-/// position whose four bytes look like a chunk id wins, and if both do, a
-/// well-known id at `end` means the pad is missing. Needs five bytes after
-/// `end` to decide; with fewer there is no next chunk either way.
+/// position whose four bytes look like a chunk id wins. If both do, a
+/// well-known id at `end` means the pad is missing, and so does a length of
+/// 16 MiB or more at `end + 1` (its top byte would be the first body byte)
+/// when the length at `end` is smaller. Otherwise the pad is assumed.
+///
+/// Needs five bytes after `end` to decide; with fewer there is no next chunk
+/// either way. The lengths are only compared when nine bytes are there.
 fn after_pad(buf: &[u8], end: usize) -> usize {
     let id = |at: usize| buf.get(at..at + 4).filter(|id| is_chunk_id(id));
+    let huge = |at: usize| buf.get(at + 7).is_some_and(|top| *top != 0);
     match (buf.get(end), id(end), id(end + 1)) {
         (Some(0), _, _) | (_, None, _) => end + 1,
-        (_, Some(here), Some(_)) if !KNOWN_IDS.contains(&here) => end + 1,
+        (_, Some(here), Some(_))
+            if !KNOWN_IDS.contains(&here) && !(huge(end + 1) && !huge(end)) =>
+        {
+            end + 1
+        }
         _ => end,
     }
 }
@@ -653,8 +667,8 @@ impl TrailingScanner {
             }
             let want = match self.list {
                 Some(total) => total,
-                // A possible pad byte is decided on the first five bytes.
-                None if self.pad => 5,
+                // A possible pad byte is decided on the first nine bytes.
+                None if self.pad => 9,
                 None => 8,
             };
             let n = (want - self.buf.len()).min(input.len());
@@ -668,10 +682,11 @@ impl TrailingScanner {
                 self.pad = (total - 8) % 2 == 1;
                 self.buf.clear();
             } else if self.pad {
+                // Scan the held bytes again from the chunk start; there are
+                // too few of them to need another pad decision.
                 self.pad = false;
-                if after_pad(&self.buf, 0) == 1 {
-                    self.buf.remove(0);
-                }
+                let held = std::mem::take(&mut self.buf);
+                self.push(&held[after_pad(&held, 0)..]);
             } else if !is_chunk_id(&self.buf[..4]) {
                 self.done = true;
                 self.buf = Vec::new();
