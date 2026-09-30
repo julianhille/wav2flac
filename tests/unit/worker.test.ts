@@ -245,6 +245,43 @@ describe('worker protocol', () => {
     await expect(w.probe(wav)).rejects.toMatchObject({ name: 'AbortError' });
   });
 
+  it('cancels the input when the encoder is already dead', async () => {
+    const cancelled: unknown[] = [];
+    // Never ends by itself, like an HTTP body.
+    const input = (): ReadableStream<Uint8Array> =>
+      new ReadableStream({ cancel: (r) => void cancelled.push(r) });
+    const { w } = pair();
+    w.terminate();
+    const a = input();
+    await expect(w.encode(a)).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(collect(w.encodeStream(input()))).rejects.toThrow(/terminated/);
+    // Being dead wins over bad options, and the input is still released.
+    await expect(w.encode(input(), { compressionLevel: 99 })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    await vi.waitFor(() => expect(cancelled).toHaveLength(3));
+    for (const r of cancelled) expect(r).toMatchObject({ name: 'AbortError' });
+    expect(a.locked).toBe(false);
+
+    // Same after a crash.
+    let fire: (e: Error) => void = () => undefined;
+    const port: Port<FromWorker, ToWorker> = {
+      post: () => undefined,
+      listen: (_on, onErr) => {
+        fire = onErr;
+      },
+      ref: () => undefined,
+      close: () => undefined,
+    };
+    const crashed = connect(port, wasm);
+    const crash = new Error('crashed');
+    fire(crash);
+    cancelled.length = 0;
+    await expect(crashed.encode(input())).rejects.toBe(crash);
+    await expect(collect(crashed.encodeStream(input()))).rejects.toBe(crash);
+    await vi.waitFor(() => expect(cancelled).toEqual([crash, crash]));
+  });
+
   it('fails all jobs when the worker errors', async () => {
     const ch = new MessageChannel();
     let fire: (e: Error) => void = () => undefined;

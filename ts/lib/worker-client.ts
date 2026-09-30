@@ -244,6 +244,8 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
   ): (() => void) => {
     let prepared: ReturnType<typeof preparePcm>;
     try {
+      // A dead encoder wins over bad options, and still releases the input.
+      if (dead !== undefined) throw dead;
       // Check the signal before locking the input stream.
       opts?.signal?.throwIfAborted();
       prepared = preparePcm(rawInput, normalizeOptions(opts, streaming));
@@ -397,7 +399,6 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
   return {
     encode(input, opts) {
       return new Promise<Bytes>((resolve, reject) => {
-        if (dead !== undefined) throw dead;
         start(input, opts, false, ignore, (d) => resolve(d!), reject);
       });
     },
@@ -419,7 +420,6 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
           start(c) {
             // Like encodeStream() on the main thread: failures error the stream.
             try {
-              if (dead !== undefined) throw dead;
               id = nextId;
               cancel = start(
                 input,

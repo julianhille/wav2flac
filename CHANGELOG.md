@@ -21,6 +21,10 @@ links are collected at the bottom of this file.
   single-page app navigated, `encode()` fetched the wasm from the new route,
   got the HTML page and failed with a `CompileError`. rc.3 did not have this
   bug.
+- A worker encoder that was terminated or whose worker crashed now cancels a
+  `ReadableStream` input passed to `encode()` or `encodeStream()`, like every
+  other failed encode. Before, the stream was left open, so a `fetch()` body
+  kept its HTTP connection.
 
 ## [1.0.0-rc.4] - 2026-09-30
 
