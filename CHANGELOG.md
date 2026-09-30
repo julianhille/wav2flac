@@ -27,6 +27,14 @@ links are collected at the bottom of this file.
   kept its HTTP connection.
 - `encode()` and `encodeStream()` on the main thread cancel a `ReadableStream`
   input when the options are invalid, as the worker encoder already did.
+- `copy: true` on the worker encoder copies a Node `Buffer`. Before, it used
+  `Buffer#slice()`, which returns a view: a Buffer from `fs.readFile()` was
+  still transferred (detached), so encoding it a second time failed, and a
+  Buffer view was read after the call returned, so reusing it at once
+  encoded garbage. Buffer chunks of a stream input were detached too.
+- `probe()` on the worker encoder posts a copy of the header prefix of a Node
+  `Buffer`. Before, it posted a view, which cloned the whole backing buffer
+  on every try.
 
 ## [1.0.0-rc.4] - 2026-09-30
 

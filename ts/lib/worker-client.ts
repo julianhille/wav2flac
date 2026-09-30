@@ -217,12 +217,14 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
 
   /**
    * Prepares bytes for sending: transfers when allowed, copies otherwise.
+   * Copies with `new Uint8Array()`, not `slice()`: on a Node `Buffer`,
+   * `slice()` returns a view of the same memory.
    * @param bytes The bytes.
    * @param copy Whether the caller asked to keep the buffer.
    * @returns Bytes safe to transfer or copy.
    */
   const outgoing = (bytes: Uint8Array, copy: boolean): Uint8Array =>
-    copy || transferOf(bytes).length === 0 ? bytes.slice() : bytes;
+    copy || transferOf(bytes).length === 0 ? new Uint8Array(bytes) : bytes;
 
   /**
    * Creates a job that feeds `input` to the worker and routes its messages.
@@ -474,7 +476,8 @@ export function connect(port: Port<FromWorker, ToWorker>, wasm?: WasmSource): Wo
       const bytes = toBytes(input, 'input', BUFFER_INPUT);
       // Only the header is read, so copy growing prefixes, not the whole file.
       for (let n = Math.min(PROBE_FIRST_TRY, bytes.length); ; n = Math.min(n * 4, bytes.length)) {
-        const data = bytes.slice(0, n);
+        // A copy, not a Buffer view that would clone the whole backing buffer.
+        const data = new Uint8Array(bytes.subarray(0, n));
         try {
           return await request(
             (id) => ({ t: 'probe', id, data }),

@@ -78,6 +78,50 @@ describe('worker protocol', () => {
     expect(padded.byteLength).toBe(wav.length + 3);
   });
 
+  it('keeps a Node Buffer with copy: true, so it can be encoded again', async () => {
+    const { w } = pair();
+    const ref = encodeSync(wav);
+    // What fs.readFile() returns: a Buffer that owns its whole ArrayBuffer.
+    // Buffer#slice() is a view, so copying with it would still transfer.
+    const buf = Buffer.from(wav);
+    expect(transferOf(buf)).toHaveLength(1);
+    expect(await w.encode(buf, { copy: true })).toEqual(ref);
+    expect(buf.buffer.byteLength, 'copy: true must not detach the caller buffer').toBe(wav.length);
+    expect(await w.encode(buf, { copy: true })).toEqual(ref);
+  });
+
+  it('copies a Buffer view at call time, so the caller may reuse it at once', async () => {
+    const { w } = pair();
+    const ref = encodeSync(wav);
+    const backing = Buffer.alloc(wav.length + 16);
+    backing.set(wav, 16);
+    const view = backing.subarray(16);
+    const p = w.encode(view, { copy: true });
+    view.fill(0);
+    expect(await p).toEqual(ref);
+  });
+
+  it('does not detach Buffer stream chunks with copy: true', async () => {
+    const { w } = pair();
+    const chunks: Buffer[] = [];
+    let i = 0;
+    const src = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (i >= wav.length) return c.close();
+        // Like Readable.toWeb(fs.createReadStream()): each chunk owns its buffer.
+        const chunk = Buffer.from(wav.subarray(i, i + 65536));
+        chunks.push(chunk);
+        c.enqueue(chunk);
+        i += 65536;
+      },
+    });
+    expect(await w.encode(src, { copy: true })).toEqual(encodeSync(wav));
+    expect(
+      chunks.filter((c) => c.buffer.byteLength === 0),
+      'detached chunks',
+    ).toHaveLength(0);
+  });
+
   it('pulls stream input chunk by chunk', async () => {
     const { w, toHost } = pair();
     expect(await w.encode(streamOf(wav, 50_000))).toEqual(encodeSync(wav));
@@ -223,6 +267,20 @@ describe('worker protocol', () => {
     new DataView(big.buffer).setUint32(4, big.length - 8, true);
     await expect(w.probe(big)).resolves.toMatchObject({ channels: 2, frames: 44100 * 2 });
     expect(big.length).toBeGreaterThan(junk); // still attached: only prefixes were copied
+  });
+
+  it('probes a Buffer by posting copies of its prefix, not views of it', async () => {
+    const { w, toHost } = pair();
+    const big = Buffer.alloc(2 * 1024 * 1024);
+    big.set(wav.subarray(0, 44));
+    new DataView(big.buffer, big.byteOffset).setUint32(4, big.length - 8, true);
+    new DataView(big.buffer, big.byteOffset).setUint32(40, big.length - 44, true);
+    await expect(w.probe(big)).resolves.toMatchObject({ channels: 2 });
+    const probes = toHost.filter((m) => m.t === 'probe');
+    expect(probes.length).toBeGreaterThan(0);
+    // A view would structured-clone the whole 2 MiB backing buffer.
+    for (const m of probes) expect(m.data.buffer.byteLength).toBe(m.data.byteLength);
+    expect(big.length).toBe(2 * 1024 * 1024);
   });
 
   it('explains a retry with an input transferred by an earlier call', async () => {
