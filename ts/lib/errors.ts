@@ -104,31 +104,105 @@ export interface SerializedError {
   name: string;
   message: string;
   code?: string;
+  stack?: string;
+  /** Set for a `DOMException`, which is revived as one. */
+  dom?: true;
+  /** The error's `cause`; a cause that is not an error arrives as an `Error`. */
+  cause?: SerializedError;
 }
+
+/** How many nested causes cross the boundary; also stops cyclic ones. */
+const MAX_CAUSES = 8;
 
 /**
  * Serializes an error for `postMessage`.
  * @param e The error.
+ * @param depth Nesting level of `e` in a chain of causes.
  * @returns A plain, structured-cloneable object.
  * @internal
  */
-export function serializeError(e: unknown): SerializedError {
-  if (e instanceof Wav2FlacError) return { name: e.name, code: e.code, message: e.message };
-  if (e instanceof Error || e instanceof DOMException) return { name: e.name, message: e.message };
-  return { name: 'Error', message: String(e) };
+export function serializeError(e: unknown, depth = 0): SerializedError {
+  // Never throws: an error that can't be described still has to reach the client.
+  try {
+    return serializeOne(e, depth);
+  } catch {
+    return { name: 'Error', message: 'unserializable error' };
+  }
 }
 
 /**
- * Rebuilds an error that was serialized across a worker boundary.
+ * {@link serializeError} without its fallback.
+ * @param e The error.
+ * @param depth Nesting level of `e` in a chain of causes.
+ * @returns A plain, structured-cloneable object.
+ */
+function serializeOne(e: unknown, depth: number): SerializedError {
+  if (!(e instanceof Error || e instanceof DOMException))
+    return { name: 'Error', message: describe(e) };
+  const out: SerializedError = { name: String(e.name), message: String(e.message) };
+  if (e instanceof Wav2FlacError) out.code = e.code;
+  if (e instanceof DOMException) out.dom = true;
+  if (typeof e.stack === 'string') out.stack = e.stack;
+  // An absent cause and `cause: undefined` both arrive as no cause.
+  if (e.cause !== undefined && depth < MAX_CAUSES) out.cause = serializeError(e.cause, depth + 1);
+  return out;
+}
+
+/**
+ * `String(v)`, or its `Object.prototype.toString` tag for a value that has no
+ * usable conversion (a null-prototype object, a throwing `toString`).
+ * @param v Any value.
+ * @returns A description.
+ */
+function describe(v: unknown): string {
+  try {
+    return String(v);
+  } catch {
+    return Object.prototype.toString.call(v);
+  }
+}
+
+/**
+ * The error types revived by name; any other name gives an `Error` with that name.
+ * @returns Constructors by name.
+ */
+function errorTypes(): Readonly<Record<string, new (message: string) => Error>> {
+  const types: Record<string, new (message: string) => Error> = {
+    TypeError,
+    RangeError,
+    SyntaxError,
+    ReferenceError,
+    EvalError,
+    URIError,
+  };
+  if (typeof WebAssembly === 'object') {
+    types['CompileError'] = WebAssembly.CompileError;
+    types['LinkError'] = WebAssembly.LinkError;
+    types['RuntimeError'] = WebAssembly.RuntimeError;
+  }
+  return types;
+}
+
+/**
+ * Rebuilds an error that was serialized across a worker boundary, with the
+ * worker's stack and cause.
  * @param e Serialized error.
  * @returns The reconstructed error.
  * @internal
  */
 export function reviveError(e: SerializedError): Error {
-  if (e.name === 'Wav2FlacError' && isErrorCode(e.code))
-    return new Wav2FlacError(e.code, e.message);
-  if (e.name === 'AbortError' || e.name === 'TimeoutError') return abortError(e.message, e.name);
-  const err = e.name === 'TypeError' ? new TypeError(e.message) : new Error(e.message);
+  let err: Error;
+  if (e.name === 'Wav2FlacError' && isErrorCode(e.code)) err = new Wav2FlacError(e.code, e.message);
+  else if (e.dom === true) err = abortError(e.message, e.name);
+  else {
+    const types = errorTypes();
+    err = new (Object.hasOwn(types, e.name) ? types[e.name]! : Error)(e.message);
+    if (err.name !== e.name) err.name = e.name;
+  }
+  const own = { configurable: true, writable: true, enumerable: false };
+  if (e.stack !== undefined) Object.defineProperty(err, 'stack', { ...own, value: e.stack });
+  if (e.cause !== undefined)
+    Object.defineProperty(err, 'cause', { ...own, value: reviveError(e.cause) });
   return err;
 }
 

@@ -13,7 +13,7 @@
 import { runBuffered, runStream, runSync, type Bytes } from './lib/engine.js';
 import {
   BUFFER_INPUT,
-  isStream,
+  releaseUnread,
   preparePcm,
   toBytes,
   type Input,
@@ -69,10 +69,17 @@ export {
  * ```
  */
 export async function encode(input: Input | PcmInput, options?: Options): Promise<Bytes> {
-  const p = preparePcm(input, normalizeOptions(options, false));
+  let p: ReturnType<typeof preparePcm>;
+  try {
+    p = preparePcm(input, normalizeOptions(options, false));
+  } catch (e) {
+    // Bad options fail the encode, so a stream input is cancelled too.
+    releaseUnread(input, e);
+    throw e;
+  }
   await init(undefined, { signal: options?.signal }).catch((e: unknown) => {
     // As for any failed encode, a stream input is cancelled.
-    if (isStream(p.input)) void p.input.cancel(e).catch(ignore);
+    releaseUnread(p.input, e);
     throw e;
   });
   return runBuffered(p.input, p.args, { signal: options?.signal, onProgress: options?.onProgress });
@@ -84,7 +91,8 @@ export async function encode(input: Input | PcmInput, options?: Options): Promis
  * frames as the consumer reads. Memory stays bounded for any input length.
  *
  * @param input WAV bytes or a stream of them; raw PCM with `options.pcm`.
- * @param options Encoder options (`seekPointInterval` does not apply).
+ * @param options Encoder options. `seekPointInterval` is validated but has no
+ * effect: a stream has no seek table.
  * @returns The FLAC stream. It never throws: every failure, including
  * invalid options, bad input and aborts, errors the stream instead.
  * @example
@@ -93,28 +101,47 @@ export async function encode(input: Input | PcmInput, options?: Options): Promis
  * await flac.pipeTo(fileWritable);
  * ```
  */
-export function encodeStream(
-  input: Input | PcmInput,
-  options?: Omit<Options, 'seekPointInterval'>,
-): ReadableStream<Bytes> {
+export function encodeStream(input: Input | PcmInput, options?: Options): ReadableStream<Bytes> {
   // Every failure errors the returned stream, so consumers handle one path.
   let prepared: ReturnType<typeof preparePcm>;
   try {
     prepared = preparePcm(input, normalizeOptions(options, true));
   } catch (e) {
+    releaseUnread(input, e);
     return new ReadableStream<Bytes>({ start: (c) => c.error(e) });
   }
   const { input: bytes, args } = prepared;
   const hooks = { signal: options?.signal, onProgress: options?.onProgress };
   if (isReady()) return runStream(bytes, args, hooks);
   const { readable, writable } = new TransformStream<Bytes, Bytes>();
-  init(undefined, { signal: options?.signal })
+  // Stops waiting for the load on the caller's abort or the consumer's cancel.
+  // Always a signal: waiting without one would pin a stalled load, and with it
+  // the input, even after the consumer gave up.
+  const stop = new AbortController();
+  const signal = options?.signal;
+  const onAbort = (): void => stop.abort(signal?.reason);
+  if (signal?.aborted === true) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
+  // Cancelling the readable errors the writable with the cancel reason.
+  const writer = writable.getWriter();
+  let loading = true;
+  writer.closed.catch((reason: unknown) => {
+    if (loading) stop.abort(reason);
+  });
+  init(undefined, { signal: stop.signal })
     .then(
-      () => runStream(bytes, args, hooks).pipeTo(writable),
+      () => {
+        loading = false;
+        signal?.removeEventListener('abort', onAbort);
+        writer.releaseLock();
+        return runStream(bytes, args, hooks).pipeTo(writable);
+      },
       (e: unknown) => {
+        loading = false;
+        signal?.removeEventListener('abort', onAbort);
         // The input is never read, so release it like a failed encode would.
-        if (isStream(bytes)) void bytes.cancel(e).catch(ignore);
-        return writable.abort(e);
+        releaseUnread(bytes, e);
+        return writer.abort(e);
       },
     )
     .catch(ignore);
@@ -164,7 +191,7 @@ export async function probe(input: Uint8Array | ArrayBuffer): Promise<WavInfo> {
 }
 
 /**
- * The encoder's version string, e.g. `wav2flac 0.1.0 (libflac-rs 0.143.1)`.
+ * The encoder's version string, e.g. `wav2flac 1.0.0 (libflac-rs 0.143.1)`.
  * @returns The version string.
  * @throws {Error} If the wasm is not initialized.
  */
@@ -176,18 +203,22 @@ export function version(): string {
 /**
  * The license notices of the third-party code in the wasm, as Markdown: a
  * table of the Rust crates, then each crate's license files word for word.
- * Initializes the wasm on first use, and reads the notices from its `license`
- * section, so nothing else is fetched.
+ * Reads the notices from the `license` section of the wasm that is already
+ * loaded. It never loads the wasm or waits for a load, so it cannot hang on a
+ * stalled download: before {@link init} or {@link initSync} has finished, it
+ * rejects.
  *
  * @example
  * ```ts
+ * await init();
  * console.log(await thirdPartyLicenses());
  * ```
  * @returns The same text as `wav2flac/THIRD_PARTY_LICENSES.txt`.
- * @throws {Error} If the wasm was loaded from a copy without its `license` section.
+ * @throws {Error} If the wasm is not initialized, or was loaded from a copy
+ * without its `license` section.
  */
 export async function thirdPartyLicenses(): Promise<string> {
-  await init();
+  if (!isReady()) throw notReady();
   const [section] = WebAssembly.Module.customSections(wasmModule(), 'license');
   if (section === undefined) {
     throw new Error(

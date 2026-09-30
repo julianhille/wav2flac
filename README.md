@@ -7,7 +7,7 @@
 
 **Turn WAV files or raw audio samples into FLAC, in the browser or in
 Node.js.** No native modules, no ffmpeg, no server round trip. The package is
-one small WebAssembly encoder (~70 KB gzipped) plus typed JavaScript. The
+one small WebAssembly encoder (~90 KB gzipped) plus typed JavaScript. The
 encoder is a bit-exact Rust port of libFLAC 1.4.3. It runs in Chrome,
 Firefox, Safari, Node ≥ 22.12, Deno, Bun and workers.
 
@@ -42,7 +42,8 @@ const flac = await encode(wavBytes); // Uint8Array in, Uint8Array (a .flac file)
 - **Production details.** Progress callbacks, `AbortSignal` cancellation,
   input-size limits, stable error codes, ESM + CommonJS, TypeScript types.
   The output is deterministic: the same input and options give the same
-  bytes, however the input is chunked.
+  bytes, however the input is chunked, in every browser and runtime and on
+  every CPU.
 - **Zero dependencies.** `npm install wav2flac` installs just this package:
   JS bundles, types and one `.wasm` file. In Node it uses only built-in
   modules.
@@ -55,6 +56,9 @@ const flac = await encode(wavBytes); // Uint8Array in, Uint8Array (a .flac file)
 ```sh
 npm install wav2flac
 ```
+
+The type declarations need TypeScript 5.7 or newer: they use the
+`Uint8Array<ArrayBuffer>` form of the typed arrays.
 
 The wasm binary is found automatically: next to the JS in Node, and via
 `new URL(…, import.meta.url)` in browsers and in bundlers such as Vite and
@@ -180,7 +184,7 @@ const info = await probe(wav);
 | `probe(input)` | → `Promise<WavInfo>`. Reads the WAV header only. |
 | `init(source?, { signal? })` / `initSync(source?)` | Loads the wasm. `encode`, `encodeStream`, `probe` and the worker encoder do this for you. A `signal` (e.g. `AbortSignal.timeout(10_000)`) gives up on a stalled download. Once every caller waiting on the load has given up, or the load failed, the next call retries: from its own source, or else from the last one; a caller without a signal, such as `probe()`, keeps the load going. |
 | `version()` | The encoder's version string. |
-| `thirdPartyLicenses()` | → `Promise<string>`. The license notices of the crates in the wasm, as Markdown. |
+| `thirdPartyLicenses()` | → `Promise<string>`. The license notices of the crates in the wasm, as Markdown. Needs the wasm loaded: it rejects before `init()` has finished, and never loads it itself. |
 | `wasmMemoryBytes()` | Size of the wasm linear memory in bytes (for diagnostics and leak checks). |
 
 `input` is a `Uint8Array`, an `ArrayBuffer` or a `ReadableStream<Uint8Array>`
@@ -196,7 +200,7 @@ generated from the TSDoc in the source.
 |---|---|---|
 | `compressionLevel` | `5` | 0 (fastest) – 8 (smallest), the libFLAC presets |
 | `blockSize` | per level | samples per frame, 16–65535 |
-| `sampleRate` | input rate | resample to this rate |
+| `sampleRate` | input rate | resample to this rate, 1–1 048 575 Hz; at most 256× the input rate and at least 1/65536 of it, else `UNSUPPORTED_FORMAT` |
 | `resampleQuality` | `'balanced'` | `'fast'`, `'balanced'` or `'best'` |
 | `bitsPerSample` | input depth | 4–32; **required for float input** |
 | `dither` | `'tpdf'` | `'tpdf'` or `'none'`; used when samples are requantized (lower bit depth, float input or resampling) |

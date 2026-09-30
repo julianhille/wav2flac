@@ -27,8 +27,6 @@ function hostPort(p: MessagePort): Port<ToWorker, FromWorker> {
     listen: (on) => {
       p.on('message', on);
     },
-    ref: () => undefined,
-    close: () => p.close(),
   };
 }
 

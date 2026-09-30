@@ -48,12 +48,79 @@ describe('errors', () => {
     expect(t.message).toBe('tt');
 
     const g = reviveError(serializeError(new RangeError('r')));
-    expect(g).toBeInstanceOf(Error);
+    expect(g).toBeInstanceOf(RangeError);
     expect(g.message).toBe('r');
+    expect(reviveError(serializeError(new WebAssembly.CompileError('c')))).toBeInstanceOf(
+      WebAssembly.CompileError,
+    );
+    expect(reviveError(serializeError(new WebAssembly.LinkError('l')))).toBeInstanceOf(
+      WebAssembly.LinkError,
+    );
+
+    // Any DOMException, not only aborts.
+    const d = reviveError(serializeError(new DOMException('no clone', 'DataCloneError')));
+    expect(d).toBeInstanceOf(DOMException);
+    expect(d.name).toBe('DataCloneError');
+
+    // An unknown type keeps its name.
+    class MyError extends Error {
+      override name = 'MyError';
+    }
+    const u = reviveError(serializeError(new MyError('m')));
+    expect(u).toBeInstanceOf(Error);
+    expect(u).toMatchObject({ name: 'MyError', message: 'm' });
 
     expect(serializeError(42)).toEqual({ name: 'Error', message: '42' });
+    // Values without a usable string conversion still serialize.
+    expect(serializeError(Object.create(null))).toEqual({
+      name: 'Error',
+      message: '[object Object]',
+    });
+    const bad = new Error('outer', {
+      cause: {
+        toString() {
+          throw new Error('no');
+        },
+      },
+    });
+    expect(serializeError(bad).cause).toEqual({ name: 'Error', message: '[object Object]' });
+    const trap = new Error('m');
+    Object.defineProperty(trap, 'message', {
+      get() {
+        throw new Error('no');
+      },
+    });
+    expect(serializeError(trap)).toEqual({ name: 'Error', message: 'unserializable error' });
+    expect(reviveError({ name: 'Error', message: 'x' }).name).toBe('Error');
     expect(reviveError({ name: 'Wav2FlacError', code: 'BOGUS', message: 'm' })).not.toBeInstanceOf(
       Wav2FlacError,
     );
+  });
+
+  it('keeps the stack and the cause', () => {
+    const inner = new TypeError('inner');
+    const outer = new Wav2FlacError('INTERNAL', 'outer');
+    Object.defineProperty(outer, 'cause', { value: inner });
+    const r = reviveError(structuredClone(serializeError(outer)));
+    expect(r.stack).toBe(outer.stack);
+    expect(r.cause).toBeInstanceOf(TypeError);
+    expect((r.cause as Error).message).toBe('inner');
+    expect((r.cause as Error).stack).toBe(inner.stack);
+    expect(Object.keys(r)).not.toContain('cause');
+
+    // A cause that is not an error arrives as one.
+    expect(reviveError(serializeError(new Error('e', { cause: 'why' }))).cause).toMatchObject({
+      message: 'why',
+    });
+    // An undefined cause stays undefined.
+    expect(reviveError(serializeError(new Error('e', { cause: undefined }))).cause).toBeUndefined();
+
+    // A cyclic chain is cut.
+    const a = new Error('a');
+    const b = new Error('b', { cause: a });
+    Object.defineProperty(a, 'cause', { value: b });
+    let depth = 0;
+    for (let c: unknown = reviveError(serializeError(a)); c instanceof Error; c = c.cause) depth++;
+    expect(depth).toBe(9);
   });
 });

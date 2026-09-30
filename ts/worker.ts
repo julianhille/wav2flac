@@ -5,7 +5,7 @@
  * @module
  * @internal
  */
-import { builtin, ignore, isNode } from './lib/platform.js';
+import { builtin, isNode } from './lib/platform.js';
 import type { FromWorker, Port, ToWorker } from './lib/protocol.js';
 import { serve } from './lib/worker-host.js';
 
@@ -13,7 +13,17 @@ import { serve } from './lib/worker-host.js';
 interface WorkerScope {
   postMessage(msg: unknown, transfer: Transferable[]): void;
   onmessage: ((e: MessageEvent<ToWorker>) => void) | null;
-  close(): void;
+  onmessageerror: (() => void) | null;
+}
+
+/**
+ * The error for a message this worker could not deserialize.
+ * @param detail What the platform says, if anything.
+ * @returns The error.
+ */
+function lost(detail?: string): Error {
+  const msg = 'wav2flac worker: a message to the worker could not be deserialized';
+  return new Error(detail === undefined ? msg : `${msg}: ${detail}`);
 }
 
 /**
@@ -27,21 +37,20 @@ function parent(): Port<ToWorker, FromWorker> {
   if (pp !== null) {
     return {
       post: (msg, transfer) => pp.postMessage(msg, transfer as never),
-      listen: (onMessage) => {
+      listen: (onMessage, onError, onClose) => {
         pp.on('message', onMessage);
+        pp.on('messageerror', (e: Error) => onError(lost(e.message)));
+        if (onClose !== undefined) pp.on('close', onClose);
       },
-      ref: ignore,
-      close: () => pp.close(),
     };
   }
   const scope = globalThis as unknown as WorkerScope;
   return {
     post: (msg, transfer) => scope.postMessage(msg, transfer),
-    listen: (onMessage) => {
+    listen: (onMessage, onError) => {
       scope.onmessage = (e: MessageEvent<ToWorker>) => onMessage(e.data);
+      scope.onmessageerror = () => onError(lost());
     },
-    ref: ignore,
-    close: () => scope.close(),
   };
 }
 

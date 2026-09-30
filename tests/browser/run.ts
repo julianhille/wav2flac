@@ -3,7 +3,7 @@
  * Browser and bundler smoke test of the packed package.
  *
  * `npm pack`s the built package, installs it with Vite and webpack into a
- * temporary app, and loads the same page three ways: unbundled (import
+ * temporary app (bundler versions: `app/package.json` and its lockfile), and loads the same page three ways: unbundled (import
  * map), built by Vite, built by webpack; each once with `wav2flac` and once
  * with the minified bundles (`index.min.js`, `wav2flac/min`). In every
  * browser given by `WAV2FLAC_BROWSERS` (default `chromium`; also `firefox`,
@@ -41,10 +41,6 @@ import { tmpdir } from 'node:os';
 import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type Browser, chromium, firefox, webkit } from 'playwright';
-
-/** Bundler versions under test (exact, so the run is repeatable). */
-const VITE = '8.3.1';
-const WEBPACK = '5.111.1';
 
 const root = resolve(import.meta.dirname, '../..');
 const tmp = mkdtempSync(join(tmpdir(), 'wav2flac-browser-'));
@@ -105,20 +101,10 @@ function prepare(): void {
   const tgz = readdirSync(tmp).find((f) => f.endsWith('.tgz'));
   if (tgz === undefined) throw new Error('npm pack produced no tarball');
   cpSync(join(import.meta.dirname, 'app'), app, { recursive: true });
-  writeFileSync(join(app, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
-  sh(
-    'npm',
-    [
-      'install',
-      '--silent',
-      '--no-audit',
-      '--no-fund',
-      join(tmp, tgz),
-      `vite@${VITE}`,
-      `webpack@${WEBPACK}`,
-    ],
-    app,
-  );
+  // Vite and webpack come from the app's lockfile; no package runs install scripts.
+  const quiet = ['--silent', '--no-audit', '--no-fund', '--ignore-scripts'];
+  sh('npm', ['ci', ...quiet], app);
+  sh('npm', ['install', ...quiet, '--no-save', join(tmp, tgz)], app);
 
   // The same page importing 'wav2flac/min', for the bundlers.
   const min = join(app, 'min');

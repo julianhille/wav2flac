@@ -8,7 +8,12 @@ import {
   runStream,
   Session,
 } from '../../ts/lib/engine.js';
-import { normalizeOptions } from '../../ts/lib/options.js';
+import { normalizeOptions as normalize, type ResolvedArgs } from '../../ts/lib/options.js';
+import { makeWav } from '../helpers/wav.js';
+
+/** Normalized options fed to the engine as they are, unresolved PCM included. */
+const normalizeOptions = (...a: Parameters<typeof normalize>): ResolvedArgs =>
+  normalize(...a) as ResolvedArgs;
 
 describe('engine internals', () => {
   it('assembles header, parts and tail in one buffer', () => {
@@ -61,11 +66,32 @@ describe('engine internals', () => {
     ['level', 256],
     ['maxInputBytes', 2 ** 53],
     ['pcmChannels', 1.5],
+    ['quality', 3],
+    ['quality', 256],
+    ['pcmFormat', 6],
+    ['pcmFormat', 256 + 5],
   ])('rejects %s = %d at the wasm boundary instead of wrapping it', (key, value) => {
     const base = normalizeOptions({ pcm: { sampleRate: 8000, channels: 1, format: 's16' } }, false);
     expect(() => new Session({ ...base, [key]: value })).toThrow(
       expect.objectContaining({ code: 'INVALID_OPTIONS' }),
     );
+  });
+
+  it.each([9, 65536, 2 ** 32])('reports TOO_MANY_CHANNELS for %d pcm channels', (channels) => {
+    const base = normalizeOptions({ pcm: { sampleRate: 8000, channels: 1, format: 's16' } }, false);
+    const args = { ...base, pcmChannels: channels };
+    expect(() => new Session(args)).toThrow(
+      expect.objectContaining({
+        code: 'TOO_MANY_CHANNELS',
+        message: expect.stringContaining(`${channels} channels`),
+      }),
+    );
+  });
+
+  it('refuses a pcm format that was never resolved', () => {
+    const args = normalizeOptions({ pcm: { sampleRate: 8000, channels: 1 } }, false);
+    expect(args.pcmFormat).toBe(-1);
+    expect(() => new Session(args)).toThrow(/pcm format not resolved/);
   });
 
   it('reports ENCODER_STATE for push after finish', () => {
@@ -94,5 +120,34 @@ describe('engine internals', () => {
     const out = runStream(input(), normalizeOptions({}, true), { signal: ac.signal });
     await expect(out.getReader().read()).rejects.toThrow('stop');
     expect(cancelled).toHaveLength(3);
+  });
+
+  it('cancels a stream input with the error that fails a buffered run', async () => {
+    let cancelled: unknown;
+    /** An endless stream that starts with `head`, recording its cancel reason. */
+    const input = (head: Uint8Array): ReadableStream<Uint8Array> => {
+      let first = true;
+      return new ReadableStream({
+        pull(c) {
+          c.enqueue(first ? head : new Uint8Array(4096));
+          first = false;
+        },
+        cancel: (r) => void (cancelled = r),
+      });
+    };
+    const args = normalizeOptions({}, false);
+
+    const bad = runBuffered(input(new Uint8Array(4096).fill(0x55)), args, {});
+    await expect(bad).rejects.toMatchObject({ code: 'INVALID_WAV' });
+    expect(cancelled).toBe(await bad.catch((e: unknown) => e));
+
+    cancelled = undefined;
+    const boom = new Error('progress failed');
+    const wav = makeWav({ frames: 4096 });
+    const onProgress = (): void => {
+      throw boom;
+    };
+    await expect(runBuffered(input(wav), args, { onProgress })).rejects.toBe(boom);
+    expect(cancelled).toBe(boom);
   });
 });

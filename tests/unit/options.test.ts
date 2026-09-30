@@ -131,6 +131,17 @@ describe('normalizeOptions', () => {
     expect((e as Wav2FlacError).code).toBe('INVALID_OPTIONS');
   });
 
+  it.each([9, 65536, 2 ** 32, Number.MAX_SAFE_INTEGER])(
+    'rejects %d pcm channels with TOO_MANY_CHANNELS, as for WAV',
+    (channels) => {
+      const e = bad({ pcm: { sampleRate: 8000, channels } });
+      expect(e).toMatchObject({
+        code: 'TOO_MANY_CHANNELS',
+        message: `${channels} channels (FLAC supports at most 8)`,
+      });
+    },
+  );
+
   it('names the accepted range', () => {
     expect((bad({ compressionLevel: 9 }) as Error).message).toMatch(/between 0 and 8/);
     expect((bad({ blockSize: 1 }) as Error).message).toMatch(/between 16 and 65535/);

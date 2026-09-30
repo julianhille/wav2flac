@@ -6,8 +6,8 @@
  */
 import { serializeError } from './errors.js';
 import { runBuffered, runStream } from './engine.js';
-import type { Progress } from './options.js';
 import { ignore } from './platform.js';
+import type { Progress } from './options.js';
 import { probeBytes } from './probe.js';
 import type { FromWorker, Port, ToWorker } from './protocol.js';
 import { transferOf } from './protocol.js';
@@ -45,9 +45,15 @@ interface HostJob {
  */
 export function serve(port: Port<ToWorker, FromWorker>): void {
   const jobs = new Map<number, HostJob>();
-  let initError: unknown;
+  /** Why this worker can't run jobs: its wasm failed to start, or a message was lost. */
+  let fatal: unknown;
+  /** Set once the port closed: nothing sent arrives any more. */
+  let closed = false;
+  /** Whether a lost message made this worker give up and tell the client. */
+  let gaveUp = false;
 
   const send = (msg: FromWorker, data?: Uint8Array): void => {
+    if (closed) throw new DOMException('wav2flac worker: the port closed', 'AbortError');
     port.post(msg, data === undefined ? [] : transferOf(data));
   };
 
@@ -72,6 +78,34 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
       { highWaterMark: 0 },
     );
 
+  /**
+   * Stops a running job.
+   * @param job Job state.
+   * @param reason Why.
+   */
+  const stop = (job: HostJob, reason?: unknown): void => {
+    job.abort.abort(reason);
+    job.input?.resolve(null);
+    job.credit?.resolve();
+  };
+
+  /**
+   * Handles a message that could not be deserialized, such as an `init` whose
+   * wasm module can't be shared with this worker. Nothing tells which job it
+   * belonged to, and a lost `init`, `chunk` or `ack` would leave jobs failing
+   * obscurely or waiting forever, so the worker gives up: it fails every job
+   * and tells the client to do the same.
+   * @param e Why.
+   */
+  const lost = (e: Error): void => {
+    fatal ??= e;
+    // Once is enough: the client fails everything on the first `fatal`.
+    if (gaveUp) return;
+    gaveUp = true;
+    send({ t: 'fatal', error: serializeError(e) });
+    for (const job of jobs.values()) stop(job, e);
+  };
+
   const runJob = async (m: Extract<ToWorker, { t: 'job' }>): Promise<void> => {
     const job: HostJob = {
       abort: new AbortController(),
@@ -85,7 +119,7 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
       onProgress: m.progress ? (p: Progress) => send({ t: 'progress', id: m.id, p }) : undefined,
     };
     try {
-      if (initError !== undefined) throw initError;
+      if (fatal !== undefined) throw fatal;
       const input = m.input ?? pulled(m.id, job);
       if (!m.args.streaming) {
         const out = await runBuffered(input, m.args, hooks);
@@ -105,64 +139,83 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
           job.credits--;
           send({ t: 'out', id: m.id, data: r.value }, r.value);
         }
+      } catch (e) {
+        // Frees the encoder, e.g. when `send()` throws because the port closed.
+        await reader.cancel(e).catch(ignore);
+        throw e;
       } finally {
         reader.releaseLock();
       }
       send({ t: 'done', id: m.id, data: null });
     } catch (e) {
-      send({ t: 'error', id: m.id, error: serializeError(e) });
+      try {
+        send({ t: 'error', id: m.id, error: serializeError(e) });
+      } catch {
+        // The port closed, or the error can't be cloned: the client still waits
+        // unless the port is gone, so send what can always be sent.
+        try {
+          send({ t: 'error', id: m.id, error: { name: 'Error', message: 'unserializable error' } });
+        } catch {
+          // The port closed: nobody is left to tell.
+        }
+      }
     } finally {
       jobs.delete(m.id);
     }
   };
 
-  port.listen((m) => {
-    switch (m.t) {
-      case 'init':
-        try {
-          initSync(m.module);
-        } catch (e) {
-          initError = e;
+  port.listen(
+    (m) => {
+      switch (m.t) {
+        case 'init':
+          try {
+            initSync(m.module);
+          } catch (e) {
+            fatal ??= e;
+          }
+          return;
+        case 'job':
+          void runJob(m);
+          return;
+        case 'chunk':
+        case 'end': {
+          const job = jobs.get(m.id);
+          job?.input?.resolve(m.t === 'chunk' ? m.data : null);
+          return;
         }
-        return;
-      case 'job':
-        void runJob(m);
-        return;
-      case 'chunk':
-      case 'end': {
-        const job = jobs.get(m.id);
-        job?.input?.resolve(m.t === 'chunk' ? m.data : null);
-        return;
-      }
-      case 'ack': {
-        const job = jobs.get(m.id);
-        if (job === undefined) return;
-        job.credits++;
-        job.credit?.resolve();
-        return;
-      }
-      case 'abort': {
-        const job = jobs.get(m.id);
-        if (job === undefined) return;
-        job.abort.abort();
-        job.input?.resolve(null);
-        job.credit?.resolve();
-        return;
-      }
-      case 'probe':
-        try {
-          if (initError !== undefined) throw initError;
-          send({ t: 'probe', id: m.id, info: probeBytes(m.data) });
-        } catch (e) {
-          send({ t: 'error', id: m.id, error: serializeError(e) });
+        case 'ack': {
+          const job = jobs.get(m.id);
+          if (job === undefined) return;
+          job.credits++;
+          job.credit?.resolve();
+          return;
         }
-        return;
-      case 'stats':
-        // A worker whose wasm failed to start can't encode; say so.
-        if (initError !== undefined)
-          send({ t: 'error', id: m.id, error: serializeError(initError) });
-        else send({ t: 'stats', id: m.id, wasmBytes: wasmMemoryBytes() });
-        return;
-    }
-  }, ignore);
+        case 'abort': {
+          const job = jobs.get(m.id);
+          if (job !== undefined) stop(job);
+          return;
+        }
+        case 'probe':
+          try {
+            if (fatal !== undefined) throw fatal;
+            send({ t: 'probe', id: m.id, info: probeBytes(m.data) });
+          } catch (e) {
+            send({ t: 'error', id: m.id, error: serializeError(e) });
+          }
+          return;
+        case 'stats':
+          // A worker whose wasm failed to start can't encode; say so.
+          if (fatal !== undefined) send({ t: 'error', id: m.id, error: serializeError(fatal) });
+          else send({ t: 'stats', id: m.id, wasmBytes: wasmMemoryBytes() });
+          return;
+      }
+    },
+    lost,
+    () => {
+      // A closed port drops messages silently, so waiting jobs would wait forever.
+      closed = true;
+      const reason = new DOMException('wav2flac worker: the port closed', 'AbortError');
+      for (const job of jobs.values()) stop(job, reason);
+    },
+  );
 }

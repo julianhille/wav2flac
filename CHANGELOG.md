@@ -10,6 +10,143 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Changed
+
+- A `sampleRate` more than 256 times the input rate, or less than 1/65536 of
+  it, fails with `UNSUPPORTED_FORMAT` instead of `INVALID_OPTIONS`: whether
+  the ratio is supported depends on the input's rate, not on the option alone.
+  The README and the `sampleRate` docs now state these limits.
+- `thirdPartyLicenses()` no longer loads the wasm. It reads the notices from
+  the wasm that is already loaded, and rejects with an error if `init()` or
+  `initSync()` hasn't finished yet, without starting or waiting for a load.
+  Call `await init()` first.
+- `encodeStream()` and the worker encoder's `encodeStream()` take the full
+  `Options` type. `seekPointInterval` was already accepted at runtime (and
+  through any variable typed `Options`); it is validated but has no effect,
+  because a stream has no seek table.
+- Errors from a `createWorkerEncoder()` worker keep the worker's `stack` and
+  their `cause`, and keep their type: a `RangeError`, `SyntaxError`,
+  `WebAssembly.CompileError`, `LinkError` or `RuntimeError` is no longer
+  turned into a plain `Error`, any `DOMException` stays one, and another
+  error keeps its `name`.
+- The Rust crate's `Error::new` is `#[must_use]`.
+
+### Fixed
+
+- A worker job stops, and frees its wasm encoder, when the worker's port
+  closes, instead of waiting forever for input or acknowledgements that can
+  no longer arrive. It also frees the encoder when its output can't be posted.
+- A worker job whose error can't be serialized (a `cause` without a usable
+  string conversion) still settles on the client, instead of never settling.
+- `createWorkerEncoder()` no longer loads the wasm on the calling thread when
+  its worker could not start.
+- A worker that loses several messages tells the client it failed only once.
+- The docs no longer promise that resampled output is byte-identical to a
+  native build of the Rust crate. The wasm gives the same bytes on every host,
+  but natively rubato uses the CPU's SIMD and the platform's libm, so a
+  resampled sample can differ by 1 LSB. The crate docs say so.
+- Doc fixes: `Progress.fraction` stays `null` for a raw PCM stream, whose
+  length is unknown; in the Rust crate, `Encoder::info()` and
+  `Encoder::output_spec()` return `None` again after `finish()` or a failed
+  call. The `version()` example no longer shows `0.1.0`.
+- Resampled output stays aligned with the input at every supported ratio. At
+  large upsampling ratios it used to start up to 4 frames early (for example
+  1 kHz to 256 kHz at `resampleQuality: 'fast'`), and at the largest
+  downsampling ratios about one frame early.
+- When a message to or from a `createWorkerEncoder()` worker can't be
+  deserialized, for example a wasm module that the browser can't share with
+  the worker, every pending and later call now fails with an error that says
+  so, and the worker is stopped. The first job used to fail with an obscure
+  `TypeError` from inside the worker, or wait forever. In Node, a message from
+  the worker that couldn't be deserialized used to be ignored.
+- Cancelling the stream that `encodeStream()` returned while the wasm is
+  still loading now cancels the input stream with the cancel reason and
+  stops waiting for the load. The input used to stay open until the load
+  finished, and forever if the download stalled.
+- When `encode()` fails partway through a stream input, for example on
+  invalid WAV data or an `onProgress` callback that throws, the input stream
+  is now cancelled with that error. It used to be cancelled with `undefined`.
+- A WAV whose odd-sized chunk lacks its pad byte and is followed by a chunk
+  with an unknown id is read correctly also when that chunk's length starts
+  with a printable byte (such as 32). It used to be read one byte late and
+  fail with `TRUNCATED` or `LIMIT_EXCEEDED`, or lose the tags behind it.
+- A WAV with an empty `data` chunk followed by a well-known chunk such as
+  `LIST` encodes to an empty FLAC also when its RIFF size is too small to
+  include that chunk. It used to fail with `UNSUPPORTED_FORMAT`, reporting a
+  streaming WAV header.
+- Plain PCM (`WAVE_FORMAT_PCM`) whose bits per sample are not a multiple of
+  8, such as 20 bits in 3-byte samples, is encoded. The samples are read from
+  the most significant bits, as the RIFF spec says. It used to fail with
+  `UNSUPPORTED_BIT_DEPTH`.
+- `pcm.channels` above 65535 fails with `TOO_MANY_CHANNELS`, as 9 to 65535
+  channels already did. It used to fail with `INVALID_OPTIONS` and a message
+  naming an internal limit.
+- The README states that the type declarations need TypeScript 5.7 or newer.
+- In Node, `init()` reads a string without a URL scheme as a file path also
+  where a global `location` exists, as in jsdom or Deno with `--location`. It
+  used to resolve the path against `location.href` and fetch it over HTTP.
+  An Electron renderer, which has a real page, still resolves it against the
+  page.
+- A `WAVE_FORMAT_EXTENSIBLE` file whose `fmt ` chunk is longer than 40 bytes
+  (extra bytes after the standard fields, a `cbSize` above 22, or an odd
+  size) is encoded. It used to fail with `INVALID_WAV`.
+- The build puts the license texts of a crate that keeps them in a
+  `LICENSES/` directory (the REUSE layout) into the wasm's notices and
+  `THIRD_PARTY_LICENSES.txt`. Before, it silently left them out when the crate
+  also had e.g. an `AUTHORS` file. No crate in the wasm has that layout today.
+- `init()`, `encodeStream()` and `createWorkerEncoder()` no longer throw
+  synchronously when the CommonJS build is bundled into a script that has no
+  `__filename`, `document.currentScript` or `location`, so the default wasm or
+  worker URL can't be resolved. `init()` rejects and `encodeStream()` errors
+  its stream, saying to pass the wasm to `init()`. The worker encoder fails
+  every call, saying to pass its `url`, as it fails when its worker can't
+  start for any other reason, such as a relative `url` in Node.
+- `node scripts/release.ts prepare X.Y.Z` runs on a `release/vX.Y.Z` branch
+  started from `origin/main`, as the release workflow describes, and prints
+  the matching push command. It used to run only on `main`.
+- `node scripts/release.ts prepare X.Y.Z` stops when the previous release's
+  tag is missing or not in `main`'s history, as after a squash-merged release
+  branch. The new version's headline would link to a compare that starts
+  from the merge base, not from the previous release.
+- A retry of `init('wav2flac.wasm')`, or of a relative path in Node, loads the
+  same file as the first attempt. Before, the retry resolved the string again,
+  against the page URL or the current directory at that time: after a
+  single-page app navigated, `encode()` fetched the wasm from the new route,
+  got the HTML page and failed with a `CompileError`. rc.3 did not have this
+  bug.
+- A worker encoder that was terminated or whose worker crashed now cancels a
+  `ReadableStream` input passed to `encode()` or `encodeStream()`, like every
+  other failed encode. Before, the stream was left open, so a `fetch()` body
+  kept its HTTP connection.
+- `encode()` and `encodeStream()` on the main thread cancel a `ReadableStream`
+  input when the options are invalid, as the worker encoder already did.
+- `init()` and `initSync()` accept a `WebAssembly.Module` of another realm,
+  such as one a parent page compiled and handed to an iframe, or one from a
+  Node `vm` context; `init()` also accepts a `URL` of another realm. Before,
+  they failed with a `TypeError` that said a Module or URL was needed.
+- `initSync()` with something other than wasm bytes or a `WebAssembly.Module`
+  throws a `TypeError` that says so, instead of the engine's "Argument 0 must
+  be a buffer source". Both `init()` and `initSync()` name the type they got.
+- `copy: true` on the worker encoder copies a Node `Buffer`. Before, it used
+  `Buffer#slice()`, which returns a view: a Buffer from `fs.readFile()` was
+  still transferred (detached), so encoding it a second time failed, and a
+  Buffer view was read after the call returned, so reusing it at once
+  encoded garbage. Buffer chunks of a stream input were detached too.
+- `probe()` on the worker encoder posts a copy of the header prefix of a Node
+  `Buffer`. Before, it posted a view, which cloned the whole backing buffer
+  on every try.
+- After a load from a `Response` (or a promise of one) failed or was given
+  up, `encode()` and the other calls that retry the load no longer load the
+  wasm from the default location next to the package, which you never
+  configured. The retry now rejects with an error asking for a new
+  `Response`, unless an earlier `init()` gave a URL, path, bytes or module,
+  which it then loads from as before.
+- Docs: the README gives the wasm as ~90 KB gzipped, its size since the
+  license notices are in it. It said ~70 KB.
+- Cancelling the output of a worker encoder's `encodeStream()` with a reason
+  now passes that reason to the input stream, as `encodeStream()` on the main
+  thread does. Before, the input stream was cancelled with `undefined`.
+
 ## [1.0.0-rc.4] - 2026-09-30
 
 ### Added
@@ -33,7 +170,8 @@ links are collected at the bottom of this file.
   without a bundler: `pkg/esm/index.min.js` and `worker.min.js`,
   `pkg/cjs/index.min.cjs` and `worker.min.cjs`, each with a source map, also
   exported as `wav2flac/min`. About 6 KiB smaller gzipped (index + worker).
-  `wav2flac` still resolves to the normal bundles, which are unchanged.
+  `wav2flac` still resolves to the normal bundles, which lose only the
+  license comment (see Removed).
 - Docs: a how-to for loading from a CDN, including starting the worker
   there.
 
@@ -43,9 +181,13 @@ links are collected at the bottom of this file.
   versions, licenses and sources, then each crate's license files word for
   word, in code blocks. The name stays, and the text still reads as plain
   text.
-- The JS bundles no longer start with a `/*! @license */` comment. The
-  notices it listed are in the wasm now, which has them in full. Before,
-  bundlers such as Vite dropped the comment, and the notices with it.
+
+### Removed
+
+- The `/*! @license */` comment at the start of the JS bundles. If you kept
+  the license notices through that comment, take them from the wasm's
+  `license` custom section instead (see Added), which has them in full.
+  Bundlers such as Vite dropped the comment, and the notices with it.
 
 ### Fixed
 

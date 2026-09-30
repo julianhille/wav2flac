@@ -71,7 +71,22 @@ describe('input', () => {
       cancel,
     });
     await expect(all(chunks(s as ReadableStream<Uint8Array>))).rejects.toThrow(TypeError);
-    expect(cancel).toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledWith(expect.any(TypeError));
+  });
+
+  it('cancels the stream with the error the consumer throws in', async () => {
+    const cancel = vi.fn();
+    const s = new ReadableStream<Uint8Array>({
+      pull(c) {
+        c.enqueue(new Uint8Array(1));
+      },
+      cancel,
+    });
+    const it = chunks(s);
+    await it.next();
+    const e = new Error('bad input');
+    await expect(it.throw(e)).rejects.toBe(e);
+    expect(cancel).toHaveBeenCalledWith(e);
   });
 
   it('cancels the stream when iteration stops early', async () => {

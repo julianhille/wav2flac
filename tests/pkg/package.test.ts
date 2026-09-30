@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { inspect } from 'node:util';
+import { gzipSync } from 'node:zlib';
 import { afterAll, describe, expect, it } from 'vitest';
 import { NOTICES_SECTION, readLeb128 } from '../../scripts/wasm-section.js';
 import { collect, makeWav } from '../helpers/wav.js';
@@ -62,7 +63,9 @@ function run(cmd: string, args: string[], cwd: string, input?: Uint8Array): Buff
 // Pack and install once; every test below uses the installed copy.
 const consumer = mkdtempSync(join(tmpdir(), 'wav2flac-consumer-'));
 afterAll(() => rmSync(consumer, { recursive: true, force: true }));
-const packArgs = ['pack', '--json', '--ignore-scripts', '--pack-destination', consumer];
+// `--force` turns the devEngines check (Node ≥ 22.18 to build) into a warning,
+// so the package can be packed and tested on the minimum Node too.
+const packArgs = ['pack', '--json', '--ignore-scripts', '--force', '--pack-destination', consumer];
 const [packed] = JSON.parse(String(run('npm', packArgs, root))) as {
   filename: string;
   files: { path: string }[];
@@ -152,6 +155,20 @@ describe('installed package', () => {
     );
   });
 
+  it('ships a license text for every component, not only its NOTICE or AUTHORS', () => {
+    const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
+    // Crates whose license text has a name that does not start with LICENSE or
+    // COPYING, such as a `license-file` elsewhere. Check each one by hand.
+    const otherNames = new Set<string>();
+    const sections = text.split(/\n## /).slice(1);
+    expect(sections.length).toBeGreaterThan(10);
+    for (const s of sections) {
+      const heading = s.split('\n')[0]!;
+      if (otherNames.has(heading.split(' ')[0]!)) continue;
+      expect(s, heading).toMatch(/^### (licen[cs]e|copying)/im);
+    }
+  });
+
   it('puts the notices first in the wasm, as THIRD_PARTY_LICENSES.txt has them', () => {
     const notices = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'));
     const wasm = readFileSync(join(installed, 'pkg/wav2flac.wasm'));
@@ -175,6 +192,18 @@ describe('installed package', () => {
     expect(sections.map((b) => Buffer.from(b))).toEqual([notices]);
   });
 
+  it('states the gzipped size of the wasm in the README', () => {
+    const wasm = readFileSync(join(installed, 'pkg/wav2flac.wasm'));
+    const actual = gzipSync(wasm, { level: 9 }).length / 1000;
+    const claim = /\(~(\d+) KB gzipped\)/.exec(readFileSync(join(installed, 'README.md'), 'utf8'));
+    expect(claim, 'README has a "(~NN KB gzipped)" claim').not.toBeNull();
+    const stated = Number(claim![1]);
+    expect(
+      Math.abs(actual - stated) / actual,
+      `README says ~${stated} KB, the wasm is ${actual.toFixed(1)} KB gzipped`,
+    ).toBeLessThan(0.1);
+  });
+
   it('lists every component in a Markdown table, with its notices in code blocks', () => {
     const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
     const rows = text.split('\n').filter((l) => /^\| (?!---|Component )/.test(l));
@@ -194,8 +223,33 @@ describe('installed package', () => {
     ['minified CJS', cjsMin],
   ])('returns the notices from the wasm (%s)', async (_, api) => {
     const text = readFileSync(join(installed, 'pkg/THIRD_PARTY_LICENSES.txt'), 'utf8');
+    await api.init();
     await expect(api.thirdPartyLicenses()).resolves.toBe(text);
   });
+
+  it.each(['cjs/index.cjs', 'cjs/index.min.cjs'])(
+    'rejects, never throws, when %s cannot tell where it was loaded from',
+    async (f) => {
+      // Bundled into a script with no __filename, document.currentScript or location.
+      const src = readFileSync(join(installed, 'pkg', f), 'utf8');
+      const module = { exports: {} as Api };
+      new Function('module', 'exports', src)(module, module.exports);
+      const api = module.exports;
+      const lost = /can't tell where this bundle was loaded from/;
+      await expect(api.init()).rejects.toThrow(lost);
+      await expect(collect(api.encodeStream(wav))).rejects.toThrow(lost);
+      await expect(api.encode(wav)).rejects.toThrow(lost);
+      const w = api.createWorkerEncoder();
+      const noWorker = /can't find its worker script; pass its URL to createWorkerEncoder/;
+      await expect(w.encode(wav)).rejects.toThrow(noWorker);
+      await expect(w.probe(wav)).rejects.toThrow(noWorker);
+      w.terminate();
+      // A source passed explicitly still loads.
+      await api.init(readFileSync(join(installed, 'pkg/wav2flac.wasm')));
+      await esm.init();
+      expect(api.encodeSync(wav)).toEqual(esm.encodeSync(wav));
+    },
+  );
 
   it('keeps license comments out of the bundles', () => {
     for (const f of BUNDLES) {

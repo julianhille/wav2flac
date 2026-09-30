@@ -9,6 +9,8 @@ allow = [
     "0BSD",
     "MIT",
     "Apache-2.0",
+    # Kept in step with KNOWN in scripts/gen-licenses.ts; may be unused (a warning).
+    "BSD-2-Clause",
     "BSD-3-Clause",
     "Unicode-3.0",
     "Zlib",

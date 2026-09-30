@@ -54,6 +54,24 @@ export function flacTest(flac: Uint8Array): string | null {
   return r.status === 0 ? '' : r.stderr.toString() || `exit ${r.status}`;
 }
 
+/**
+ * Decodes FLAC to its samples with `flac -d`.
+ * @param flac FLAC file.
+ * @returns The interleaved samples, or `null` if flac is unavailable.
+ */
+export function flacDecode(flac: Uint8Array): Int32Array | null {
+  if (!has('flac')) return null;
+  const raw = ['--force-raw-format', '--endian=little', '--sign=signed'];
+  const r = spawnSync('flac', ['-d', '-c', '-s', ...raw, '-'], { input: flac, maxBuffer: 1 << 30 });
+  if (r.status !== 0) throw new Error(r.stderr.toString() || `flac -d: exit ${r.status}`);
+  // STREAMINFO follows the 4-byte marker and a 4-byte block header.
+  const bits = (((flac[20]! & 1) << 4) | (flac[21]! >> 4)) + 1;
+  const width = Math.ceil(bits / 8);
+  const out = new Int32Array(r.stdout.length / width);
+  for (let i = 0; i < out.length; i++) out[i] = r.stdout.readIntLE(i * width, width);
+  return out;
+}
+
 /** Path of the native reference encoder (built by `cargo build --release --example encode`). */
 export const NATIVE = 'target/release/examples/encode';
 

@@ -71,7 +71,8 @@ pub struct Progress {
     pub bytes_in: u64,
     /// Output samples (per channel) encoded into frames so far.
     pub samples_out: u64,
-    /// Fraction of the data chunk consumed (0..=1), `None` before the header is known.
+    /// Fraction of the data chunk consumed (0..=1). `None` before the header is known
+    /// and for raw PCM of unknown length.
     pub fraction: Option<f64>,
 }
 
@@ -240,6 +241,8 @@ impl Encoder {
     }
 
     /// Information about the input, once its header has been parsed.
+    ///
+    /// `None` again after [`Encoder::finish`] or a failed call, which release the input state.
     #[must_use]
     pub fn info(&self) -> Option<WavInfo> {
         self.active.as_ref().map(|a| {
@@ -254,6 +257,8 @@ impl Encoder {
     }
 
     /// Output sample rate and bit depth, once known.
+    ///
+    /// `None` again after [`Encoder::finish`] or a failed call, which release the input state.
     #[must_use]
     pub fn output_spec(&self) -> Option<crate::transcode::OutputSpec> {
         self.active.as_ref().map(|a| a.transcoder.spec)
@@ -514,13 +519,17 @@ impl Encoder {
             // encoding that as an empty file would silently drop everything.
             // What follows an empty data chunk must look like a chunk that
             // fits in the RIFF size; audio rarely does, even when its first
-            // bytes happen to be printable.
+            // bytes happen to be printable. A well-known id (a trailing
+            // `LIST`, say) is trusted even when the RIFF size is too small,
+            // as it is everywhere else.
             if a.header.data_len == 0 && seen < 8 && a.lead.len() == 8 {
+                let id = &a.lead[..4];
                 let len = u64::from(u32::from_le_bytes([
                     a.lead[4], a.lead[5], a.lead[6], a.lead[7],
                 ]));
                 let end = a.header.data_offset as u64 + 8 + len;
-                if !riff::is_chunk_id(&a.lead[..4]) || end > a.header.riff_end {
+                let fits = end <= a.header.riff_end || riff::is_known_chunk_id(id);
+                if !riff::is_chunk_id(id) || !fits {
                     return err(
                         ErrorCode::UnsupportedFormat,
                         "data chunk size is 0 but audio follows \

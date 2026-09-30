@@ -15,6 +15,15 @@ package's JS:
   `new URL('../wav2flac.wasm', import.meta.url)`, which bundlers detect and
   emit as an asset.
 
+The CommonJS build has no `import.meta.url`, so it finds its own location
+another way: from `__filename` in Node, and elsewhere from the `src` of the
+`<script>` that loaded it, or else from the page URL (`location.href`). In
+that last case the default `.wasm` and worker resolve against the page, not
+the package, so pass `init()` a source and `createWorkerEncoder()` a `url`.
+Where none of these exist, as in a CommonJS bundle run in a sandbox,
+`init()` rejects and the worker encoder fails every call, both with an error
+that asks for the location.
+
 To host it yourself, call `init()` before anything encodes. It takes a URL or
 path, the bytes, a compiled `WebAssembly.Module`, or a `Response` (or a
 promise of one):
@@ -23,6 +32,11 @@ promise of one):
 import { init } from 'wav2flac';
 await init(new URL('/assets/wav2flac.wasm', location.href));
 ```
+
+In Node a string without a URL scheme (`https:`, `file:`, ...) is a file
+path, even where a global `location` exists (jsdom, Deno with `--location`);
+in a browser it is a URL relative to the page. Pass a `URL` to fetch over
+HTTP from Node.
 
 Only the call that starts a load chooses its source. Later calls share the
 load already in progress and ignore their argument. A retry after a failed or
@@ -66,10 +80,15 @@ next call.
 
 A retry loads from the source passed to that call. Without one, as in
 `encode()`, it loads from the last URL, path, bytes or module that a load
-started with, not from the default location. `init()` loads from its own
+started with, not from the default location. A relative URL or path is
+resolved once, when its load starts, against the page URL or the current
+directory, so the retry loads the same file after a single-page app navigated
+or the process changed directory. `init()` loads from its own
 copy of bytes, so you can reuse or transfer your buffer right after the call.
 A `Response` can be read only once, so after a load from a `Response` failed,
-pass a new one.
+pass a new one. Until you do, a retry without a source loads from the URL,
+path, bytes or module of an earlier load, or, if there was none, rejects
+with an error that asks for a new `Response`.
 
 A worker encoder loads the wasm once, when you create it. If that load fails,
 every job of that encoder rejects with its error; create a new encoder to try

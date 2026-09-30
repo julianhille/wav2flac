@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: 0BSD
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
@@ -14,11 +16,25 @@ afterEach(() => {
   vi.resetModules();
 });
 
-/** A fresh copy of the loader and glue (no instance yet). */
 /** Reads a stream to the end. */
 const collectAll = async (s: ReadableStream<Uint8Array>): Promise<Uint8Array> =>
   new Uint8Array(await new Response(s).arrayBuffer());
 
+/** A compiled module of another realm, e.g. from an iframe's parent. */
+const foreignModule = (): WebAssembly.Module => {
+  const mod = runInNewContext('new WebAssembly.Module(bytes)', { bytes }) as WebAssembly.Module;
+  expect(mod).not.toBeInstanceOf(WebAssembly.Module);
+  return mod;
+};
+
+/**
+ * Stands in for a `URL` of another realm, which a `vm` context has no class
+ * for: only the brand and the string are there, as seen from this realm.
+ */
+const foreignUrl = (href: string): URL =>
+  ({ [Symbol.toStringTag]: 'URL', href, toString: () => href }) as unknown as URL;
+
+/** A fresh copy of the loader and glue (no instance yet). */
 const fresh = async (): Promise<typeof import('../../ts/lib/wasm.js')> => {
   vi.resetModules();
   return import('../../ts/lib/wasm.js');
@@ -56,8 +72,10 @@ describe('init', () => {
     ['bytes', () => bytes],
     ['ArrayBuffer', () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)],
     ['Module', () => new WebAssembly.Module(bytes)],
+    ['Module of another realm', foreignModule],
     ['file URL', () => pathToFileURL(WASM)],
     ['file URL string', () => pathToFileURL(WASM).href],
+    ['file URL of another realm', () => foreignUrl(pathToFileURL(WASM).href)],
     ['file path', () => WASM],
     [
       'SharedArrayBuffer',
@@ -136,7 +154,7 @@ describe('init', () => {
       w.init(new Response('nope', { status: 404, statusText: 'Not Found' })),
     ).rejects.toThrow(/404/);
     await expect(w.init(new Uint8Array([1, 2, 3]))).rejects.toThrow(WebAssembly.CompileError);
-    await expect(w.init(42 as never)).rejects.toThrow(/needs wasm bytes/);
+    await expect(w.init(42 as never)).rejects.toThrow(/needs wasm bytes.*, got number$/);
     await w.init(bytes);
     expect(w.isReady()).toBe(true);
   });
@@ -256,6 +274,37 @@ describe('init', () => {
   });
 
   it.each([
+    ['a Response', () => new Response('busy', { status: 503, statusText: 'Unavailable' })],
+    ['a Response promise', () => Promise.resolve(new Response(null, { status: 503 }))],
+  ])('does not retry %s from the default location', async (_, make) => {
+    const real = process;
+    const readFile = vi.fn(async () => bytes);
+    vi.stubGlobal(
+      'process',
+      new Proxy(real, {
+        get: (t, k) =>
+          k === 'getBuiltinModule'
+            ? (id: string) => (id === 'fs' ? { promises: { readFile } } : real.getBuiltinModule(id))
+            : Reflect.get(t, k),
+      }),
+    );
+    const fetch = vi.fn(async () => new Response(bytes));
+    vi.stubGlobal('fetch', fetch);
+    const w = await fresh();
+    await expect(w.init(make())).rejects.toThrow(/503/);
+    // What encode() does: init() without a source.
+    await expect(w.init()).rejects.toThrow(/new Response/);
+    await expect(w.init(undefined, { signal: new AbortController().signal })).rejects.toThrow(
+      /new Response/,
+    );
+    expect(readFile).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(w.isReady()).toBe(false);
+    await w.init(new Response(bytes));
+    expect(w.isReady()).toBe(true);
+  });
+
+  it.each([
     // A view that doesn't start at the start of its buffer.
     [
       'a view',
@@ -342,6 +391,110 @@ describe('init', () => {
       'https://cdn.example/wav2flac.wasm',
       'https://cdn.example/wav2flac.wasm',
     ]);
+  });
+
+  it('retries a relative URL resolved against the page it was given on', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', (url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(
+        urls.length === 1 ? new Response(null, { status: 503 }) : new Response(bytes),
+      );
+    });
+    vi.stubGlobal('location', { href: 'https://app.example/editor/' });
+    // A browser: no Node, so the string is a URL, not a file path.
+    const real = process;
+    vi.stubGlobal(
+      'process',
+      new Proxy(real, {
+        get: (t, k) =>
+          k === 'versions' ? { ...real.versions, node: undefined } : Reflect.get(t, k),
+      }),
+    );
+    const w = await fresh();
+    await expect(w.init('wav2flac.wasm')).rejects.toThrow(/503/);
+    // A single-page app navigates (history.pushState) before encode() retries.
+    (globalThis as { location: { href: string } }).location.href =
+      'https://app.example/editor/project/42/';
+    await w.init();
+    expect(urls).toEqual([
+      'https://app.example/editor/wav2flac.wasm',
+      'https://app.example/editor/wav2flac.wasm',
+    ]);
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('reads a path as a file in Node, also where a location exists', async () => {
+    // jsdom and Deno --location define a location; a path must not become a fetch.
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('location', { href: 'http://localhost:3000/' });
+    const w = await fresh();
+    await expect(w.init('nope/wav2flac.wasm')).rejects.toThrow(/ENOENT/);
+    await expect(w.init('/nope/wav2flac.wasm')).rejects.toThrow(/ENOENT/);
+    await w.init(WASM);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(w.isReady()).toBe(true);
+  });
+
+  it('resolves a relative URL against the page in an Electron renderer', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', (url: URL) => {
+      urls.push(url.href);
+      return Promise.resolve(new Response(bytes));
+    });
+    vi.stubGlobal('location', { href: 'http://localhost:5173/app/' });
+    // Node integration on: Node is there, but so is the page.
+    const real = process;
+    vi.stubGlobal(
+      'process',
+      new Proxy(real, {
+        get: (t, k) =>
+          k === 'versions'
+            ? { ...real.versions, electron: '38.0.0' }
+            : k === 'type'
+              ? 'renderer'
+              : Reflect.get(t, k),
+      }),
+    );
+    const w = await fresh();
+    await w.init('wav2flac.wasm');
+    expect(urls).toEqual(['http://localhost:5173/app/wav2flac.wasm']);
+  });
+
+  it('retries a relative path resolved against the cwd it was given in', async () => {
+    const reads: string[] = [];
+    const readFile = async (p: URL): Promise<Uint8Array> => {
+      reads.push(p.href);
+      if (reads.length === 1) throw Object.assign(new Error('EIO: busy'), { code: 'EIO' });
+      return bytes;
+    };
+    const real = process;
+    vi.stubGlobal(
+      'process',
+      new Proxy(real, {
+        get: (t, k) =>
+          k === 'getBuiltinModule'
+            ? (id: string) => (id === 'fs' ? { promises: { readFile } } : real.getBuiltinModule(id))
+            : Reflect.get(t, k),
+      }),
+    );
+    const cwd = process.cwd();
+    const app = mkdtempSync(join(tmpdir(), 'wav2flac-'));
+    mkdirSync(join(app, 'sub'));
+    try {
+      process.chdir(app);
+      const w = await fresh();
+      await expect(w.init('w2f.wasm')).rejects.toThrow('EIO');
+      process.chdir(join(app, 'sub'));
+      await w.init();
+      const want = pathToFileURL(join(realpathSync(app), 'w2f.wasm')).href;
+      expect(reads).toEqual([want, want]);
+      expect(w.isReady()).toBe(true);
+    } finally {
+      process.chdir(cwd);
+      rmSync(app, { recursive: true });
+    }
   });
 
   it('lets the caller transfer its bytes right after the call', async () => {
@@ -485,6 +638,53 @@ describe('init', () => {
     await expect(again).rejects.toMatchObject({ name: 'AbortError' });
   });
 
+  it('encodeStream releases its input when cancelled while the wasm loads', async () => {
+    vi.resetModules();
+    const real = process;
+    const reads: AbortSignal[] = [];
+    vi.stubGlobal(
+      'process',
+      new Proxy(real, {
+        get: (t, k) =>
+          k === 'getBuiltinModule'
+            ? (id: string) =>
+                id === 'fs'
+                  ? {
+                      promises: {
+                        // The default file never arrives until the read is aborted.
+                        readFile: (_: URL, o: { signal: AbortSignal }) => {
+                          reads.push(o.signal);
+                          return new Promise((_, reject) =>
+                            o.signal.addEventListener('abort', () => reject(o.signal.reason)),
+                          );
+                        },
+                      },
+                    }
+                  : real.getBuiltinModule(id)
+            : Reflect.get(t, k),
+      }),
+    );
+    const api = await import('../../ts/index.js');
+    const cancels: unknown[] = [];
+    const input = (): ReadableStream<Uint8Array> =>
+      new ReadableStream<Uint8Array>({ cancel: (why) => void cancels.push(why) });
+
+    // No signal: the cancel alone releases the input and abandons the load.
+    const reason = new Error('not needed');
+    await api.encodeStream(input()).cancel(reason);
+    await vi.waitFor(() => expect(cancels).toEqual([reason]));
+    expect(reads).toHaveLength(1);
+    expect(reads[0]!.aborted).toBe(true);
+
+    // A plain init() keeps the load going; the cancelled stream still lets go.
+    void api.init();
+    const other = new Error('gone');
+    await api.encodeStream(input()).cancel(other);
+    await vi.waitFor(() => expect(cancels).toEqual([reason, other]));
+    expect(reads).toHaveLength(2);
+    expect(reads[1]!.aborted).toBe(false);
+  });
+
   it('initSync accepts bytes or a Module', async () => {
     let w = await fresh();
     w.initSync(bytes);
@@ -498,6 +698,22 @@ describe('init', () => {
     w.initSync(new WebAssembly.Module(bytes));
     expect(w.wasmMemoryBytes()).toBeGreaterThan(0);
     await w.init();
+    w = await fresh();
+    w.initSync(foreignModule());
+    expect(w.wasmModule()).toBeInstanceOf(WebAssembly.Module);
+  });
+
+  it('initSync names what it got instead of bytes or a Module', async () => {
+    const w = await fresh();
+    for (const [src, got] of [
+      [42, 'number'],
+      [{}, 'Object'],
+      [pathToFileURL(WASM), 'URL'],
+    ] as const)
+      expect(() => w.initSync(src as never)).toThrow(
+        new TypeError(`wav2flac: initSync() needs wasm bytes or a WebAssembly.Module, got ${got}`),
+      );
+    expect(w.isReady()).toBe(false);
   });
 
   it('points the default URL next to the bundle', async () => {
@@ -524,12 +740,39 @@ describe('init', () => {
     expect(() => api.version()).toThrow(/not initialized/);
   });
 
-  it('thirdPartyLicenses returns the license section, initializing on first use', async () => {
+  it('thirdPartyLicenses returns the license section of the loaded wasm', async () => {
     vi.resetModules();
     const api = await import('../../ts/index.js');
-    // The default URL (ts/wav2flac.wasm) does not exist next to the sources.
-    await expect(api.thirdPartyLicenses()).rejects.toThrow(/ENOENT/);
     const text = '# Notices\n\n| a | b |\n| --- | --- |\n| ü | → |\n';
+    await api.init(
+      withFirstSection(Uint8Array.from(bytes), NOTICES_SECTION, new TextEncoder().encode(text)),
+    );
+    await expect(api.thirdPartyLicenses()).resolves.toBe(text);
+  });
+
+  it('thirdPartyLicenses rejects before init, without loading or waiting for the wasm', async () => {
+    vi.resetModules();
+    const api = await import('../../ts/index.js');
+    // A download that never answers until it is aborted.
+    const fetch = vi.fn(
+      (_: URL, opts: RequestInit) =>
+        new Promise<Response>((_, reject) => {
+          opts.signal!.addEventListener('abort', () => reject(opts.signal!.reason));
+        }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    await expect(api.thirdPartyLicenses()).rejects.toThrow(/not initialized/);
+    expect(fetch).not.toHaveBeenCalled();
+    // A load in progress is not waited for, and not kept alive.
+    const loading = api.init('https://cdn.example/wav2flac.wasm', {
+      signal: AbortSignal.timeout(10),
+    });
+    await expect(api.thirdPartyLicenses()).rejects.toThrow(/not initialized/);
+    await expect(loading).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(fetch.mock.calls[0]![1].signal!.aborted).toBe(true);
+    await expect(api.thirdPartyLicenses()).rejects.toThrow(/not initialized/);
+    expect(fetch).toHaveBeenCalledOnce();
+    const text = '# Notices\n';
     await api.init(
       withFirstSection(Uint8Array.from(bytes), NOTICES_SECTION, new TextEncoder().encode(text)),
     );

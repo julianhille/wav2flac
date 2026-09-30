@@ -65,6 +65,13 @@
   "engines": {
     "node": ">=22.12"
   },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=22.18",
+      "onFail": "error"
+    }
+  },
   "scripts": {
     "build": "scripts/build.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/tsconfig.json --noEmit",
@@ -74,6 +81,7 @@
     "coverage": "vitest run --project unit --coverage",
     "test:browser": "node tests/browser/run.ts",
     "lint": "oxlint --deny-warnings",
+    "lint:changelog": "node scripts/release.ts lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint:pkg": "publint --strict && attw --pack . --profile node16 --exclude-entrypoints wasm THIRD_PARTY_LICENSES.txt",

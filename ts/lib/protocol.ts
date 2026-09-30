@@ -11,7 +11,7 @@
  */
 import type { Bytes } from './engine.js';
 import type { SerializedError } from './errors.js';
-import type { EncoderArgs, Progress } from './options.js';
+import type { ResolvedArgs, Progress } from './options.js';
 import type { WavInfo } from './probe.js';
 
 /** Messages to the worker. */
@@ -20,7 +20,7 @@ export type ToWorker =
   | {
       t: 'job';
       id: number;
-      args: EncoderArgs;
+      args: ResolvedArgs;
       input: Uint8Array | null;
       progress: boolean;
       window: number;
@@ -40,14 +40,23 @@ export type FromWorker =
   | { t: 'done'; id: number; data: Bytes | null }
   | { t: 'error'; id: number; error: SerializedError }
   | { t: 'probe'; id: number; info: WavInfo }
-  | { t: 'stats'; id: number; wasmBytes: number };
+  | { t: 'stats'; id: number; wasmBytes: number }
+  /** The worker can't run jobs any more (a message to it was lost); fail them all. */
+  | { t: 'fatal'; error: SerializedError };
 
 /** A bidirectional message endpoint (Worker, worker_threads port, MessagePort). */
 export interface Port<In, Out> {
   /** Sends a message, transferring the listed objects. */
   post(msg: Out, transfer: Transferable[]): void;
-  /** Installs the message and error handlers. */
-  listen(onMessage: (msg: In) => void, onError: (err: Error) => void): void;
+  /**
+   * Installs the message and error handlers, and the close handler where the
+   * port reports closing (a closed port drops messages silently).
+   */
+  listen(onMessage: (msg: In) => void, onError: (err: Error) => void, onClose?: () => void): void;
+}
+
+/** The client's endpoint to a worker, which it also keeps alive and terminates. */
+export interface WorkerPort<In, Out> extends Port<In, Out> {
   /** Keeps (`true`) or stops keeping (`false`) a Node process alive; no-op elsewhere. */
   ref(keep: boolean): void;
   /** Terminates the worker or closes the port. */

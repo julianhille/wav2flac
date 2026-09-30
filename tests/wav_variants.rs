@@ -54,6 +54,51 @@ fn extensible_nonzero_padding_bits_rejected() {
     assert_eq!(e.code(), wav2flac::ErrorCode::InvalidWav);
 }
 
+/// Plain PCM declaring `valid` bits in a `container`-bit sample: the header
+/// carries the valid width, the samples fill the most significant bits.
+fn plain_pcm_odd_width(container: u16, valid: u16, samples: &[i32]) -> Vec<u8> {
+    let b = WavBuilder::pcm(2, 44100, container);
+    let packed = b.clone().extensible(container, valid, 0).pack_int(samples);
+    let mut f = b.build_raw(&packed);
+    f[34..36].copy_from_slice(&valid.to_le_bytes());
+    f
+}
+
+#[test]
+fn plain_pcm_sub_container_bits() {
+    for (container, valid) in [(24u16, 20u16), (16, 12), (24, 18), (32, 20), (16, 10)] {
+        let s = signal(Signal::Noise, u32::from(valid), 2, 3000, 11);
+        let f = plain_pcm_odd_width(container, valid, &s);
+        let info = wav2flac::probe(&f).unwrap();
+        assert_eq!(info.bits_per_sample, valid);
+        let d = decode(&encode(&f, Options::default()));
+        assert_eq!(d.bits, u32::from(valid));
+        if !d.samples.is_empty() {
+            assert_eq!(d.samples, s);
+        }
+        assert_eq!(d.md5, pcm_md5(&s, u32::from(valid)));
+    }
+}
+
+#[test]
+fn plain_pcm_odd_width_rejects_bad_samples() {
+    use wav2flac::ErrorCode;
+    let code = |f: &[u8]| {
+        wav2flac::encode_all(f, Options::default())
+            .unwrap_err()
+            .code()
+    };
+    // A non-zero padding bit would be lost.
+    let mut f = plain_pcm_odd_width(24, 20, &[1, 2, 3, 4]);
+    let n = f.len();
+    f[n - 3] |= 1;
+    assert_eq!(code(&f), ErrorCode::InvalidWav);
+    // More valid bits than the container holds.
+    let mut f = plain_pcm_odd_width(16, 12, &[1, 2, 3, 4]);
+    f[34..36].copy_from_slice(&20u16.to_le_bytes());
+    assert_eq!(code(&f), ErrorCode::InvalidWav);
+}
+
 #[test]
 fn fmt_sizes_16_18_40() {
     let s = signal(Signal::Sine, 16, 2, 2000, 1);
@@ -149,6 +194,62 @@ fn garbage_pad_byte_is_skipped() {
 }
 
 #[test]
+fn missing_pad_before_unknown_chunk_with_printable_length() {
+    // No pad byte after an odd chunk, and the next chunk's id is unknown and
+    // its length's low byte is printable (0x20), so the id shifted by one
+    // byte ("bcd ") looks like a chunk id too. Its length would be the
+    // three zero bytes plus the first body byte, 16 MiB or more. (A body
+    // starting with a zero byte stays ambiguous; the pad is assumed then.)
+    let s = signal(Signal::Noise, 16, 1, 100, 6);
+    let data = WavBuilder::pcm(1, 8000, 16).pack_int(&s);
+    for body in [[b'x'; 32], [0xFF; 32], [1; 32]] {
+        let mut f = b"RIFF\0\0\0\0WAVE".to_vec();
+        f.extend_from_slice(b"odd \x03\0\0\0abc"); // no pad byte
+        f.extend_from_slice(b"abcd\x20\0\0\0");
+        f.extend_from_slice(&body);
+        f.extend_from_slice(b"fmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0");
+        f.extend_from_slice(b"data");
+        f.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        f.extend_from_slice(&data);
+        let n = (f.len() - 8) as u32;
+        f[4..8].copy_from_slice(&n.to_le_bytes());
+        for chunks in [&[usize::MAX][..], &[1][..], &[7][..]] {
+            let what = format!("body {:#x}, chunks {chunks:?}", body[0]);
+            let flac = encode_chunked(&f, Options::default(), chunks).expect(&what);
+            assert_eq!(decode(&flac).samples, s, "{what}");
+        }
+    }
+}
+
+#[test]
+fn missing_pad_after_odd_data_before_unknown_chunk_keeps_trailing_tags() {
+    // As above, after the data chunk: the unknown chunk must be skipped by its
+    // real length for the LIST behind it to be found.
+    let s = signal(Signal::Noise, 8, 1, 1001, 5);
+    let mut f = WavBuilder::pcm(1, 8000, 8).build(&s);
+    f.pop(); // the builder's pad byte
+    f.extend_from_slice(b"abcd\x20\0\0\0");
+    f.extend_from_slice(&[b'x'; 32]);
+    let list = info_list(&[(b"INAM", b"after")]);
+    f.extend_from_slice(b"LIST");
+    f.extend_from_slice(&(list.len() as u32).to_le_bytes());
+    f.extend_from_slice(&list);
+    let n = (f.len() - 8) as u32;
+    f[4..8].copy_from_slice(&n.to_le_bytes());
+    for chunks in [&[usize::MAX][..], &[1][..], &[7][..]] {
+        let flac = encode_chunked(&f, Options::default(), chunks).unwrap();
+        let (blocks, _) = metadata_blocks(&flac);
+        let vc = blocks.iter().find(|b| b.0 == 4).expect("vorbis comment");
+        let (_, tags) = parse_vorbis(&vc.2);
+        assert!(
+            tags.contains(&("TITLE".into(), "after".into())),
+            "{chunks:?}: {tags:?}"
+        );
+        assert_eq!(decode(&flac).samples, s);
+    }
+}
+
+#[test]
 fn printable_pad_after_odd_data_keeps_trailing_tags() {
     // 8-bit mono with an odd sample count: the data chunk is padded with a
     // space, and a LIST follows.
@@ -172,6 +273,84 @@ fn printable_pad_after_odd_data_keeps_trailing_tags() {
             "{chunks:?}: {tags:?}"
         );
         assert_eq!(decode(&flac).samples, s);
+    }
+}
+
+#[test]
+fn printable_pad_before_well_known_chunk_of_16_mib() {
+    // A space pad, then a JUNK chunk of 16 MiB + 16 bytes: shifted back by
+    // the pad, its length's zero third byte is the top byte of the length
+    // read at the pad, which alone would look like a missing pad byte.
+    const JUNK: u32 = 0x0100_0010;
+    let junk = |f: &mut Vec<u8>| {
+        f.extend_from_slice(b"JUNK");
+        f.extend_from_slice(&JUNK.to_le_bytes());
+        f.resize(f.len() + JUNK as usize, 0);
+    };
+    let s = signal(Signal::Noise, 8, 1, 1001, 5);
+    let b = WavBuilder::pcm(1, 8000, 8);
+    let data = b.pack_int(&s);
+    let list = info_list(&[(b"INAM", b"after")]);
+
+    // Before the data chunk.
+    let mut head = b"RIFF\0\0\0\0WAVE".to_vec();
+    head.extend_from_slice(b"odd \x03\0\0\0abc "); // space pad
+    junk(&mut head);
+    head.extend_from_slice(b"fmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x40\x1f\0\0\x01\0\x08\0");
+    head.extend_from_slice(b"data");
+    head.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    head.extend_from_slice(&data);
+    head.push(0);
+
+    // After the (odd-sized) data chunk, with tags behind it.
+    let mut tail = b.build(&s);
+    *tail.last_mut().unwrap() = b' '; // the builder's zero pad
+    junk(&mut tail);
+
+    for (what, mut f) in [("head", head), ("tail", tail)] {
+        f.extend_from_slice(b"LIST");
+        f.extend_from_slice(&(list.len() as u32).to_le_bytes());
+        f.extend_from_slice(&list);
+        let n = (f.len() - 8) as u32;
+        f[4..8].copy_from_slice(&n.to_le_bytes());
+        for chunks in [&[usize::MAX][..], &[4099][..]] {
+            let flac = encode_chunked(&f, Options::default(), chunks)
+                .unwrap_or_else(|e| panic!("{what} {chunks:?}: {e}"));
+            let (blocks, _) = metadata_blocks(&flac);
+            let vc = blocks.iter().find(|b| b.0 == 4).expect("vorbis comment");
+            let (_, tags) = parse_vorbis(&vc.2);
+            assert!(
+                tags.contains(&("TITLE".into(), "after".into())),
+                "{what} {chunks:?}: {tags:?}"
+            );
+            assert_eq!(decode(&flac).samples, s, "{what} {chunks:?}");
+        }
+    }
+}
+
+#[test]
+fn extensible_fmt_longer_than_40() {
+    // Odd and even sizes; cbSize grows with the chunk (above 22).
+    for size in [41u32, 42, 47, 64] {
+        let s = signal(Signal::Noise, 24, 2, 1000, 3);
+        let mut b = WavBuilder::pcm(2, 48000, 24).extensible(24, 24, 0x3);
+        b.fmt_size = Some(size);
+        check(&b, &s, 24);
+        let f: Vec<f64> = s
+            .iter()
+            .map(|v| f64::from(*v) / f64::from(1 << 23))
+            .collect();
+        let mut b = WavBuilder::pcm(2, 48000, 32)
+            .float32()
+            .extensible(32, 32, 0x3);
+        b.fmt_size = Some(size);
+        let opts = Options {
+            bits_per_sample: Some(24),
+            dither: wav2flac::Dither::None,
+            ..Options::default()
+        };
+        let flac = encode(&b.build_raw(&WavBuilder::pack_f32(&f)), opts);
+        assert_eq!(decode(&flac).md5, pcm_md5(&s, 24), "float fmt size {size}");
     }
 }
 

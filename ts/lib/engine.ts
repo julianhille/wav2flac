@@ -7,8 +7,8 @@
  * @internal
  */
 import { fromWasmError } from './errors.js';
-import { chunks, isStream, slices, type Input } from './input.js';
-import type { EncoderArgs, Progress } from './options.js';
+import { chunks, releaseUnread, slices, type Input } from './input.js';
+import type { Progress, ResolvedArgs } from './options.js';
 import { ignore, Pacer } from './platform.js';
 import { WasmEncoder } from '../../build/bindgen/wav2flac.js';
 
@@ -77,7 +77,9 @@ export class Session {
    * @param a Normalized constructor arguments.
    * @throws {Wav2FlacError} `INVALID_OPTIONS` for out-of-range options.
    */
-  constructor(a: EncoderArgs) {
+  constructor(a: ResolvedArgs) {
+    // The type rules out -1 (PCM format not yet inferred); this guards casts.
+    if (a.pcmFormat < 0) throw new Error('wav2flac: internal error: pcm format not resolved');
     try {
       this.#enc = new WasmEncoder(
         a.level,
@@ -94,7 +96,7 @@ export class Session {
         a.padding,
         a.maxInputBytes,
         a.streaming,
-        Math.max(a.pcmFormat, 0),
+        a.pcmFormat,
         a.pcmChannels,
         a.pcmRate,
         a.pcmTotalBytes,
@@ -197,7 +199,7 @@ export function assemble(
  * @param hooks Progress and abort hooks.
  * @returns The complete FLAC file.
  */
-export function runSync(bytes: Uint8Array, args: EncoderArgs, hooks: RunHooks): Bytes {
+export function runSync(bytes: Uint8Array, args: ResolvedArgs, hooks: RunHooks): Bytes {
   hooks.signal?.throwIfAborted();
   const s = new Session(args);
   const rep = new Reporter(hooks.onProgress);
@@ -225,7 +227,7 @@ export function runSync(bytes: Uint8Array, args: EncoderArgs, hooks: RunHooks): 
  */
 export async function runBuffered(
   input: Input,
-  args: EncoderArgs,
+  args: ResolvedArgs,
   hooks: RunHooks,
 ): Promise<Bytes> {
   let s: Session;
@@ -234,16 +236,19 @@ export async function runBuffered(
     s = new Session(args);
   } catch (e) {
     // Nothing has read the input yet; release a stream input.
-    if (isStream(input) && !input.locked) void input.cancel(e).catch(ignore);
+    releaseUnread(input, e);
     throw e;
   }
   const rep = new Reporter(hooks.onProgress);
   const pacer = new Pacer();
+  const it = chunks(input, undefined, hooks.signal);
   try {
     const parts: Uint8Array[] = [];
-    for await (const piece of chunks(input, undefined, hooks.signal)) {
+    // Not `for await`: it would close the input with return() on a failure,
+    // which cancels a stream input without the error.
+    for (let r = await it.next(); r.done !== true; r = await it.next()) {
       hooks.signal?.throwIfAborted();
-      const out = s.push(piece);
+      const out = s.push(r.value);
       if (out.length > 0) parts.push(out);
       rep.update(s);
       await pacer.maybeYield();
@@ -253,6 +258,10 @@ export async function runBuffered(
     const { tail, header } = s.finish();
     rep.update(s, true);
     return assemble(header, parts, tail);
+  } catch (e) {
+    // Hand the failure to the input, so a stream input is cancelled with it.
+    await it.throw(e).catch(ignore);
+    throw e;
   } finally {
     s.free();
   }
@@ -267,7 +276,11 @@ export async function runBuffered(
  * @param hooks Progress and abort hooks.
  * @returns The FLAC byte stream.
  */
-export function runStream(input: Input, args: EncoderArgs, hooks: RunHooks): ReadableStream<Bytes> {
+export function runStream(
+  input: Input,
+  args: ResolvedArgs,
+  hooks: RunHooks,
+): ReadableStream<Bytes> {
   let s: Session | undefined;
   let it: AsyncGenerator<Uint8Array> | undefined;
   const rep = new Reporter(hooks.onProgress);
@@ -285,7 +298,7 @@ export function runStream(input: Input, args: EncoderArgs, hooks: RunHooks): Rea
     s = undefined;
     stop.abort(reason);
     // A generator that never ran has not locked the input; cancel it directly.
-    if (!reading && isStream(input) && !input.locked) void input.cancel(reason).catch(ignore);
+    if (!reading) releaseUnread(input, reason);
     const i = it;
     it = undefined;
     void i?.return(undefined).catch(ignore);

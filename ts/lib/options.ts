@@ -4,7 +4,7 @@
  * Types are checked here; value ranges are checked by the Rust core.
  * @module
  */
-import { invalidOption } from './errors.js';
+import { invalidOption, Wav2FlacError } from './errors.js';
 
 /**
  * Whether a value is an object literal (or `Object.create(null)`), as opposed
@@ -25,7 +25,10 @@ export interface Progress {
   bytesIn: number;
   /** Samples per channel encoded so far. */
   samplesOut: number;
-  /** Fraction of the WAV `data` chunk consumed (0–1), or `null` until the header is parsed. */
+  /**
+   * Fraction of the WAV `data` chunk consumed (0–1). `null` until the header is
+   * parsed, and throughout for a raw PCM stream, whose length is unknown.
+   */
   fraction: number | null;
 }
 
@@ -65,7 +68,11 @@ export interface Options {
   compressionLevel?: number | undefined;
   /** Samples per frame, 16–65535. Default: the level's (1152 or 4096). */
   blockSize?: number | undefined;
-  /** Target sample rate in Hz; resamples when it differs from the input. */
+  /**
+   * Target sample rate in Hz, 1–1 048 575; resamples when it differs from the
+   * input. It may be at most 256 times the input rate and at least 1/65536 of
+   * it: other ratios fail with `UNSUPPORTED_FORMAT`.
+   */
   sampleRate?: number | undefined;
   /** Resampler filter quality. Default `'balanced'`. */
   resampleQuality?: ResampleQuality | undefined;
@@ -85,7 +92,10 @@ export interface Options {
   ditherSeed?: number | undefined;
   /** Extra/overriding Vorbis comments (an empty string removes a field), or `false` to write no tags. */
   tags?: Record<string, string> | false | undefined;
-  /** Seconds between seek points; 0 = no seek table. Default 10. Buffered output only. */
+  /**
+   * Seconds between seek points; 0 = no seek table. Default 10. Buffered output
+   * only: `encodeStream()` validates it but writes no seek table.
+   */
   seekPointInterval?: number | undefined;
   /** Bytes of PADDING for later tag edits; 0 = none. Default 8192. */
   padding?: number | undefined;
@@ -102,6 +112,15 @@ export interface Options {
    */
   copy?: boolean | undefined;
 }
+
+/** Brands {@link ResolvedArgs}; exists only in types. */
+declare const resolvedPcm: unique symbol;
+
+/**
+ * {@link EncoderArgs} whose PCM format is resolved (never -1), as only
+ * `preparePcm()` returns them; the encoder takes nothing else.
+ */
+export type ResolvedArgs = EncoderArgs & { readonly [resolvedPcm]: true };
 
 /**
  * Plain, structured-cloneable arguments for the wasm `WasmEncoder` constructor.
@@ -290,11 +309,21 @@ function normalizePcm(
     if (k !== 'sampleRate' && k !== 'channels' && k !== 'format')
       throw invalidOption(`unknown pcm option "${k}"`);
   }
-  for (const k of ['sampleRate', 'channels']) {
+  for (const [k, max] of [
+    ['sampleRate', 2 ** 32 - 1],
+    ['channels', Number.MAX_SAFE_INTEGER],
+  ] as const) {
     const n = p[k];
-    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 2 ** 32 - 1) {
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > max) {
       throw invalidOption(`pcm.${k} must be a positive integer`);
     }
+  }
+  // Any count above 8 gets the code and message of a WAV file with too many channels.
+  if ((p['channels'] as number) > 8) {
+    throw new Wav2FlacError(
+      'TOO_MANY_CHANNELS',
+      `${String(p['channels'])} channels (FLAC supports at most 8)`,
+    );
   }
   const f = p['format'];
   let pcmFormat = -1;

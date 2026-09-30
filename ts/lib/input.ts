@@ -6,7 +6,12 @@
  */
 
 import { invalidOption } from './errors.js';
-import { PCM_FORMATS, type EncoderArgs, type PcmSampleFormat } from './options.js';
+import {
+  PCM_FORMATS,
+  type EncoderArgs,
+  type PcmSampleFormat,
+  type ResolvedArgs,
+} from './options.js';
 import { ignore } from './platform.js';
 
 /** Anything the encoder accepts as WAV input. */
@@ -46,7 +51,7 @@ export const BUFFER_INPUT = 'a Uint8Array or ArrayBuffer';
  * @param x Candidate.
  * @returns The tag, e.g. `ArrayBuffer` or `Int16Array`.
  */
-function typeTag(x: unknown): string {
+export function typeTag(x: unknown): string {
   return Object.prototype.toString.call(x).slice(8, -1);
 }
 
@@ -79,6 +84,16 @@ export function isStream(x: unknown): x is ReadableStream<Uint8Array> {
   return (
     typeof x === 'object' && x !== null && typeof (x as ReadableStream).getReader === 'function'
   );
+}
+
+/**
+ * Cancels `input` when it is a stream nobody reads yet, so that its source is
+ * released; a locked stream belongs to its reader, and bytes need nothing.
+ * @param input Any input.
+ * @param reason Why, passed to the stream's source.
+ */
+export function releaseUnread(input: unknown, reason: unknown): void {
+  if (isStream(input) && !input.locked) void input.cancel(reason).catch(ignore);
 }
 
 /**
@@ -127,7 +142,9 @@ export function* slices(bytes: Uint8Array, size = SLICE_BYTES): Generator<Uint8A
 /**
  * Iterates any {@link Input} as byte slices. Streams are read one chunk at a
  * time; if iteration stops early, or `signal` aborts (even while a read is
- * pending), the stream is cancelled.
+ * pending), the stream is cancelled. When iteration fails, because reading
+ * fails or the consumer passes its error to `throw()`, the stream is
+ * cancelled with that error.
  * @param input The input.
  * @param size Largest slice.
  * @param signal Cancels a stream input when aborted.
@@ -149,6 +166,7 @@ export async function* chunks(
     void reader.cancel(signal?.reason).catch(ignore);
   };
   signal?.addEventListener('abort', onAbort, { once: true });
+  let reason: unknown;
   try {
     for (;;) {
       signal?.throwIfAborted();
@@ -160,9 +178,12 @@ export async function* chunks(
       }
       yield* slices(toBytes(r.value, 'stream chunk'), size);
     }
+  } catch (e) {
+    reason = e;
+    throw e;
   } finally {
     signal?.removeEventListener('abort', onAbort);
-    if (!done) await reader.cancel(signal?.reason).catch(ignore);
+    if (!done) await reader.cancel(reason).catch(ignore);
     reader.releaseLock();
   }
 }
@@ -303,8 +324,11 @@ function byteStream(
  * @throws {Wav2FlacError} `INVALID_OPTIONS` when the format is missing or contradicts the input.
  * @throws {TypeError} For unsupported input types.
  */
-export function preparePcm(input: unknown, args: EncoderArgs): { input: Input; args: EncoderArgs } {
-  if (args.pcmFormat === 0) return { input: input as Input, args };
+export function preparePcm(
+  input: unknown,
+  args: EncoderArgs,
+): { input: Input; args: ResolvedArgs } {
+  if (args.pcmFormat === 0) return { input: input as Input, args: args as ResolvedArgs };
   let format: PcmSampleFormat | undefined = PCM_FORMATS[args.pcmFormat - 1];
   const resolve = (implied: PcmSampleFormat | undefined, what: string): number => {
     if (implied !== undefined && format !== undefined && implied !== format) {
@@ -322,7 +346,7 @@ export function preparePcm(input: unknown, args: EncoderArgs): { input: Input; a
     const pcmFormat = resolve(undefined, 'streams');
     return {
       input: byteStream(input, format as PcmSampleFormat),
-      args: { ...args, pcmFormat, pcmTotalBytes: -1 },
+      args: { ...args, pcmFormat, pcmTotalBytes: -1 } as ResolvedArgs,
     };
   }
   let samples: unknown = input;
@@ -352,5 +376,8 @@ export function preparePcm(input: unknown, args: EncoderArgs): { input: Input; a
   }
   const pcmFormat = resolve(implied, implied === undefined ? 'byte input' : typeTag(samples));
   const bytes = pcmBytes(samples, format as PcmSampleFormat, 'pcm input');
-  return { input: bytes, args: { ...args, pcmFormat, pcmTotalBytes: bytes.byteLength } };
+  return {
+    input: bytes,
+    args: { ...args, pcmFormat, pcmTotalBytes: bytes.byteLength } as ResolvedArgs,
+  };
 }

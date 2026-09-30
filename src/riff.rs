@@ -28,9 +28,11 @@ pub enum SampleFormat {
 /// How samples are aligned when fewer bits are valid than the container holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Justify {
-    /// Valid bits are the most significant bits (`WAVE_FORMAT_EXTENSIBLE`, per spec).
+    /// Valid bits are the most significant bits (`WAVE_FORMAT_EXTENSIBLE`, and
+    /// plain PCM whose width is not a multiple of 8; both per spec).
     Left,
-    /// Valid bits are the least significant bits (plain PCM, hound's interpretation).
+    /// Valid bits are the least significant bits (plain PCM whose width is a
+    /// multiple of 8 in a larger container, hound's interpretation).
     Right,
 }
 
@@ -228,6 +230,11 @@ impl HeaderParser {
             // this chunk, which must not be processed twice.
             let mut next = end;
             if len % 2 == 1 {
+                // Nine bytes let `after_pad` compare the lengths, too; at the
+                // end of the input five will do.
+                if buf.len() < end + 9 && !eof {
+                    return self.need_more(end + 9, eof, "chunk padding");
+                }
                 if buf.len() < end + 5 {
                     return self.need_more(end + 5, eof, "chunk padding");
                 }
@@ -309,7 +316,7 @@ struct FmtInfo {
     sample_rate: u32,
     valid_bits: u16,
     container_bytes: u16,
-    extensible: bool,
+    justify: Justify,
     channel_mask: Option<u32>,
 }
 
@@ -335,6 +342,43 @@ fn map_hound(e: hound::Error) -> crate::error::Error {
     }
 }
 
+/// Builds a minimal file for hound: RIFF/WAVE, the fmt chunk and an empty
+/// data chunk, with the fields hound is strict about corrected.
+fn minimal_wav(raw: &[u8], tag: u16) -> Vec<u8> {
+    // Plain PCM and float chunks are cut to the 16 bytes that carry
+    // information: a `WAVEFORMATEX` (18 bytes) or longer chunk adds nothing
+    // for these tags, and hound would reject some of them (e.g. 32-bit PCM in
+    // 18 bytes).
+    // Extensible chunks are cut to the 40 bytes of `WAVEFORMATEXTENSIBLE`:
+    // hound reads exactly that much and would parse the rest as the next
+    // chunk header.
+    let fmt_len = match tag {
+        0x0001 | 0x0003 => 16,
+        0xFFFE => raw.len().min(40),
+        _ => raw.len(),
+    };
+    let mut mini = Vec::with_capacity(fmt_len + 28);
+    mini.extend_from_slice(b"RIFF");
+    mini.extend_from_slice(&((fmt_len + 20) as u32).to_le_bytes());
+    mini.extend_from_slice(b"WAVE");
+    mini.extend_from_slice(b"fmt ");
+    mini.extend_from_slice(&(fmt_len as u32).to_le_bytes());
+    mini.extend_from_slice(&raw[..fmt_len]);
+    mini.extend_from_slice(b"data");
+    mini.extend_from_slice(&0u32.to_le_bytes());
+    // hound accepts only a `cbSize` of exactly 22; a larger one just announces
+    // extra bytes we dropped above.
+    if fmt_len == 40 && le_u16(raw, 16) > 22 {
+        mini[36..38].copy_from_slice(&22u16.to_le_bytes());
+    }
+    // The byte rate is redundant and often wrong in the wild; hound rejects a
+    // mismatch, so write the value it expects.
+    if let Some(rate) = u32::from(le_u16(raw, 12)).checked_mul(le_u32(raw, 4)) {
+        mini[28..32].copy_from_slice(&rate.to_le_bytes());
+    }
+    mini
+}
+
 /// Validates the fmt chunk body using hound and extracts what we need.
 fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
     if raw.len() < 16 {
@@ -358,36 +402,38 @@ fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
         );
     }
 
-    // Normalized minimal file: RIFF/WAVE + fmt + empty data chunk. Plain PCM
-    // and float chunks are cut to the 16 bytes that carry information: a
-    // `WAVEFORMATEX` (18 bytes) or longer chunk adds nothing for these tags,
-    // and hound would reject some of them (e.g. 32-bit PCM in 18 bytes).
-    let fmt_len = if tag == 0x0001 || tag == 0x0003 {
-        16
-    } else {
-        raw.len()
-    };
-    let mut mini = Vec::with_capacity(fmt_len + 28);
-    mini.extend_from_slice(b"RIFF");
-    mini.extend_from_slice(&((fmt_len + 20) as u32).to_le_bytes());
-    mini.extend_from_slice(b"WAVE");
-    mini.extend_from_slice(b"fmt ");
-    mini.extend_from_slice(&(fmt_len as u32).to_le_bytes());
-    mini.extend_from_slice(&raw[..fmt_len]);
-    mini.extend_from_slice(b"data");
-    mini.extend_from_slice(&0u32.to_le_bytes());
-    // The byte rate is redundant and often wrong in the wild; hound rejects a
-    // mismatch, so write the value it expects.
-    if let Some(rate) = u32::from(le_u16(raw, 12)).checked_mul(le_u32(raw, 4)) {
-        mini[28..32].copy_from_slice(&rate.to_le_bytes());
+    let mut mini = minimal_wav(raw, tag);
+    // Plain PCM may declare a width that is not a multiple of 8 (e.g. 20 bits):
+    // the samples then fill the most significant bits of the smallest container
+    // that holds them. hound rejects such a width, so give it the container's
+    // and keep the declared one as the valid bits.
+    let pcm_bits = le_u16(raw, 14);
+    let odd_pcm_width = tag == 0x0001 && !pcm_bits.is_multiple_of(8);
+    if odd_pcm_width {
+        // Near u16::MAX there is no larger multiple of 8 that fits.
+        let Some(container_bits) = pcm_bits.checked_next_multiple_of(8) else {
+            return err(
+                ErrorCode::UnsupportedBitDepth,
+                format!("unsupported sample width: {pcm_bits} bits per sample"),
+            );
+        };
+        mini[34..36].copy_from_slice(&container_bits.to_le_bytes());
     }
     let reader = hound::WavReader::new(Cursor::new(&mini[..])).map_err(map_hound)?;
-    let spec = reader.spec();
+    let mut spec = reader.spec();
+    if odd_pcm_width {
+        spec.bits_per_sample = pcm_bits;
+    }
     let channels = le_u16(raw, 2);
     let block_align = le_u16(raw, 12);
     let bytes_per_sample = block_align.checked_div(channels).unwrap_or(0);
 
     let extensible = tag == 0xFFFE;
+    let justify = if extensible || odd_pcm_width {
+        Justify::Left
+    } else {
+        Justify::Right
+    };
     let channel_mask = if extensible && raw.len() >= 24 {
         Some(le_u32(raw, 20)).filter(|m| *m != 0)
     } else {
@@ -426,7 +472,7 @@ fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
         sample_rate: spec.sample_rate,
         valid_bits: spec.bits_per_sample,
         container_bytes: bytes_per_sample,
-        extensible,
+        justify,
         channel_mask,
     })
 }
@@ -444,11 +490,7 @@ fn finalize(
         sample_rate: f.sample_rate,
         valid_bits: f.valid_bits,
         container_bytes: f.container_bytes,
-        justify: if f.extensible {
-            Justify::Left
-        } else {
-            Justify::Right
-        },
+        justify: f.justify,
         channel_mask: f.channel_mask,
         data_offset,
         data_len,
@@ -552,20 +594,37 @@ pub(crate) fn is_chunk_id(id: &[u8]) -> bool {
 /// RIFF requires a pad byte after odd-sized chunks. Some writers omit it,
 /// and some fill it with garbage, even printable garbage such as a space.
 /// Both positions are looked at: a zero byte is always a pad; otherwise the
-/// position whose four bytes look like a chunk id wins, and if both do, a
-/// well-known id at `end` means the pad is missing. Needs five bytes after
-/// `end` to decide; with fewer there is no next chunk either way.
+/// position whose four bytes look like a chunk id wins. If both do, a
+/// well-known id at `end` means the pad is missing. So does a length of
+/// 16 MiB or more at `end + 1` (its top byte would be the first body byte)
+/// when the length at `end` is smaller, unless the id at `end + 1` is a
+/// well-known one: a real chunk that large, behind a printable pad, has such
+/// lengths too. Otherwise the pad is assumed.
+///
+/// Needs five bytes after `end` to decide; with fewer there is no next chunk
+/// either way. The lengths are only compared when nine bytes are there.
 fn after_pad(buf: &[u8], end: usize) -> usize {
     let id = |at: usize| buf.get(at..at + 4).filter(|id| is_chunk_id(id));
+    let huge = |at: usize| buf.get(at + 7).is_some_and(|top| *top != 0);
     match (buf.get(end), id(end), id(end + 1)) {
         (Some(0), _, _) | (_, None, _) => end + 1,
-        (_, Some(here), Some(_)) if !KNOWN_IDS.contains(&here) => end + 1,
+        (_, Some(here), Some(next))
+            if !KNOWN_IDS.contains(&here)
+                && (KNOWN_IDS.contains(&next) || !huge(end + 1) || huge(end)) =>
+        {
+            end + 1
+        }
         _ => end,
     }
 }
 
+/// Whether `id` is one of the chunk ids common enough to trust on sight.
+pub(crate) fn is_known_chunk_id(id: &[u8]) -> bool {
+    KNOWN_IDS.contains(&id)
+}
+
 /// Chunk ids common enough to beat a spec-conforming pad byte in
-/// [`after_pad`].
+/// [`after_pad`], or a RIFF size too small to hold them.
 const KNOWN_IDS: [&[u8]; 12] = [
     b"fmt ", b"data", b"LIST", b"fact", b"JUNK", b"junk", b"PAD ", b"bext", b"iXML", b"cue ",
     b"smpl", b"id3 ",
@@ -625,8 +684,8 @@ impl TrailingScanner {
             }
             let want = match self.list {
                 Some(total) => total,
-                // A possible pad byte is decided on the first five bytes.
-                None if self.pad => 5,
+                // A possible pad byte is decided on the first nine bytes.
+                None if self.pad => 9,
                 None => 8,
             };
             let n = (want - self.buf.len()).min(input.len());
@@ -640,10 +699,11 @@ impl TrailingScanner {
                 self.pad = (total - 8) % 2 == 1;
                 self.buf.clear();
             } else if self.pad {
+                // Scan the held bytes again from the chunk start; there are
+                // too few of them to need another pad decision.
                 self.pad = false;
-                if after_pad(&self.buf, 0) == 1 {
-                    self.buf.remove(0);
-                }
+                let held = std::mem::take(&mut self.buf);
+                self.push(&held[after_pad(&held, 0)..]);
             } else if !is_chunk_id(&self.buf[..4]) {
                 self.done = true;
                 self.buf = Vec::new();

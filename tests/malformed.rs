@@ -2,7 +2,7 @@
 //! Broken and unsupported inputs produce the right error code and never panic.
 mod common;
 use common::*;
-use wav2flac::{encode_all, Encoder, ErrorCode, Options};
+use wav2flac::{encode_all, probe, Encoder, ErrorCode, Options};
 
 fn code(w: &[u8]) -> ErrorCode {
     encode_all(w, Options::default()).unwrap_err().code()
@@ -83,10 +83,10 @@ fn bad_fmt_values() {
             .to_vec(),
     );
     assert_eq!(code(&f), ErrorCode::InvalidWav);
-    // bits not multiple of 8 in plain PCM: a width hound cannot unpack
+    // A width that is not a multiple of 8 but exceeds the container.
     let mut f = WavBuilder::pcm(1, 8000, 16).build(&s);
-    f[34] = 12;
-    assert_eq!(code(&f), ErrorCode::UnsupportedBitDepth);
+    f[34] = 20;
+    assert_eq!(code(&f), ErrorCode::InvalidWav);
 }
 
 #[test]
@@ -144,6 +144,20 @@ fn unsupported_bit_depths() {
             ErrorCode::UnsupportedBitDepth
         };
         assert_eq!(e.code(), expected, "{container_bits}-bit container: {e}");
+    }
+    // Plain PCM widths that are not a multiple of 8 and have no multiple of 8
+    // above them in a u16 fail instead of overflowing. 65527 still has one
+    // (65528), which is too wide for the 2-byte samples.
+    for (bits, expected) in [
+        (65527u16, ErrorCode::InvalidWav),
+        (65529, ErrorCode::UnsupportedBitDepth),
+        (65535, ErrorCode::UnsupportedBitDepth),
+    ] {
+        let mut f = WavBuilder::pcm(1, 8000, 16).build_raw(&[0; 40]);
+        f[34..36].copy_from_slice(&bits.to_le_bytes());
+        let e = encode_all(&f, Options::default()).unwrap_err();
+        assert_eq!(e.code(), expected, "{bits} bits: {e}");
+        assert_eq!(probe(&f).unwrap_err().code(), expected, "{bits} bits");
     }
 }
 
@@ -252,6 +266,15 @@ fn zero_data_size_followed_by_audio() {
     let mut b = WavBuilder::pcm(2, 44100, 16);
     b.chunks_after = vec![(*b"LIST", info_list(&[(b"INAM", b"empty")]))];
     assert!(encode_all(&b.build(&[]), Options::default()).is_ok());
+    // Even when the RIFF size leaves that chunk out, as some writers do.
+    for riff in [36, 37, 40] {
+        b.riff_len_override = Some(riff);
+        let f = b.build(&[]);
+        let r = encode_all(&f, Options::default());
+        assert!(r.is_ok(), "{riff}: {r:?}");
+        let r = encode_chunked(&f, Options::default(), &[1]);
+        assert!(r.is_ok(), "{riff}: {r:?}");
+    }
 }
 
 #[test]

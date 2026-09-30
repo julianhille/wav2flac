@@ -17,7 +17,7 @@ import {
 import { liveSessions } from '../../ts/lib/engine.js';
 import type { ErrorCode } from '../../ts/lib/errors.js';
 import { normalizeOptions } from '../../ts/lib/options.js';
-import type { FromWorker, Port, ToWorker } from '../../ts/lib/protocol.js';
+import type { FromWorker, ToWorker, WorkerPort } from '../../ts/lib/protocol.js';
 import { connect, type WorkerEncoder } from '../../ts/lib/worker-client.js';
 import { serve } from '../../ts/lib/worker-host.js';
 import { params } from '../helpers/fc.js';
@@ -127,7 +127,7 @@ const wasm = readFileSync('build/bindgen/wav2flac_bg.wasm');
  * @param p The port.
  * @returns The protocol port.
  */
-function wrap<I, O>(p: MessagePort): Port<I, O> {
+function wrap<I, O>(p: MessagePort): WorkerPort<I, O> {
   return {
     post: (m, t) => p.postMessage(m, t as never),
     listen: (on, onErr) => {

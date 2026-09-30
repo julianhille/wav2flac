@@ -4,7 +4,7 @@
  * @module
  */
 import initGlue, { initSync as initGlueSync } from '../../build/bindgen/wav2flac.js';
-import { isBuffer, isDetached } from './input.js';
+import { isBuffer, isDetached, typeTag } from './input.js';
 import { isSignal } from './options.js';
 import { builtin, ignore, isNode } from './platform.js';
 
@@ -40,21 +40,70 @@ let compiled: WebAssembly.Module | undefined;
 let memory: WebAssembly.Memory | undefined;
 let pending: Load | undefined;
 /**
+ * Stands in for {@link configured} when the only source given so far was a
+ * `Response`: a retry cannot read it again, and must not load from the
+ * default location instead.
+ */
+const RESPONSE_READ = Symbol('Response read');
+/**
  * The last source that started a load and can be read again, for the loads
  * that retry after it failed or was abandoned; bytes are a copy. Cleared once
  * the module is ready.
  */
-let configured: WasmSource | undefined;
+let configured: WasmSource | typeof RESPONSE_READ | undefined;
 /** Whether init() is inside the glue's async instantiation. */
 let instantiating = false;
 
 /**
  * URL of the `.wasm` shipped next to this bundle (`pkg/wav2flac.wasm`).
  * @returns The URL.
+ * @throws {Error} If the bundle cannot tell where it was loaded from: the
+ *   CommonJS build bundled into a script without `__filename`,
+ *   `document.currentScript` or `location`.
  * @internal
  */
 export function defaultWasmUrl(): URL {
-  return new URL('../wav2flac.wasm', import.meta.url);
+  try {
+    return new URL('../wav2flac.wasm', import.meta.url);
+  } catch (e) {
+    throw new Error(
+      "wav2flac: can't tell where this bundle was loaded from, so can't find " +
+        'wav2flac.wasm; pass its URL, path or bytes to init()',
+      { cause: e },
+    );
+  }
+}
+
+/**
+ * Checks for a `URL`, also one from another realm (iframe, `vm` context).
+ * @param x Candidate.
+ * @returns `true` for URLs.
+ */
+function isUrl(x: unknown): x is URL {
+  return x instanceof URL || typeTag(x) === 'URL';
+}
+
+/**
+ * Takes a `WebAssembly.Module`, also one from another realm, as a module of
+ * this realm: the glue checks with `instanceof`. A clone shares the compiled
+ * code, so it costs no recompile.
+ * @param x Candidate.
+ * @returns The module, or `undefined` for anything else.
+ */
+function asModule(x: unknown): WebAssembly.Module | undefined {
+  if (x instanceof WebAssembly.Module) return x;
+  if (typeTag(x) === 'WebAssembly.Module') return structuredClone(x as WebAssembly.Module);
+  return undefined;
+}
+
+/**
+ * Names the type of a value for an error message.
+ * @param x The value.
+ * @returns E.g. `number`, `null` or `Blob`.
+ */
+function kind(x: unknown): string {
+  if (x === null) return 'null';
+  return typeof x === 'object' ? typeTag(x) : typeof x;
 }
 
 /**
@@ -68,20 +117,33 @@ async function readFileUrl(url: URL, signal: AbortSignal): Promise<Uint8Array<Ar
 }
 
 /**
- * Resolves a URL string: relative to the page in browsers, and in Node a
- * string that has no URL scheme (`file:`, `https:`, ...) is a file path.
+ * Whether this is an Electron renderer, which has both Node and a real page.
+ * @returns `true` in a renderer.
+ */
+function isElectronRenderer(): boolean {
+  const p = (globalThis as { process?: { type?: unknown; versions?: { electron?: unknown } } })
+    .process;
+  return typeof p?.versions?.electron === 'string' && p.type === 'renderer';
+}
+
+/**
+ * Resolves a URL string: in Node a string that has no URL scheme (`file:`,
+ * `https:`, ...) is a file path, also where a `location` exists (jsdom, Deno
+ * `--location`), except in an Electron renderer, whose page it is relative
+ * to as it is everywhere else.
  * @param source The URL or path.
  * @returns The URL.
  * @throws {TypeError} For strings that are neither.
  */
 function toUrl(source: string | URL): URL {
-  if (source instanceof URL) return source;
-  if (typeof location === 'object' && location !== null) return new URL(source, location.href);
+  // A URL of another realm is copied into this one; its string is its href.
+  if (typeof source !== 'string') return source instanceof URL ? source : new URL(String(source));
   // A Windows drive path ("C:\\x.wasm") parses as a URL with scheme "c"; only
   // schemes of two or more characters count as URLs in Node.
-  if (isNode() && !/^[a-z][a-z0-9+.-]+:/i.test(source)) {
+  if (isNode() && !isElectronRenderer() && !/^[a-z][a-z0-9+.-]+:/i.test(source)) {
     return builtin<typeof import('node:url')>('url').pathToFileURL(source);
   }
+  if (typeof location === 'object' && location !== null) return new URL(source, location.href);
   if (URL.canParse(source)) return new URL(source);
   throw new TypeError(
     `wav2flac: cannot resolve wasm URL "${source}" (no page to resolve it against)`,
@@ -99,30 +161,37 @@ function bufferSource(bytes: ArrayBufferView | ArrayBufferLike): BufferSource {
 }
 
 /**
+ * Whether `source` is a `Response` or a promise of one.
+ * @param source The source.
+ * @returns `true` for a `Response` or a thenable.
+ */
+function isResponse(source: WasmSource): source is Response | PromiseLike<Response> {
+  return typeof source === 'object' && source !== null && ('ok' in source || 'then' in source);
+}
+
+/**
  * Compiles a module from any {@link WasmSource}.
  * @param source The source.
  * @param signal Cancels a fetch or file read started here.
  * @returns The compiled module.
  */
 async function compile(source: WasmSource, signal: AbortSignal): Promise<WebAssembly.Module> {
-  if (source instanceof WebAssembly.Module) return source;
+  const mod = asModule(source);
+  if (mod !== undefined) return mod;
   if (ArrayBuffer.isView(source) || isBuffer(source))
     return WebAssembly.compile(bufferSource(source));
   let res: Response | PromiseLike<Response>;
-  if (typeof source === 'string' || source instanceof URL) {
+  if (typeof source === 'string' || isUrl(source)) {
     const url = toUrl(source);
     if (url.protocol === 'file:' && isNode())
       return WebAssembly.compile(await readFileUrl(url, signal));
     res = fetch(url, { signal });
-  } else if (
-    typeof source === 'object' &&
-    source !== null &&
-    ('ok' in source || 'then' in source)
-  ) {
-    res = source as Response | PromiseLike<Response>;
+  } else if (isResponse(source)) {
+    res = source;
   } else {
     throw new TypeError(
-      'wav2flac: init() needs wasm bytes, a WebAssembly.Module, a URL, a path or a Response',
+      'wav2flac: init() needs wasm bytes, a WebAssembly.Module, a URL, a path or a Response,' +
+        ` got ${kind(source)}`,
     );
   }
   const r = await res;
@@ -232,10 +301,14 @@ function waitFor(load: Load, signal: AbortSignal): Promise<void> {
  *
  * A retry loads from the `source` of that call. Without one, it loads from
  * the last URL, path, bytes or module that a load started with, so the
- * `init()` inside `encode()` retries your custom location. `init()` loads
- * from a copy of bytes, so you can reuse or transfer your buffer right after
- * the call. A `Response` can be read only once; after it failed, pass a new
- * one.
+ * `init()` inside `encode()` retries your custom location, never the default
+ * one. A relative URL or path is resolved once, when its load starts, so the
+ * retry loads the same file after the page navigated or the process changed
+ * directory. `init()` loads from a copy of bytes, so you can reuse or
+ * transfer your buffer right after the call. A `Response` can be read only
+ * once; after it failed, pass a new one. Until you do, a retry without a
+ * source rejects, unless an earlier load started from a URL, path, bytes or
+ * module.
  *
  * @param source Where to load the wasm from. Default: `wav2flac.wasm` next to
  *   the package's JS (read with `fs` in Node, `fetch`ed elsewhere).
@@ -261,14 +334,24 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
   if (compiled !== undefined) return Promise.resolve();
   if (signal?.aborted === true) return Promise.reject(signal.reason);
   if (pending === undefined) {
-    let again: WasmSource | undefined;
+    let from: WasmSource | typeof RESPONSE_READ;
     try {
-      again = source === undefined ? undefined : retrySource(source);
+      const again = source === undefined ? undefined : retrySource(source);
+      if (again !== undefined) configured = again;
+      else if (source !== undefined && isResponse(source)) configured ??= RESPONSE_READ;
+      from = again ?? source ?? configured ?? defaultWasmUrl();
     } catch (e) {
       return Promise.reject(e);
     }
-    if (again !== undefined) configured = again;
-    pending = startLoad(again ?? source ?? configured ?? defaultWasmUrl());
+    if (from === RESPONSE_READ) {
+      return Promise.reject(
+        new Error(
+          'wav2flac: the wasm Response passed to init() was read by a load that did not ' +
+            'finish; call init() with a new Response or a URL to retry',
+        ),
+      );
+    }
+    pending = startLoad(from);
   }
   const load = pending;
   if (signal === undefined) {
@@ -279,16 +362,20 @@ export function init(source?: WasmSource, options?: InitOptions): Promise<void> 
 }
 
 /**
- * What a retry of a load from `source` loads from: a path or a module as it
- * is, and a copy of a `URL` or of bytes, which the caller may change or
- * transfer meanwhile. A `Response` can be read only once, so it has none.
+ * What a retry of a load from `source` loads from: a module as it is, a URL
+ * string or path resolved now, since the page location or the cwd may change
+ * before the retry, and a copy of a `URL` or of bytes, which the caller may
+ * change or transfer meanwhile. A `Response` can be read only once, so it has
+ * none.
  * @param source The source.
  * @returns The source for a retry, or `undefined`.
- * @throws {TypeError} For detached bytes.
+ * @throws {TypeError} For detached bytes, or a string that is no URL.
  */
 function retrySource(source: WasmSource): WasmSource | undefined {
-  if (typeof source === 'string' || source instanceof WebAssembly.Module) return source;
-  if (source instanceof URL) return new URL(source.href);
+  const mod = asModule(source);
+  if (mod !== undefined) return mod;
+  if (typeof source === 'string') return toUrl(source);
+  if (isUrl(source)) return new URL(source.href);
   if (!ArrayBuffer.isView(source) && !isBuffer(source)) return undefined;
   if (isDetached(source))
     throw new TypeError('wav2flac: init() got wasm bytes that were transferred (detached)');
@@ -318,8 +405,13 @@ export function initSync(source?: BufferSource | WebAssembly.Module): void {
     );
   }
   const bytes = source ?? builtin<typeof import('node:fs')>('fs').readFileSync(defaultWasmUrl());
-  const mod =
-    bytes instanceof WebAssembly.Module ? bytes : new WebAssembly.Module(bufferSource(bytes));
+  let mod = asModule(bytes);
+  if (mod === undefined && (ArrayBuffer.isView(bytes) || isBuffer(bytes)))
+    mod = new WebAssembly.Module(bufferSource(bytes));
+  if (mod === undefined)
+    throw new TypeError(
+      `wav2flac: initSync() needs wasm bytes or a WebAssembly.Module, got ${kind(bytes)}`,
+    );
   const out = initGlueSync({ module: mod });
   compiled = mod;
   memory = out.memory;

@@ -4,13 +4,20 @@
 // `node scripts/release.ts prepare X.Y.Z` bumps the version in package.json,
 // package-lock.json, Cargo.toml and Cargo.lock, turns `## [Unreleased]` in
 // CHANGELOG.md into `## [X.Y.Z] - today` (with a fresh empty Unreleased
-// section and updated compare links) and commits. It never tags or pushes;
-// it prints the commands for that.
+// section and updated compare links) and commits. It runs on a fresh
+// `release/vX.Y.Z` branch at origin/main. It never tags or pushes; it prints
+// the commands for that.
 //
 // `node scripts/release.ts check vX.Y.Z [NOTES]` is run by the release
 // workflow: the tag must match every version, and CHANGELOG.md must have a
 // dated, non-empty section with a link for it. The section body is written to
 // NOTES (the GitHub release text).
+//
+// `node scripts/release.ts lint` checks the structure of CHANGELOG.md alone.
+// CI runs it on every push: CHANGELOG.md merges with `merge=union`
+// (.gitattributes), which never conflicts but can duplicate or reorder the
+// `### ` headings, or leave bullets under the wrong one. `check` and
+// `prepare` run the same check.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -87,6 +94,42 @@ function versions(): Record<string, string | undefined> {
   };
 }
 
+/** The Keep a Changelog change types, in the order they are listed in. */
+const TYPES = ['Added', 'Changed', 'Deprecated', 'Removed', 'Fixed', 'Security'];
+
+/**
+ * Checks the structure of the changelog: each `## ` section lists its `### `
+ * headings from `TYPES`, in that order and at most once each, and every
+ * bullet is under one. A `merge=union` merge of two branches that both add
+ * to `[Unreleased]` breaks one of these when it goes wrong; a bullet that
+ * landed under the wrong existing heading it cannot catch.
+ * @param log CHANGELOG.md
+ */
+function lint(log: string): void {
+  let section: string | undefined;
+  let last = -1;
+  const where = (line: number, msg: string): never =>
+    fail(`CHANGELOG.md:${line}: ${msg} (a merge=union artefact? see .gitattributes)`);
+  log.split('\n').forEach((text, i) => {
+    const line = i + 1;
+    if (text.startsWith('## ')) {
+      section = text.slice(3);
+      last = -1;
+    } else if (section === undefined) {
+      // The preamble before the first section.
+    } else if (text.startsWith('### ')) {
+      const type = text.slice(4);
+      const index = TYPES.indexOf(type);
+      if (index < 0) where(line, `"${text}" is not one of ${TYPES.join(', ')}`);
+      if (index === last) where(line, `${section} has "${text}" twice`);
+      if (index < last) where(line, `${section} has "${text}" after "### ${TYPES[last]}"`);
+      last = index;
+    } else if (/^[-*] /.test(text) && last < 0) {
+      where(line, `${section} has a bullet before its first "### " heading`);
+    }
+  });
+}
+
 /**
  * The body of a version's changelog section.
  * @param log CHANGELOG.md
@@ -123,7 +166,9 @@ function check(tag: string, notes?: string): void {
   for (const [file, got] of Object.entries(versions())) {
     if (got !== v) fail(`${file} has version ${got ?? '(none)'}, the tag says ${v}`);
   }
-  const body = section(read('CHANGELOG.md'), v);
+  const log = read('CHANGELOG.md');
+  lint(log);
+  const body = section(log, v);
   if (notes !== undefined) writeFileSync(notes, `${body}\n`);
   console.log(`release: ${tag} is consistent`);
 }
@@ -141,17 +186,38 @@ function prepare(v: string): void {
     fail('the working tree has uncommitted changes');
   }
   const git = (...args: string[]): string => execFileSync('git', args, { encoding: 'utf8' }).trim();
-  if (git('rev-parse', '--abbrev-ref', 'HEAD') !== 'main') fail('releases are cut from main');
-  git('fetch', '--quiet', 'origin', 'main');
+  // The release commit goes on its own branch, which is tagged and then
+  // merged into main (see .github/workflows/release.yml).
+  const branch = `release/v${v}`;
+  if (git('rev-parse', '--abbrev-ref', 'HEAD') !== branch) {
+    fail(`releases are prepared on ${branch}: git switch -c ${branch} origin/main`);
+  }
+  git('fetch', '--quiet', '--tags', 'origin', 'main');
   if (git('rev-parse', 'HEAD') !== git('rev-parse', 'origin/main')) {
-    fail('main is not at origin/main; pull or push first');
+    fail(`${branch} is not at origin/main; start it from there`);
   }
   const log = read('CHANGELOG.md');
+  lint(log);
   const prev = releasedVersions(log).reduce<string | undefined>(
     (a, b) => (a === undefined || compareVersions(b, a) > 0 ? b : a),
     undefined,
   );
   if (prev !== undefined && compareVersions(v, prev) <= 0) fail(`${v} is not newer than ${prev}`);
+  // The headline links to compare/vPREV...vX. GitHub diffs from the merge
+  // base, so a tag outside main's history (a squash-merged release branch)
+  // gives a link that is not "everything since PREV".
+  if (prev !== undefined) {
+    try {
+      execFileSync('git', ['merge-base', '--is-ancestor', `refs/tags/v${prev}`, 'HEAD'], {
+        stdio: 'ignore',
+      });
+    } catch {
+      fail(
+        `tag v${prev} is missing or not in main's history; merge release/v${prev} ` +
+          `into main with a merge commit (not a squash) first`,
+      );
+    }
+  }
   if (releasedVersions(log).includes(v) || new RegExp(`^\\[${escape(v)}\\]: `, 'm').test(log)) {
     fail(`CHANGELOG.md already has ${v}`);
   }
@@ -199,8 +265,13 @@ function prepare(v: string): void {
     execFileSync('git', ['checkout', '--', ...EDITED], { stdio: 'inherit' });
     throw e;
   }
+  // A merge commit (not a squash) keeps the tag in main's history, so the next
+  // release's compare link starts at an ancestor.
   console.log(
-    `release: committed. Review, then:\n  git tag -a v${v} -m v${v}\n  git push origin main v${v}`,
+    `release: committed. Review, then:\n` +
+      `  git tag -a v${v} -m v${v}\n` +
+      `  git push origin release/v${v} v${v}\n` +
+      `and merge release/v${v} into main with a merge commit (not a squash).`,
   );
 }
 
@@ -208,7 +279,12 @@ const [cmd, arg, notes] = process.argv.slice(2);
 try {
   if (cmd === 'check' && arg !== undefined) check(arg, notes);
   else if (cmd === 'prepare' && arg !== undefined) prepare(arg);
-  else fail('usage: release.ts prepare X.Y.Z | release.ts check vX.Y.Z [NOTES]');
+  else if (cmd === 'lint' && arg === undefined) lint(read('CHANGELOG.md'));
+  else {
+    fail(
+      'usage: release.ts prepare X.Y.Z | release.ts check vX.Y.Z [NOTES] | ' + 'release.ts lint',
+    );
+  }
 } catch (e) {
   if (!(e instanceof ReleaseError)) throw e;
   console.error(`release: ${e.message}`);
