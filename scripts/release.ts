@@ -148,7 +148,7 @@ function prepare(v: string): void {
   if (git('rev-parse', '--abbrev-ref', 'HEAD') !== branch) {
     fail(`releases are prepared on ${branch}: git switch -c ${branch} origin/main`);
   }
-  git('fetch', '--quiet', 'origin', 'main');
+  git('fetch', '--quiet', '--tags', 'origin', 'main');
   if (git('rev-parse', 'HEAD') !== git('rev-parse', 'origin/main')) {
     fail(`${branch} is not at origin/main; start it from there`);
   }
@@ -158,6 +158,21 @@ function prepare(v: string): void {
     undefined,
   );
   if (prev !== undefined && compareVersions(v, prev) <= 0) fail(`${v} is not newer than ${prev}`);
+  // The headline links to compare/vPREV...vX. GitHub diffs from the merge
+  // base, so a tag outside main's history (a squash-merged release branch)
+  // gives a link that is not "everything since PREV".
+  if (prev !== undefined) {
+    try {
+      execFileSync('git', ['merge-base', '--is-ancestor', `refs/tags/v${prev}`, 'HEAD'], {
+        stdio: 'ignore',
+      });
+    } catch {
+      fail(
+        `tag v${prev} is missing or not in main's history; merge release/v${prev} ` +
+          `into main with a merge commit (not a squash) first`,
+      );
+    }
+  }
   if (releasedVersions(log).includes(v) || new RegExp(`^\\[${escape(v)}\\]: `, 'm').test(log)) {
     fail(`CHANGELOG.md already has ${v}`);
   }

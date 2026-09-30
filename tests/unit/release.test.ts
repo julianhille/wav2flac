@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: 0BSD
 // Which branch `scripts/release.ts prepare` runs on: release/vX.Y.Z at
-// origin/main, as .github/workflows/release.yml describes.
+// origin/main, as .github/workflows/release.yml describes, and that the
+// previous release's tag is in main's history for the compare link.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,9 +31,10 @@ afterEach(() => {
 /**
  * A clone at version 1.2.2 with an unreleased changelog entry, whose origin
  * has the same `main`.
+ * @param tag Whether to tag the commit v1.2.2 (in origin too).
  * @returns The clone's directory.
  */
-function repo(): string {
+function repo(tag = true): string {
   dir = mkdtempSync(join(tmpdir(), 'release-'));
   const work = join(dir, 'work');
   execFileSync('git', ['init', '--quiet', '--bare', join(dir, 'origin.git')], { env });
@@ -59,6 +61,10 @@ function repo(): string {
   git(work, 'commit', '--quiet', '--message', 'init');
   git(work, 'remote', 'add', 'origin', join(dir, 'origin.git'));
   git(work, 'push', '--quiet', 'origin', 'main');
+  if (tag) {
+    git(work, 'tag', '--annotate', 'v1.2.2', '--message', 'v1.2.2');
+    git(work, 'push', '--quiet', 'origin', 'v1.2.2');
+  }
   return work;
 }
 
@@ -94,6 +100,10 @@ describe('release.ts prepare', () => {
     expect(git(work, 'rev-parse', 'HEAD~1')).toBe(git(work, 'rev-parse', 'origin/main'));
     expect(r.out).toContain('git push origin release/v1.2.3 v1.2.3\n');
     expect(r.out).not.toMatch(/push origin main/);
+    expect(git(work, 'show', 'HEAD:CHANGELOG.md')).toContain(
+      `[Unreleased]: ${REPO}/compare/v1.2.3...HEAD\n` +
+        `[1.2.3]: ${REPO}/compare/v1.2.2...v1.2.3\n`,
+    );
   });
 
   it.each(['main', 'release/v1.2.4', 'release/1.2.3'])('refuses to run on %s', (branch) => {
@@ -118,5 +128,34 @@ describe('release.ts prepare', () => {
     expect(r.status).toBe(1);
     expect(r.err).toBe('release: release/v1.2.3 is not at origin/main; start it from there\n');
     expect(git(work, 'rev-parse', 'HEAD')).toBe(head);
+  });
+
+  it('refuses when the previous tag is missing', () => {
+    const work = repo(false);
+    git(work, 'switch', '--quiet', '--create', 'release/v1.2.3');
+    const head = git(work, 'rev-parse', 'HEAD');
+    const r = prepare(work, '1.2.3');
+    expect(r.status).toBe(1);
+    expect(r.err).toBe(
+      "release: tag v1.2.2 is missing or not in main's history; merge release/v1.2.2 " +
+        'into main with a merge commit (not a squash) first\n',
+    );
+    expect(git(work, 'rev-parse', 'HEAD')).toBe(head);
+  });
+
+  it('refuses when the previous release branch was squash-merged', () => {
+    const work = repo(false);
+    // v1.2.2 tags a commit on its release branch; main got a squash of it.
+    git(work, 'switch', '--quiet', '--create', 'release/v1.2.2');
+    git(work, 'commit', '--quiet', '--allow-empty', '--message', 'Release 1.2.2');
+    git(work, 'tag', '--annotate', 'v1.2.2', '--message', 'v1.2.2');
+    git(work, 'switch', '--quiet', 'main');
+    git(work, 'commit', '--quiet', '--allow-empty', '--message', 'Release 1.2.2 (#1)');
+    git(work, 'push', '--quiet', 'origin', 'main', 'v1.2.2');
+    git(work, 'switch', '--quiet', '--create', 'release/v1.2.3');
+    const r = prepare(work, '1.2.3');
+    expect(r.status).toBe(1);
+    expect(r.err).toMatch(/^release: tag v1\.2\.2 is missing or not in main's history;/);
+    expect(git(work, 'log', '-1', '--format=%s')).toBe('Release 1.2.2 (#1)');
   });
 });

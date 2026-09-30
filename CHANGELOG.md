@@ -15,6 +15,10 @@ links are collected at the bottom of this file.
 - `node scripts/release.ts prepare X.Y.Z` runs on a `release/vX.Y.Z` branch
   started from `origin/main`, as the release workflow describes, and prints
   the matching push command. It used to run only on `main`.
+- `node scripts/release.ts prepare X.Y.Z` stops when the previous release's
+  tag is missing or not in `main`'s history, as after a squash-merged release
+  branch. The new version's headline would link to a compare that starts
+  from the merge base, not from the previous release.
 - A retry of `init('wav2flac.wasm')`, or of a relative path in Node, loads the
   same file as the first attempt. Before, the retry resolved the string again,
   against the page URL or the current directory at that time: after a
