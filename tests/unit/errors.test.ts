@@ -92,6 +92,8 @@ describe('errors', () => {
     expect(reviveError(serializeError(new Error('e', { cause: 'why' }))).cause).toMatchObject({
       message: 'why',
     });
+    // An undefined cause stays undefined.
+    expect(reviveError(serializeError(new Error('e', { cause: undefined }))).cause).toBeUndefined();
 
     // A cyclic chain is cut.
     const a = new Error('a');

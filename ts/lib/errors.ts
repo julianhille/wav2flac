@@ -128,7 +128,8 @@ export function serializeError(e: unknown, depth = 0): SerializedError {
   if (e instanceof Wav2FlacError) out.code = e.code;
   if (e instanceof DOMException) out.dom = true;
   if (typeof e.stack === 'string') out.stack = e.stack;
-  if ('cause' in e && depth < MAX_CAUSES) out.cause = serializeError(e.cause, depth + 1);
+  // An absent cause and `cause: undefined` both arrive as no cause.
+  if (e.cause !== undefined && depth < MAX_CAUSES) out.cause = serializeError(e.cause, depth + 1);
   return out;
 }
 
