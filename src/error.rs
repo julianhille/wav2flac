@@ -68,6 +68,7 @@ pub struct Error {
 
 impl Error {
     /// Creates a new error.
+    #[must_use]
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
             code,

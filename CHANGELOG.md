@@ -20,6 +20,7 @@ links are collected at the bottom of this file.
   the wasm that is already loaded, and rejects with an error if `init()` or
   `initSync()` hasn't finished yet, without starting or waiting for a load.
   Call `await init()` first.
+- The Rust crate's `Error::new` is `#[must_use]`.
 
 ### Fixed
 
