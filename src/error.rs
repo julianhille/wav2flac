@@ -15,7 +15,9 @@ pub enum ErrorCode {
     /// The input is not a well-formed RIFF/WAVE file.
     InvalidWav,
     /// The input is a WAV file, but its encoding is not supported
-    /// (e.g. ADPCM, A-law, RF64, or a streaming header of unknown length).
+    /// (e.g. ADPCM, A-law, RF64, or a streaming header of unknown length),
+    /// or it cannot be converted as asked (float input without a target bit
+    /// depth, or a resampling ratio beyond the supported range).
     UnsupportedFormat,
     /// The sample bit depth cannot be encoded as requested.
     UnsupportedBitDepth,

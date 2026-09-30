@@ -373,22 +373,23 @@ fn all_rate_pairs() {
 
 #[test]
 fn extreme_upsampling_is_rejected() {
+    // The ratio depends on the input rate, so it is not an option error.
     let s = signal(Signal::Sine, 16, 1, 16, 1);
     let opts = |rate| Options {
         sample_rate: Some(rate),
         ..Options::default()
     };
     let e = encode_all(&wav(1, 1, 16, &s), opts(48000)).unwrap_err();
-    assert_eq!(e.code(), ErrorCode::InvalidOptions);
+    assert_eq!(e.code(), ErrorCode::UnsupportedFormat);
     assert!(encode_all(&wav(1, 1000, 16, &s), opts(256_000)).is_ok());
     let e = encode_all(&wav(1, 1000, 16, &s), opts(256_001)).unwrap_err();
-    assert_eq!(e.code(), ErrorCode::InvalidOptions);
+    assert_eq!(e.code(), ErrorCode::UnsupportedFormat);
     // Downsampling is allowed up to 65536x.
     assert!(encode_all(&wav(1, 384_000, 16, &s), opts(6)).is_ok());
     let e = encode_all(&wav(1, 384_000, 16, &s), opts(5)).unwrap_err();
-    assert_eq!(e.code(), ErrorCode::InvalidOptions);
+    assert_eq!(e.code(), ErrorCode::UnsupportedFormat);
     let e = encode_all(&wav(1, 1_048_575, 16, &s), opts(1)).unwrap_err();
-    assert_eq!(e.code(), ErrorCode::InvalidOptions);
+    assert_eq!(e.code(), ErrorCode::UnsupportedFormat);
 }
 
 #[test]

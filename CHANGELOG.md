@@ -12,6 +12,10 @@ links are collected at the bottom of this file.
 
 ### Changed
 
+- A `sampleRate` more than 256 times the input rate, or less than 1/65536 of
+  it, fails with `UNSUPPORTED_FORMAT` instead of `INVALID_OPTIONS`: whether
+  the ratio is supported depends on the input's rate, not on the option alone.
+  The README and the `sampleRate` docs now state these limits.
 - `thirdPartyLicenses()` no longer loads the wasm. It reads the notices from
   the wasm that is already loaded, and rejects with an error if `init()` or
   `initSync()` hasn't finished yet, without starting or waiting for a load.

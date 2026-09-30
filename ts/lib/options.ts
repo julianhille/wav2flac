@@ -65,7 +65,11 @@ export interface Options {
   compressionLevel?: number | undefined;
   /** Samples per frame, 16–65535. Default: the level's (1152 or 4096). */
   blockSize?: number | undefined;
-  /** Target sample rate in Hz; resamples when it differs from the input. */
+  /**
+   * Target sample rate in Hz, 1–1 048 575; resamples when it differs from the
+   * input. It may be at most 256 times the input rate and at least 1/65536 of
+   * it: other ratios fail with `UNSUPPORTED_FORMAT`.
+   */
   sampleRate?: number | undefined;
   /** Resampler filter quality. Default `'balanced'`. */
   resampleQuality?: ResampleQuality | undefined;

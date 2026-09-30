@@ -199,7 +199,7 @@ generated from the TSDoc in the source.
 |---|---|---|
 | `compressionLevel` | `5` | 0 (fastest) – 8 (smallest), the libFLAC presets |
 | `blockSize` | per level | samples per frame, 16–65535 |
-| `sampleRate` | input rate | resample to this rate |
+| `sampleRate` | input rate | resample to this rate, 1–1 048 575 Hz; at most 256× the input rate and at least 1/65536 of it, else `UNSUPPORTED_FORMAT` |
 | `resampleQuality` | `'balanced'` | `'fast'`, `'balanced'` or `'best'` |
 | `bitsPerSample` | input depth | 4–32; **required for float input** |
 | `dither` | `'tpdf'` | `'tpdf'` or `'none'`; used when samples are requantized (lower bit depth, float input or resampling) |

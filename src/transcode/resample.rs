@@ -96,9 +96,11 @@ impl Resample {
     ///
     /// # Errors
     ///
-    /// `InvalidOptions` if a rate is zero, the output rate is more than
-    /// [`MAX_UPSAMPLE_RATIO`] times (or the input rate is more than
-    /// [`MAX_DOWNSAMPLE_RATIO`] times the output rate), or rubato rejects the ratio.
+    /// `InvalidOptions` if a rate is zero. `UnsupportedFormat` if the output
+    /// rate is more than [`MAX_UPSAMPLE_RATIO`] times the input rate (or the
+    /// input rate more than [`MAX_DOWNSAMPLE_RATIO`] times the output rate), or
+    /// rubato rejects the ratio: the ratio depends on the input, so it is not
+    /// an option error.
     pub fn new(from: u32, to: u32, channels: usize, quality: ResampleQuality) -> Result<Self> {
         if from == 0 || to == 0 {
             return Err(Error::new(
@@ -108,7 +110,7 @@ impl Resample {
         }
         if u64::from(to) > u64::from(from) * u64::from(MAX_UPSAMPLE_RATIO) {
             return Err(Error::new(
-                ErrorCode::InvalidOptions,
+                ErrorCode::UnsupportedFormat,
                 format!(
                     "cannot resample {from} Hz to {to} Hz: \
                      at most {MAX_UPSAMPLE_RATIO}x upsampling is supported"
@@ -117,7 +119,7 @@ impl Resample {
         }
         if u64::from(from) > u64::from(to) * u64::from(MAX_DOWNSAMPLE_RATIO) {
             return Err(Error::new(
-                ErrorCode::InvalidOptions,
+                ErrorCode::UnsupportedFormat,
                 format!(
                     "cannot resample {from} Hz to {to} Hz: \
                      at most {MAX_DOWNSAMPLE_RATIO}x downsampling is supported"
@@ -133,7 +135,7 @@ impl Resample {
             channels,
             FixedAsync::Input,
         )
-        .map_err(|e| Error::new(ErrorCode::InvalidOptions, format!("resampler: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::UnsupportedFormat, format!("resampler: {e}")))?;
         // The filter's group delay in output frames. rubato's `output_delay()`
         // truncates `len * ratio / 2`, which is about one frame too late; trim
         // the true delay rounded to the nearest frame.
