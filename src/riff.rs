@@ -28,9 +28,11 @@ pub enum SampleFormat {
 /// How samples are aligned when fewer bits are valid than the container holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Justify {
-    /// Valid bits are the most significant bits (`WAVE_FORMAT_EXTENSIBLE`, per spec).
+    /// Valid bits are the most significant bits (`WAVE_FORMAT_EXTENSIBLE`, and
+    /// plain PCM whose width is not a multiple of 8; both per spec).
     Left,
-    /// Valid bits are the least significant bits (plain PCM, hound's interpretation).
+    /// Valid bits are the least significant bits (plain PCM whose width is a
+    /// multiple of 8 in a larger container, hound's interpretation).
     Right,
 }
 
@@ -309,7 +311,7 @@ struct FmtInfo {
     sample_rate: u32,
     valid_bits: u16,
     container_bytes: u16,
-    extensible: bool,
+    justify: Justify,
     channel_mask: Option<u32>,
 }
 
@@ -389,13 +391,30 @@ fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
     if let Some(rate) = u32::from(le_u16(raw, 12)).checked_mul(le_u32(raw, 4)) {
         mini[28..32].copy_from_slice(&rate.to_le_bytes());
     }
+    // Plain PCM may declare a width that is not a multiple of 8 (e.g. 20 bits):
+    // the samples then fill the most significant bits of the smallest container
+    // that holds them. hound rejects such a width, so give it the container's
+    // and keep the declared one as the valid bits.
+    let pcm_bits = le_u16(raw, 14);
+    let odd_pcm_width = tag == 0x0001 && pcm_bits % 8 != 0;
+    if odd_pcm_width {
+        mini[34..36].copy_from_slice(&pcm_bits.next_multiple_of(8).to_le_bytes());
+    }
     let reader = hound::WavReader::new(Cursor::new(&mini[..])).map_err(map_hound)?;
-    let spec = reader.spec();
+    let mut spec = reader.spec();
+    if odd_pcm_width {
+        spec.bits_per_sample = pcm_bits;
+    }
     let channels = le_u16(raw, 2);
     let block_align = le_u16(raw, 12);
     let bytes_per_sample = block_align.checked_div(channels).unwrap_or(0);
 
     let extensible = tag == 0xFFFE;
+    let justify = if extensible || odd_pcm_width {
+        Justify::Left
+    } else {
+        Justify::Right
+    };
     let channel_mask = if extensible && raw.len() >= 24 {
         Some(le_u32(raw, 20)).filter(|m| *m != 0)
     } else {
@@ -434,7 +453,7 @@ fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
         sample_rate: spec.sample_rate,
         valid_bits: spec.bits_per_sample,
         container_bytes: bytes_per_sample,
-        extensible,
+        justify,
         channel_mask,
     })
 }
@@ -452,11 +471,7 @@ fn finalize(
         sample_rate: f.sample_rate,
         valid_bits: f.valid_bits,
         container_bytes: f.container_bytes,
-        justify: if f.extensible {
-            Justify::Left
-        } else {
-            Justify::Right
-        },
+        justify: f.justify,
         channel_mask: f.channel_mask,
         data_offset,
         data_len,

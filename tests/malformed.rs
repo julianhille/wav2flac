@@ -83,10 +83,10 @@ fn bad_fmt_values() {
             .to_vec(),
     );
     assert_eq!(code(&f), ErrorCode::InvalidWav);
-    // bits not multiple of 8 in plain PCM: a width hound cannot unpack
+    // A width that is not a multiple of 8 but exceeds the container.
     let mut f = WavBuilder::pcm(1, 8000, 16).build(&s);
-    f[34] = 12;
-    assert_eq!(code(&f), ErrorCode::UnsupportedBitDepth);
+    f[34] = 20;
+    assert_eq!(code(&f), ErrorCode::InvalidWav);
 }
 
 #[test]

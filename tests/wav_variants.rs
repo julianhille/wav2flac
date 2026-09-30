@@ -54,6 +54,51 @@ fn extensible_nonzero_padding_bits_rejected() {
     assert_eq!(e.code(), wav2flac::ErrorCode::InvalidWav);
 }
 
+/// Plain PCM declaring `valid` bits in a `container`-bit sample: the header
+/// carries the valid width, the samples fill the most significant bits.
+fn plain_pcm_odd_width(container: u16, valid: u16, samples: &[i32]) -> Vec<u8> {
+    let b = WavBuilder::pcm(2, 44100, container);
+    let packed = b.clone().extensible(container, valid, 0).pack_int(samples);
+    let mut f = b.build_raw(&packed);
+    f[34..36].copy_from_slice(&valid.to_le_bytes());
+    f
+}
+
+#[test]
+fn plain_pcm_sub_container_bits() {
+    for (container, valid) in [(24u16, 20u16), (16, 12), (24, 18), (32, 20), (16, 10)] {
+        let s = signal(Signal::Noise, u32::from(valid), 2, 3000, 11);
+        let f = plain_pcm_odd_width(container, valid, &s);
+        let info = wav2flac::probe(&f).unwrap();
+        assert_eq!(info.bits_per_sample, valid);
+        let d = decode(&encode(&f, Options::default()));
+        assert_eq!(d.bits, u32::from(valid));
+        if !d.samples.is_empty() {
+            assert_eq!(d.samples, s);
+        }
+        assert_eq!(d.md5, pcm_md5(&s, u32::from(valid)));
+    }
+}
+
+#[test]
+fn plain_pcm_odd_width_rejects_bad_samples() {
+    use wav2flac::ErrorCode;
+    let code = |f: &[u8]| {
+        wav2flac::encode_all(f, Options::default())
+            .unwrap_err()
+            .code()
+    };
+    // A non-zero padding bit would be lost.
+    let mut f = plain_pcm_odd_width(24, 20, &[1, 2, 3, 4]);
+    let n = f.len();
+    f[n - 3] |= 1;
+    assert_eq!(code(&f), ErrorCode::InvalidWav);
+    // More valid bits than the container holds.
+    let mut f = plain_pcm_odd_width(16, 12, &[1, 2, 3, 4]);
+    f[34..36].copy_from_slice(&20u16.to_le_bytes());
+    assert_eq!(code(&f), ErrorCode::InvalidWav);
+}
+
 #[test]
 fn fmt_sizes_16_18_40() {
     let s = signal(Signal::Sine, 16, 2, 2000, 1);

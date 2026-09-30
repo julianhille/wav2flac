@@ -19,6 +19,10 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- Plain PCM (`WAVE_FORMAT_PCM`) whose bits per sample are not a multiple of
+  8, such as 20 bits in 3-byte samples, is encoded. The samples are read from
+  the most significant bits, as the RIFF spec says. It used to fail with
+  `UNSUPPORTED_BIT_DEPTH`.
 - `pcm.channels` above 65535 fails with `TOO_MANY_CHANNELS`, as 9 to 65535
   channels already did. It used to fail with `INVALID_OPTIONS` and a message
   naming an internal limit.
