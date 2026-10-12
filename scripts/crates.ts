@@ -102,12 +102,12 @@ export function noticeFiles(c: Package): string[] {
  * The Rust release whose license texts are in scripts/std-licenses/. Change it
  * only after comparing the texts with the new release (see the README.md there).
  */
-export const STD_TEXTS_RELEASE = '1.98.1';
+export const STD_TEXTS_RELEASE = '1.99.0';
 
 let toolchain: string | undefined;
 /**
  * The Rust release the wasm is built with: the channel in rust-toolchain.toml.
- * @returns E.g. `1.98.1`.
+ * @returns E.g. `1.99.0`.
  * @throws {Error} When the channel is not an exact release, or the texts in
  *   scripts/std-licenses/ come from another one.
  */
@@ -117,7 +117,7 @@ export function rustVersion(): string {
   const channel = /^channel\s*=\s*"([^"]*)"/m.exec(readFileSync(file, 'utf8'))?.[1];
   if (channel === undefined || !/^\d+\.\d+\.\d+$/.test(channel)) {
     throw new Error(
-      `rust-toolchain.toml: the channel must be a release such as "1.98.1", not ${channel ?? 'missing'}`,
+      `rust-toolchain.toml: the channel must be a release such as "1.99.0", not ${channel ?? 'missing'}`,
     );
   }
   if (channel !== STD_TEXTS_RELEASE) {
@@ -190,7 +190,7 @@ export const STD_PARTS: StdPart[] = [
 /**
  * The name of a part of the standard library, as the notices print it.
  * @param part The part.
- * @returns E.g. `Rust standard library 1.98.1: core, alloc, std`.
+ * @returns E.g. `Rust standard library 1.99.0: core, alloc, std`.
  */
 export function stdName(part: StdPart): string {
   return `Rust standard library ${rustVersion()}: ${part.name}`;

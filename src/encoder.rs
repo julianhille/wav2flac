@@ -836,7 +836,7 @@ mod tests {
         };
         let mut enc = Encoder::new_pcm(opts, spec, None).unwrap();
         let block = [0u8; 32]; // 16 samples: one frame per push
-        assert!(!enc.push(&block).unwrap().is_empty());
+        assert_ne!(enc.push(&block).unwrap().len(), 0);
         // Skip ahead instead of encoding 2^31 frames.
         enc.active.as_mut().unwrap().frame_number = (1 << 31) - 1;
         assert!(!enc.push(&block).unwrap().is_empty(), "last valid number");

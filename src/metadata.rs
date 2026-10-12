@@ -308,7 +308,7 @@ mod tests {
         let pts = choose_seek_points(&frames, 250);
         let samples: Vec<u64> = pts.iter().map(|p| p.sample).collect();
         assert_eq!(samples, vec![0, 200, 500, 700]);
-        assert!(choose_seek_points(&frames, 0).is_empty());
+        assert_eq!(choose_seek_points(&frames, 0).len(), 0);
     }
 
     #[test]
