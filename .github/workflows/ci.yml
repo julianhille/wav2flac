@@ -28,7 +28,7 @@ env:
 jobs:
   fmt:
     name: Rust formatting and lints
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -53,7 +53,7 @@ jobs:
 
   deny:
     name: Dependency licenses and advisories
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -69,7 +69,7 @@ jobs:
 
   msrv:
     name: Rust ${{ matrix.target }} on the MSRV (Cargo.toml rust-version)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -104,7 +104,7 @@ jobs:
 
   rust:
     name: Rust tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ (github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')) && 180 || 30 }}
     permissions:
       contents: read
@@ -124,7 +124,7 @@ jobs:
 
   js:
     name: JS tests (Node ${{ matrix.node }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ (github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')) && 180 || 30 }}
     permissions:
       contents: read
@@ -183,7 +183,7 @@ jobs:
 
   node-min:
     name: Package on the minimum Node (package.json engines)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -226,7 +226,7 @@ jobs:
 
   reproducible:
     name: Reproducible package build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -270,7 +270,7 @@ jobs:
 
   browser:
     name: Browser + bundlers (${{ matrix.browser }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -308,7 +308,7 @@ jobs:
 
   docs:
     name: Docs site (MkDocs, API reference)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
