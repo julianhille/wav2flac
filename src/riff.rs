@@ -933,7 +933,7 @@ mod tests {
         tail.extend(chunk(*b"LIST", &info_list("No")));
         let mut t = TrailingScanner::new(2);
         t.push(&tail);
-        assert!(t.tags.is_empty());
+        assert_eq!(t.tags.len(), 0);
         assert_eq!(t.buffered_len(), 0);
         // A chunk right after an odd data chunk without its pad is still read.
         let mut t = TrailingScanner::new(1);

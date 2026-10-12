@@ -80,6 +80,7 @@ const KNOWN = new Set([
   'MIT',
   'Apache-2.0',
   'MIT OR Apache-2.0',
+  'Apache-2.0 OR MIT',
   '(MIT OR Apache-2.0) AND Unicode-3.0',
   '0BSD OR Apache-2.0',
 ]);
