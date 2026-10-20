@@ -40,7 +40,7 @@ jobs:
       - name: Toolchain (rust-toolchain.toml)
         run: rustup toolchain install
       - name: Cache Rust builds
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
       # Stable rustfmt skips lines it cannot wrap without reporting them.
@@ -89,7 +89,7 @@ jobs:
           rustup toolchain install "$v" --profile minimal --target wasm32-unknown-unknown
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Cache Rust builds
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: msrv-${{ matrix.target }}
       # `+version` overrides rust-toolchain.toml.
@@ -116,7 +116,7 @@ jobs:
       - name: Toolchain (rust-toolchain.toml)
         run: rustup toolchain install
       - name: Cache Rust builds
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Test tools
         run: sudo apt-get update -q && sudo apt-get install -yq flac ffmpeg
       - name: Run Rust tests
@@ -145,7 +145,7 @@ jobs:
       - name: Toolchain (rust-toolchain.toml)
         run: rustup toolchain install
       - name: Cache Rust builds
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: wasm-bindgen + binaryen
         run: scripts/ci-tools.sh
       - name: Test tools
@@ -203,7 +203,7 @@ jobs:
       - name: Toolchain (rust-toolchain.toml)
         run: rustup toolchain install
       - name: Cache Rust builds
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: wasm-bindgen + binaryen
         run: scripts/ci-tools.sh
       - name: Install dependencies
@@ -291,7 +291,7 @@ jobs:
       - name: Toolchain (rust-toolchain.toml)
         run: rustup toolchain install
       - name: Cache Rust builds
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: wasm-bindgen + binaryen
         run: scripts/ci-tools.sh
       - name: Install dependencies
@@ -328,7 +328,7 @@ jobs:
         run: rustup toolchain install
       # cargo metadata downloads every crate's sources; nothing is compiled.
       - name: Cache the crate registry
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-targets: false
       # The page is committed so Read the Docs needs no Rust. It depends on
