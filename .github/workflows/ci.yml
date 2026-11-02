@@ -198,7 +198,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
       - name: Toolchain (rust-toolchain.toml)
         run: rustup toolchain install
@@ -244,7 +244,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 26
       - name: Toolchain (rust-toolchain.toml)
         working-directory: a
         run: rustup toolchain install
@@ -286,7 +286,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
       - name: Toolchain (rust-toolchain.toml)
         run: rustup toolchain install
@@ -321,7 +321,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 26
           cache: npm
           cache-dependency-path: scripts/api-docs/package-lock.json
       - name: Toolchain (rust-toolchain.toml)
