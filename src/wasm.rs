@@ -39,8 +39,70 @@ fn int32(name: &str, v: f64) -> Result<u32, JsError> {
 /// Largest integer a JS number holds exactly.
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
+/// [`int`] up to [`MAX_SAFE_INTEGER`], with a negative value for "not set".
+fn unset_or(name: &str, v: f64) -> Result<Option<u64>, JsError> {
+    if v < 0.0 {
+        Ok(None)
+    } else {
+        int(name, v, MAX_SAFE_INTEGER).map(Some)
+    }
+}
+
 fn js_err(e: &Error) -> JsError {
     JsError::new(&format!("[{}] {}", e.code().as_str(), e.message()))
+}
+
+/// Builds [`Options`] from the numbers the JS layer passes; see
+/// [`WasmEncoder::new`] for their encoding.
+#[allow(clippy::too_many_arguments)]
+fn options(
+    compression_level: f64,
+    block_size: f64,
+    sample_rate: f64,
+    resample_quality: f64,
+    bits_per_sample: f64,
+    dither: bool,
+    dither_seed: f64,
+    tags_enabled: bool,
+    tag_keys: Vec<String>,
+    tag_values: Vec<String>,
+    seek_point_interval: f64,
+    padding: f64,
+    max_input_bytes: f64,
+    streaming: bool,
+) -> Result<Options, JsError> {
+    if tag_keys.len() != tag_values.len() {
+        return Err(invalid(format!(
+            "tag keys and values differ in length ({} vs {})",
+            tag_keys.len(),
+            tag_values.len()
+        )));
+    }
+    let block_size = int32("blockSize", block_size)?;
+    let sample_rate = int32("sampleRate", sample_rate)?;
+    let bits_per_sample = int32("bitsPerSample", bits_per_sample)?;
+    Ok(Options {
+        compression_level: int("compressionLevel", compression_level, 255)? as u8,
+        block_size: (block_size != 0).then_some(block_size as usize),
+        sample_rate: (sample_rate != 0).then_some(sample_rate),
+        resample_quality: quality("resampleQuality", resample_quality)?,
+        bits_per_sample: (bits_per_sample != 0).then_some(bits_per_sample),
+        dither: if dither { Dither::Tpdf } else { Dither::None },
+        dither_seed: int("ditherSeed", dither_seed, MAX_SAFE_INTEGER)?,
+        tags: if tags_enabled {
+            Tags::FromWav(tag_keys.into_iter().zip(tag_values).collect())
+        } else {
+            Tags::Disabled
+        },
+        seek_point_interval,
+        padding: int32("padding", padding)?,
+        max_input_bytes: unset_or("maxInputBytes", max_input_bytes)?,
+        mode: if streaming {
+            OutputMode::Streaming
+        } else {
+            OutputMode::Buffered
+        },
+    })
 }
 
 /// Streaming encoder handle. Must be released with `free()`.
@@ -80,49 +142,22 @@ impl WasmEncoder {
         pcm_rate: f64,
         pcm_total_bytes: f64,
     ) -> Result<WasmEncoder, JsError> {
-        if tag_keys.len() != tag_values.len() {
-            return Err(invalid(format!(
-                "tag keys and values differ in length ({} vs {})",
-                tag_keys.len(),
-                tag_values.len()
-            )));
-        }
-        let block_size = int32("blockSize", block_size)?;
-        let sample_rate = int32("sampleRate", sample_rate)?;
-        let bits_per_sample = int32("bitsPerSample", bits_per_sample)?;
-        let unset_or = |name, v: f64| {
-            if v < 0.0 {
-                Ok(None)
-            } else {
-                int(name, v, MAX_SAFE_INTEGER).map(Some)
-            }
-        };
-        let opts = Options {
-            compression_level: int("compressionLevel", compression_level, 255)? as u8,
-            block_size: (block_size != 0).then_some(block_size as usize),
-            sample_rate: (sample_rate != 0).then_some(sample_rate),
-            resample_quality: match int("resampleQuality", resample_quality, 2)? {
-                0 => ResampleQuality::Fast,
-                1 => ResampleQuality::Balanced,
-                _ => ResampleQuality::Best,
-            },
-            bits_per_sample: (bits_per_sample != 0).then_some(bits_per_sample),
-            dither: if dither { Dither::Tpdf } else { Dither::None },
-            dither_seed: int("ditherSeed", dither_seed, MAX_SAFE_INTEGER)?,
-            tags: if tags_enabled {
-                Tags::FromWav(tag_keys.into_iter().zip(tag_values).collect())
-            } else {
-                Tags::Disabled
-            },
+        let opts = options(
+            compression_level,
+            block_size,
+            sample_rate,
+            resample_quality,
+            bits_per_sample,
+            dither,
+            dither_seed,
+            tags_enabled,
+            tag_keys,
+            tag_values,
             seek_point_interval,
-            padding: int32("padding", padding)?,
-            max_input_bytes: unset_or("maxInputBytes", max_input_bytes)?,
-            mode: if streaming {
-                OutputMode::Streaming
-            } else {
-                OutputMode::Buffered
-            },
-        };
+            padding,
+            max_input_bytes,
+            streaming,
+        )?;
         let format = match int("pcm format code", pcm_format, 5)? {
             0 => None,
             1 => Some(PcmFormat::U8),
@@ -134,14 +169,7 @@ impl WasmEncoder {
         let inner = match format {
             None => Encoder::new(opts),
             Some(format) => {
-                let channels = int("pcm.channels", pcm_channels, MAX_SAFE_INTEGER)?;
-                // Past u16 the count is simply too many, as it is from 9 up.
-                let channels = u16::try_from(channels).map_err(|_| {
-                    js_err(&Error::new(
-                        ErrorCode::TooManyChannels,
-                        format!("{channels} channels (FLAC supports at most 8)"),
-                    ))
-                })?;
+                let channels = channel_count("pcm.channels", pcm_channels)?;
                 let spec = PcmSpec {
                     format,
                     channels,
@@ -202,6 +230,26 @@ impl WasmEncoder {
             .info()
             .map_or_else(String::new, |i| info_to_json(&i))
     }
+}
+
+/// Converts a JS channel count; past 8 (and past `u16`) it is too many.
+fn channel_count(name: &str, v: f64) -> Result<u16, JsError> {
+    let n = int(name, v, MAX_SAFE_INTEGER)?;
+    u16::try_from(n).map_err(|_| {
+        js_err(&Error::new(
+            ErrorCode::TooManyChannels,
+            format!("{n} channels (FLAC supports at most 8)"),
+        ))
+    })
+}
+
+/// Converts a quality number: 0 fast, 1 balanced, 2 best.
+fn quality(name: &str, v: f64) -> Result<ResampleQuality, JsError> {
+    Ok(match int(name, v, 2)? {
+        0 => ResampleQuality::Fast,
+        1 => ResampleQuality::Balanced,
+        _ => ResampleQuality::Best,
+    })
 }
 
 /// Parses a WAV header and returns its description as JSON.
