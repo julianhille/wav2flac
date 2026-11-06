@@ -10,6 +10,24 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+
+- `createChunkEncoder()` cuts a live recording into standalone FLAC files,
+  for example 48 kHz microphone frames into 16 kHz, 16-bit files. The
+  resampler and dither state carry over from file to file, so the files join
+  to exactly the samples of one `encode()` of the whole recording. Without
+  `chunkSamples`, each `encode()` call cuts one file; with it, every file has
+  exactly that many samples and only the last is shorter.
+- `createResampler()` resamples audio that arrives in pieces. However the
+  input is split, the output is the same and has the exact length; `'s16'`
+  output is bit for bit what `encode()` writes at 16 bits without dither.
+  A push may split a sample frame, but input that ends inside one fails
+  with `INVALID_OPTIONS`, as in `encode()`; so does the chunk encoder.
+- `createChunkEncoderSync()` and `createResamplerSync()`, for when the wasm
+  is already loaded.
+- Resamplers and chunk encoders support `using`: leaving the scope frees them.
+- How-to guide: [Cut a live recording into FLAC files](docs/how-to/record-in-chunks.md).
+
 ## [1.0.0] - 2026-09-30
 
 ### Changed

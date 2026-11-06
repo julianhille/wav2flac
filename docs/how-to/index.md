@@ -7,3 +7,4 @@ scheduled, see [Concurrent encodes](../concurrency.md).
 - [Encode in parallel with a worker pool](parallel-encoding.md)
 - [Encode one at a time with a FIFO queue](fifo-queue.md)
 - [Load from a CDN without a bundler](load-from-cdn.md)
+- [Cut a live recording into FLAC files](record-in-chunks.md)
