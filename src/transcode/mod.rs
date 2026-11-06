@@ -15,6 +15,19 @@ use crate::riff::SampleFormat;
 use requantize::Requantizer;
 use resample::Resample;
 
+/// Maps NaN to silence and infinities to full scale, as the requantizer
+/// treats them: a non-finite sample would spread through the resampler's
+/// filter to its neighbours.
+pub(crate) fn sanitize(v: f64) -> f64 {
+    if v.is_nan() {
+        0.0
+    } else if v.is_infinite() {
+        v.signum()
+    } else {
+        v
+    }
+}
+
 /// Decoded input samples, interleaved.
 pub enum Samples<'a> {
     /// Integer samples at the input's valid bit depth.
@@ -152,18 +165,7 @@ impl Transcoder {
                     Samples::Int(s) => {
                         scratch_in.extend(s.iter().map(|v| f64::from(*v) * *in_scale));
                     }
-                    // A NaN or infinity would spread through the resampler's
-                    // filter to its neighbours: NaN becomes silence and
-                    // infinities full scale, as the requantizer treats them.
-                    Samples::Float(s) => scratch_in.extend(s.iter().map(|&v| {
-                        if v.is_nan() {
-                            0.0
-                        } else if v.is_infinite() {
-                            v.signum()
-                        } else {
-                            v
-                        }
-                    })),
+                    Samples::Float(s) => scratch_in.extend(s.iter().map(|&v| sanitize(v))),
                 }
                 if let Some(r) = resampler {
                     scratch_out.clear();
