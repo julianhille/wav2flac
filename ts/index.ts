@@ -37,6 +37,19 @@ export type {
   ResampleQuality,
 } from './lib/options.js';
 export type { WavInfo } from './lib/probe.js';
+export {
+  createChunkEncoder,
+  createChunkEncoderSync,
+  createResampler,
+  createResamplerSync,
+  type ChunkEncoder,
+  type ChunkEncoderOptions,
+  type ExactChunkEncoder,
+  type ResampledSamples,
+  type Resampler,
+  type ResamplerOptions,
+  type ResamplerOutput,
+} from './lib/stream.js';
 export { init, initSync, wasmMemoryBytes, type InitOptions, type WasmSource } from './lib/wasm.js';
 export {
   createWorkerEncoder,
