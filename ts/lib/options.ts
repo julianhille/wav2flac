@@ -12,8 +12,9 @@ import { invalidOption, Wav2FlacError } from './errors.js';
  * would not see.
  * @param v The value.
  * @returns `true` for plain objects.
+ * @internal
  */
-function isPlainObject(v: object): boolean {
+export function isPlainObject(v: object): boolean {
   if (Array.isArray(v)) return false;
   const proto: unknown = Object.getPrototypeOf(v);
   return proto === Object.prototype || proto === null || Object.getPrototypeOf(proto) === null;
@@ -176,7 +177,11 @@ const KNOWN: ReadonlySet<string> = new Set<keyof Options>([
   'pcm',
 ]);
 
-const QUALITY: Readonly<Record<ResampleQuality, number>> = { fast: 0, balanced: 1, best: 2 };
+/**
+ * Quality names to the numbers the wasm takes.
+ * @internal
+ */
+export const QUALITY: Readonly<Record<ResampleQuality, number>> = { fast: 0, balanced: 1, best: 2 };
 
 /**
  * Reads an optional non-negative integer option.

@@ -59,12 +59,21 @@ export class Reporter {
 let live = 0;
 
 /**
- * Number of wasm encoders not yet freed. Leak tests check that it returns to
- * zero; wasm memory itself never shrinks, so it cannot show a leak.
+ * Number of wasm encoders, resamplers and chunk encoders not yet freed. Leak tests
+ * check that it returns to zero; wasm memory itself never shrinks, so it cannot show
+ * a leak.
  * @returns The count.
  */
 export function liveSessions(): number {
   return live;
+}
+
+/**
+ * Counts another wasm object (resampler, chunk encoder) in {@link liveSessions}.
+ * @param delta +1 when created, -1 when freed.
+ */
+export function trackLive(delta: 1 | -1): void {
+  live += delta;
 }
 
 /**
