@@ -319,6 +319,41 @@ describe('installed package', () => {
     }
   });
 
+  it('exports the same resampler and chunk encoder from every bundle', async () => {
+    await Promise.all([esm.init(), esmMin.init()]);
+    cjs.initSync();
+    cjsMin.initSync();
+    const x = new Float32Array(48000).map((_, i) => 0.5 * Math.sin(i / 10));
+    const run = (api: Api): { samples: number[]; files: Uint8Array[] } => {
+      const r = api.createResamplerSync({ inputRate: 48000, outputRate: 16000, quality: 'fast' });
+      const enc = api.createChunkEncoderSync({
+        inputRate: 48000,
+        sampleRate: 16000,
+        bitsPerSample: 16,
+        chunkSamples: 8000,
+      });
+      try {
+        return {
+          samples: [...r.push(x), ...r.flush()],
+          files: [...enc.encode(x), ...enc.finish()],
+        };
+      } finally {
+        r.free();
+        enc.free();
+      }
+    };
+    const ref = run(esm);
+    expect(ref.samples).toHaveLength(16000);
+    expect(ref.files).toHaveLength(2);
+    for (const [label, api] of [
+      ['ESM min', esmMin],
+      ['CJS', cjs],
+      ['CJS min', cjsMin],
+    ] as const) {
+      expect(run(api), label).toEqual(ref);
+    }
+  });
+
   it('encodes identically from ESM and CJS with the default wasm', async () => {
     await esm.init();
     cjs.initSync();
@@ -453,10 +488,31 @@ describe('installed package', () => {
         signal: maybe.signal, compressionLevel: maybe.level, onProgress: undefined, tags: undefined,
       });
       export const unsetWorker: WorkerEncoder = createWorkerEncoder({ url: maybe.url, wasm: undefined });
+      // Resampler output follows \`output\`; the chunk encoder's results follow \`chunkSamples\`.
+      export const rs = async (): Promise<Float32Array> => {
+        const r: Resampler<Float32Array> = await createResampler({ inputRate: 48000, outputRate: 16000, output: 'f32' });
+        const s16: Int16Array = (await createResampler({ inputRate: 48000, outputRate: 16000 })).flush();
+        return s16.length > 0 ? r.flush() : r.push(new Float32Array(8));
+      };
+      // @ts-expect-error The type parameter is the sample array, not the output name.
+      export type NotAnOutputName = Resampler<'f32'>;
+      // \`satisfies\` keeps \`chunkSamples\` unset in the type, so \`encode()\` returns one file.
+      const co = { inputRate: 48000, sampleRate: 16000, bitsPerSample: 16, channels: maybe.level } satisfies ChunkEncoderOptions;
+      export const any = async (): Promise<Bytes[] | Bytes | null> => {
+        const wide: ChunkEncoderOptions = co;
+        return (await createChunkEncoder(wide)).encode();
+      };
+      export const ce = async (): Promise<Bytes | null> => (await createChunkEncoder(co)).encode();
+      export const ex = async (): Promise<Bytes[]> => {
+        const c: ExactChunkEncoder = await createChunkEncoder({ ...co, chunkSamples: 80000 });
+        return c.finish();
+      };
     `;
     const names =
       '{ createWorkerEncoder, encode, encodeStream, probe, Wav2FlacError, ' +
-      'type Bytes, type ErrorCode, type Options, type WavInfo, type WorkerEncoder }';
+      'type Bytes, type ErrorCode, type Options, type WavInfo, type WorkerEncoder, ' +
+      'createChunkEncoder, createResampler, type ChunkEncoderOptions, type ExactChunkEncoder, ' +
+      'type Resampler }';
     for (const [suffix, spec] of [
       ['', 'wav2flac'],
       ['-min', 'wav2flac/min'],
