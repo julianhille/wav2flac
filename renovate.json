@@ -1,4 +1,21 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "schedule:weekly", "group:allNonMajor"]
+  "extends": ["config:recommended", "schedule:weekly", "group:allNonMajor"],
+  "packageRules": [
+    {
+      "description": "The CLI pin and its SHA256 in scripts/ci-tools.sh must move with the crate.",
+      "matchDepNames": ["wasm-bindgen"],
+      "groupName": "wasm-bindgen"
+    },
+    {
+      "description": "A new toolchain needs the std license texts checked (scripts/std-licenses).",
+      "matchDepNames": ["rust"],
+      "groupName": "Rust toolchain"
+    },
+    {
+      "description": "These dev-dependencies may need a newer rustc than the MSRV in Cargo.toml.",
+      "matchDepNames": ["proptest", "sha2"],
+      "groupName": "MSRV-sensitive dev-dependencies"
+    }
+  ]
 }
