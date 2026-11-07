@@ -10,6 +10,8 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-07
+
 ### Added
 
 - `createChunkEncoder()` cuts a live recording into standalone FLAC files,
@@ -408,7 +410,8 @@ links are collected at the bottom of this file.
 - Documentation site on Read the Docs (MkDocs): the README plus the raw PCM
   and benchmark guides, at <https://wav2flac.readthedocs.io/>.
 
-[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/julianhille/wav2flac/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.4...v1.0.0
 [1.0.0-rc.4]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.3...v1.0.0-rc.4
 [1.0.0-rc.3]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.2...v1.0.0-rc.3
