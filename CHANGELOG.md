@@ -29,6 +29,12 @@ links are collected at the bottom of this file.
   is already loaded.
 - Resamplers and chunk encoders support `using`: leaving the scope frees them.
 - How-to guide: [Cut a live recording into FLAC files](docs/how-to/record-in-chunks.md).
+- The chunk encoder takes an optional `onChunk` callback, together with
+  `chunkSamples`. With it, the encoder has no `encode()`: `push()` and
+  `finish()` hand each file to `onChunk`, in order, before they return.
+  `onChunk` must be synchronous; if it throws, the error is logged and the
+  encoder carries on. With `onChunk`, samples pushed after `finish()` are
+  dropped with a warning.
 
 ## [1.0.0] - 2026-09-30
 

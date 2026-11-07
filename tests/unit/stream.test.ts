@@ -2,7 +2,7 @@
 // The stateful resampler and the chunk encoder. Their contract: however the
 // input is split, the output is that of one `encode()` of the whole signal.
 import fc from 'fast-check';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
   createChunkEncoder,
   createChunkEncoderSync,
@@ -11,7 +11,12 @@ import {
   encodeSync,
   init,
   wasmMemoryBytes,
+  type Bytes,
+  type CallbackChunkEncoder,
+  type CallbackChunkEncoderOptions,
+  type ChunkEncoder,
   type ChunkEncoderOptions,
+  type ExactChunkEncoder,
   type ResampleQuality,
   type ResamplerOutput,
 } from '../../ts/index.js';
@@ -645,6 +650,9 @@ describe('chunk encoder state and errors', () => {
       [{ ...ok, copy: true }, 'INVALID_OPTIONS'],
       [{ ...ok, compressionLevel: 9 }, 'INVALID_OPTIONS'],
       [{ ...ok, bogus: 1 }, 'INVALID_OPTIONS'],
+      [{ ...ok, chunkSamples: 100, onChunk: 5 }, 'INVALID_OPTIONS'],
+      [{ ...ok, chunkSamples: 100, onChunk: null }, 'INVALID_OPTIONS'],
+      [{ bitsPerSample: 16, inputRate: 16000, onChunk: () => {} }, 'INVALID_OPTIONS'],
       [{ ...ok, sampleRate: 48000 * 300 }, 'INVALID_OPTIONS'],
       [{ ...ok, inputRate: 2 ** 21 }, 'INVALID_OPTIONS'],
       [{ inputRate: 100, sampleRate: 30000, bitsPerSample: 16 }, 'UNSUPPORTED_FORMAT'],
@@ -654,5 +662,310 @@ describe('chunk encoder state and errors', () => {
       expect(() => createChunkEncoderSync(opts), JSON.stringify(o)).toThrow(code(c));
       await expect(createChunkEncoder(opts)).rejects.toThrow(code(c));
     }
+  });
+
+  it('treats onChunk: undefined as no callback', () => {
+    const o = { inputRate: 16000, bitsPerSample: 16, onChunk: undefined };
+    let v: ChunkEncoder | undefined;
+    const enc = createChunkEncoderSync({ ...o, chunkSamples: 100 });
+    try {
+      v = createChunkEncoderSync(o);
+      expect(enc.encode(new Float32Array(100))).toHaveLength(1);
+      expect(v.encode(new Float32Array(100))).toBeInstanceOf(Uint8Array);
+    } finally {
+      enc.free();
+      v?.free();
+    }
+  });
+});
+
+describe('chunk encoder with onChunk', () => {
+  const state = expect.objectContaining({ name: 'Wav2FlacError', code: 'ENCODER_STATE' });
+  const o16 = { inputRate: 16000, bitsPerSample: 16, chunkSamples: 100 };
+
+  /**
+   * Feeds `x` in `piece`-sample pieces through `encode()` and collects the
+   * files from the return values.
+   * @param x The input.
+   * @param o Options without `onChunk`.
+   * @param piece Samples per `encode()` call.
+   * @returns The files.
+   */
+  function returned(
+    x: Float32Array,
+    o: ChunkEncoderOptions & { chunkSamples: number },
+    piece: number,
+  ): Bytes[] {
+    const enc = createChunkEncoderSync(o);
+    const files: Bytes[] = [];
+    try {
+      for (const p of split(x, [piece])) files.push(...enc.encode(p));
+      files.push(...enc.finish());
+    } finally {
+      enc.free();
+    }
+    return files;
+  }
+
+  it('matches the return values', () => {
+    const o = { ...CHUNK_OPTS, inputRate: 48000, chunkSamples: 16000 };
+    const x = signal(48000, 1, 144_030); // finish() has a full file and a short one left
+    const got: Bytes[] = [];
+    const enc = createChunkEncoderSync({ ...o, onChunk: (f) => void got.push(f) });
+    try {
+      expect('encode' in enc).toBe(false);
+      for (const p of split(x, [128])) expect(enc.push(p)).toBeUndefined();
+      expect(got).toHaveLength(2);
+      expect(enc.finish()).toBeUndefined();
+    } finally {
+      enc.free();
+    }
+    expect(got).toHaveLength(4); // 3 full + a shorter one
+    expect(got).toEqual(returned(x, o, 128));
+    for (const f of got) expect(f.byteLength).toBe(f.buffer.byteLength);
+  });
+
+  it('calls onChunk in order before push() and finish() return', () => {
+    const log: string[] = [];
+    const files: Bytes[] = [];
+    const enc = createChunkEncoderSync({
+      ...o16,
+      onChunk: (f) => {
+        files.push(f);
+        log.push('file');
+      },
+    });
+    const x = Float32Array.from({ length: 450 }, (_, i) => Math.floor(i / 100) / 8);
+    try {
+      enc.push(x.subarray(0, 250));
+      log.push('return');
+      enc.push(x.subarray(250, 260));
+      log.push('return');
+      enc.push(x.subarray(260));
+      log.push('return');
+      enc.finish();
+      log.push('return');
+    } finally {
+      enc.free();
+    }
+    expect(log).toEqual([
+      'file',
+      'file',
+      'return',
+      'return',
+      'file',
+      'file',
+      'return',
+      'file',
+      'return',
+    ]);
+    expect(files).toEqual(returned(x, o16, 128));
+  });
+
+  it('logs what onChunk throws and carries on', () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const boom = new RangeError('boom');
+    const files: Bytes[] = [];
+    const enc = createChunkEncoderSync({
+      ...o16,
+      onChunk: (f) => {
+        files.push(f);
+        throw boom;
+      },
+    });
+    try {
+      enc.push(new Float32Array(250));
+      expect(files).toHaveLength(2);
+      enc.finish();
+      expect(files).toEqual(returned(new Float32Array(250), o16, 250));
+      expect(log.mock.calls).toEqual(Array(3).fill([expect.any(String), boom]));
+    } finally {
+      enc.free();
+      log.mockRestore();
+    }
+  });
+
+  it('carries on when console.error throws too', () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {
+      throw new Error('no logs');
+    });
+    const onChunk = vi.fn<(f: Bytes) => void>(() => {
+      throw new Error('boom');
+    });
+    const enc = createChunkEncoderSync({ ...o16, onChunk });
+    try {
+      enc.push(new Float32Array(350));
+      enc.finish();
+      expect(onChunk).toHaveBeenCalledTimes(4);
+    } finally {
+      enc.free();
+      log.mockRestore();
+    }
+  });
+
+  it('drops samples pushed after finish() with a warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onChunk = vi.fn<(f: Bytes) => void>();
+    const enc = createChunkEncoderSync({ ...o16, onChunk });
+    try {
+      enc.push(new Float32Array(150));
+      enc.finish();
+      expect(onChunk).toHaveBeenCalledTimes(2);
+      enc.push(new Float32Array(300));
+      enc.push(new Float32Array(300));
+      enc.push(new Float32Array(0));
+      expect(onChunk).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenCalledTimes(3);
+      expect(() => enc.push([0.5] as unknown as Float32Array)).toThrow(TypeError);
+      expect(() => enc.finish()).toThrow(state);
+    } finally {
+      enc.free();
+      warn.mockRestore();
+    }
+  });
+
+  it('drops samples pushed after a failed finish() with a warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onChunk = vi.fn<(f: Bytes) => void>();
+    const enc = createChunkEncoderSync({ ...o16, channels: 2, onChunk });
+    try {
+      enc.push(new Float32Array(201)); // ends inside a frame
+      expect(() => enc.finish()).toThrow(expect.objectContaining({ code: 'INVALID_OPTIONS' }));
+      expect(liveSessions()).toBe(1); // the caller still frees
+      expect(() => enc.finish()).toThrow(state);
+      enc.push(new Float32Array(2));
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(onChunk).toHaveBeenCalledTimes(1);
+    } finally {
+      enc.free();
+      warn.mockRestore();
+    }
+  });
+
+  it('calls onChunk for nothing when finish() has no file left', () => {
+    const onChunk = vi.fn<(f: Bytes) => void>();
+    const enc = createChunkEncoderSync({ ...o16, onChunk });
+    try {
+      enc.push(new Float32Array(200));
+      expect(onChunk).toHaveBeenCalledTimes(2);
+      enc.finish();
+      expect(onChunk).toHaveBeenCalledTimes(2);
+    } finally {
+      enc.free();
+    }
+  });
+
+  it('throws ENCODER_STATE for calls from inside onChunk, and keeps working', () => {
+    const errors: unknown[] = [];
+    const files: Bytes[] = [];
+    const enc: CallbackChunkEncoder = createChunkEncoderSync({
+      ...o16,
+      onChunk: (f) => {
+        files.push(f);
+        for (const call of [
+          () => enc.push(new Float32Array(1)),
+          () => enc.finish(),
+          () => enc.free(),
+          () => enc[Symbol.dispose](),
+        ]) {
+          try {
+            call();
+            errors.push('no error');
+          } catch (e) {
+            errors.push(e);
+          }
+        }
+      },
+    });
+    try {
+      enc.push(new Float32Array(200));
+      expect(files).toHaveLength(2);
+      expect(errors).toHaveLength(8);
+      for (const e of errors) expect(e).toEqual(state);
+      expect(liveSessions()).toBe(1);
+      // The encoder still works after the nested calls, also inside finish().
+      enc.push(new Float32Array(50));
+      enc.finish();
+      expect(errors).toHaveLength(12);
+      for (const e of errors) expect(e).toEqual(state);
+      expect(files).toEqual(returned(new Float32Array(250), o16, 250));
+    } finally {
+      enc.free();
+    }
+    expect(liveSessions()).toBe(0);
+  });
+
+  it('cuts a push bigger than one wasm slice per slice', () => {
+    const o = { ...o16, chunkSamples: 100_000 };
+    const x = new Float32Array((1 << 18) + 1000); // 2 wasm slices, 2 full files
+    const push = vi.spyOn(WasmChunkEncoder.prototype, 'push');
+    const at: number[] = []; // wasm pushes made before each file
+    const got: Bytes[] = [];
+    const enc = createChunkEncoderSync({
+      ...o,
+      onChunk: (f) => {
+        got.push(f);
+        at.push(push.mock.calls.length);
+      },
+    });
+    try {
+      enc.push(x);
+      expect(at).toEqual([1, 1]); // out before the second slice goes in
+      enc.finish();
+    } finally {
+      enc.free();
+      push.mockRestore();
+    }
+    expect(got).toEqual(returned(x, o, x.length));
+  });
+
+  it('works from the async factory', async () => {
+    const onChunk = vi.fn<(f: Bytes) => void>();
+    const enc = await createChunkEncoder({ ...o16, onChunk });
+    enc.push(new Float32Array(150));
+    expect(onChunk).toHaveBeenCalledTimes(1);
+    enc.free();
+    expect(() => enc.push(new Float32Array(100))).toThrow('already freed');
+    expect(() => enc.push(new Float32Array(0))).toThrow('already freed');
+    expect(() => enc.finish()).toThrow('already freed');
+  });
+
+  it('types the encoder by the options', () => {
+    // Type-checked by `npm run typecheck`, never called.
+    const typesOnly = async (): Promise<void> => {
+      const base = { inputRate: 48000, bitsPerSample: 16 } satisfies ChunkEncoderOptions;
+      const make = createChunkEncoderSync;
+      const cb = { ...base, chunkSamples: 10, onChunk: () => {} };
+      expectTypeOf(make(cb)).toEqualTypeOf<CallbackChunkEncoder>();
+      expectTypeOf(make({ ...base, chunkSamples: 10 })).toEqualTypeOf<ExactChunkEncoder>();
+      expectTypeOf(make(base)).toEqualTypeOf<ChunkEncoder>();
+      const wide: ChunkEncoderOptions = base;
+      expectTypeOf(make(wide)).toEqualTypeOf<ChunkEncoder | ExactChunkEncoder>();
+      // Untyped options keep their 1.1.0 type.
+      const untyped: any = { ...base, chunkSamples: 10 };
+      expectTypeOf(make(untyped)).toEqualTypeOf<ExactChunkEncoder>();
+      expectTypeOf(await createChunkEncoder(untyped)).toEqualTypeOf<ExactChunkEncoder>();
+      expectTypeOf(createChunkEncoder(cb)).toEqualTypeOf<Promise<CallbackChunkEncoder>>();
+      expectTypeOf<CallbackChunkEncoder>().not.toHaveProperty('encode');
+      expectTypeOf<CallbackChunkEncoder['push']>().returns.toEqualTypeOf<void>();
+      expectTypeOf<CallbackChunkEncoder['finish']>().returns.toEqualTypeOf<void>();
+      expectTypeOf<CallbackChunkEncoderOptions['onChunk']>().toEqualTypeOf<
+        (file: Bytes) => void | undefined
+      >();
+      // @ts-expect-error onChunk needs chunkSamples.
+      make({ ...base, onChunk: () => {} });
+      // @ts-expect-error onChunk must be synchronous.
+      make({ ...cb, onChunk: async () => {} });
+      // @ts-expect-error Nor may it return a promise.
+      make({ ...cb, onChunk: () => Promise.resolve() });
+      expectTypeOf<ExactChunkEncoder['encode']>().returns.toEqualTypeOf<Bytes[]>();
+      expectTypeOf<ChunkEncoder['finish']>().returns.toEqualTypeOf<Bytes | null>();
+      // @ts-expect-error onChunk must be a function.
+      make({ ...cb, onChunk: 5 });
+      // @ts-expect-error Not even when the options are not a literal.
+      const widened: ChunkEncoderOptions = cb;
+      void widened;
+    };
+    void typesOnly;
   });
 });

@@ -42,6 +42,8 @@ export {
   createChunkEncoderSync,
   createResampler,
   createResamplerSync,
+  type CallbackChunkEncoder,
+  type CallbackChunkEncoderOptions,
   type ChunkEncoder,
   type ChunkEncoderOptions,
   type ExactChunkEncoder,

@@ -335,10 +335,13 @@ describe('fifo-queue.md', () => {
 });
 
 describe('record-in-chunks.md', () => {
-  const [workletCode = '', varyingCode = '', exactCode = '', resamplerCode = ''] = jsBlocks(
-    'docs/how-to/record-in-chunks.md',
-    4,
-  ).map(asScript);
+  const [
+    workletCode = '',
+    varyingCode = '',
+    exactCode = '',
+    callbackCode = '',
+    resamplerCode = '',
+  ] = jsBlocks('docs/how-to/record-in-chunks.md', 5).map(asScript);
   const audioContext = { sampleRate: 48000 };
   // 6 s of a tone in 128-sample frames, as the worklet posts them.
   const x = Float32Array.from({ length: 6 * 48000 }, (_, i) => 0.5 * Math.sin(i / 7));
@@ -373,7 +376,7 @@ describe('record-in-chunks.md', () => {
   });
 
   it.skipIf(!has('flac'))('cuts files that join to the whole recording', async () => {
-    for (const code of [varyingCode, exactCode]) {
+    for (const code of [varyingCode, exactCode, callbackCode]) {
       const worklet: { port: { onmessage?: (e: { data: Float32Array }) => void } } = { port: {} };
       const files: Uint8Array[] = [];
       const api = (await run(
@@ -382,7 +385,10 @@ describe('record-in-chunks.md', () => {
           createChunkEncoder,
           audioContext,
           worklet,
-          upload: (f: Uint8Array) => files.push(f),
+          upload: (f: Uint8Array) => {
+            files.push(f);
+            return Promise.resolve();
+          },
         },
       )) as { cut?: () => void; stop: () => void };
       frames.forEach((data, i) => {
@@ -390,6 +396,7 @@ describe('record-in-chunks.md', () => {
         if (i === 300) api.cut?.();
       });
       api.stop();
+      if (code === callbackCode) expect(worklet.port.onmessage).toBeNull();
       expect(files.length).toBeGreaterThanOrEqual(2);
       expect(joined(files)).toEqual([...whole()]);
     }

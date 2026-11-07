@@ -326,20 +326,21 @@ describe('installed package', () => {
     const x = new Float32Array(48000).map((_, i) => 0.5 * Math.sin(i / 10));
     const run = (api: Api): { samples: number[]; files: Uint8Array[] } => {
       const r = api.createResamplerSync({ inputRate: 48000, outputRate: 16000, quality: 'fast' });
-      const enc = api.createChunkEncoderSync({
-        inputRate: 48000,
-        sampleRate: 16000,
-        bitsPerSample: 16,
-        chunkSamples: 8000,
-      });
+      const o = { inputRate: 48000, sampleRate: 16000, bitsPerSample: 16, chunkSamples: 8000 };
+      const enc = api.createChunkEncoderSync(o);
+      const called: Uint8Array[] = [];
+      const cb = api.createChunkEncoderSync({ ...o, onChunk: (f) => void called.push(f) });
       try {
-        return {
-          samples: [...r.push(x), ...r.flush()],
-          files: [...enc.encode(x), ...enc.finish()],
-        };
+        const files = [...enc.encode(x), ...enc.finish()];
+        cb.push(x);
+        cb.finish();
+        expect(called).toEqual(files);
+        expect('encode' in cb).toBe(false);
+        return { samples: [...r.push(x), ...r.flush()], files };
       } finally {
         r.free();
         enc.free();
+        cb.free();
       }
     };
     const ref = run(esm);
@@ -507,11 +508,39 @@ describe('installed package', () => {
         const c: ExactChunkEncoder = await createChunkEncoder({ ...co, chunkSamples: 80000 });
         return c.finish();
       };
+      // With \`onChunk\`, \`push()\` and \`finish()\` hand the files over and return nothing.
+      const cbo = { ...co, chunkSamples: 80000, onChunk: (f: Bytes) => void f };
+      export const cb = async (): Promise<void> => {
+        const c = await createChunkEncoder(cbo);
+        const none: void = c.push(new Float32Array(8));
+        c.finish();
+        c.free();
+        return none;
+      };
+      export const cbSync: void = createChunkEncoderSync(cbo).finish();
+      // @ts-expect-error A callback encoder has no encode().
+      export const cbEncode = createChunkEncoderSync(cbo).encode;
+      // @ts-expect-error onChunk needs chunkSamples.
+      export const cbNoChunk = createChunkEncoderSync({ ...co, onChunk: () => {} });
+      type Same<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+      export const file: Same<CallbackChunkEncoderOptions['onChunk'], (file: Bytes) => void | undefined> = true;
+      // @ts-expect-error onChunk must be synchronous.
+      export const asyncCb = createChunkEncoderSync({ ...cbo, onChunk: async () => {} });
+      const cbOpts = { ...cbo };
+      // @ts-expect-error Plain options have no callback, even when not a literal.
+      export const widened: ChunkEncoderOptions = cbOpts;
+      // Untyped options keep their 1.1.0 type.
+      declare const untyped: any;
+      export const files: Bytes[] = createChunkEncoderSync(untyped).encode();
+      export const filesAsync = async (): Promise<Bytes[]> => (await createChunkEncoder(untyped)).encode();
+      // @ts-expect-error A callback encoder returns no files.
+      export const cbFiles = async (): Promise<Bytes[]> => (await createChunkEncoder(cbo)).finish();
     `;
     const names =
       '{ createWorkerEncoder, encode, encodeStream, probe, Wav2FlacError, ' +
       'type Bytes, type ErrorCode, type Options, type WavInfo, type WorkerEncoder, ' +
       'createChunkEncoder, createResampler, type ChunkEncoderOptions, type ExactChunkEncoder, ' +
+      'createChunkEncoderSync, type CallbackChunkEncoder, type CallbackChunkEncoderOptions, ' +
       'type Resampler }';
     for (const [suffix, spec] of [
       ['', 'wav2flac'],
