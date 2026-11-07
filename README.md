@@ -161,7 +161,28 @@ enc.free();
 The resampler keeps its state from file to file, so the files join to
 exactly the samples of one `encode()` of the whole recording. With
 `chunkSamples: 80000`, `encode()` and `finish()` return arrays of files of
-exactly 5 s at 16 kHz instead. More in
+exactly 5 s at 16 kHz instead. To get the files through a callback rather
+than as return values, pass `onChunk` with `chunkSamples`. Then there is
+no `encode()`; `push()` and `finish()` hand the files to `onChunk`, which
+must be synchronous:
+
+```js
+const enc = await createChunkEncoder({
+  inputRate: 48000,
+  sampleRate: 16000,
+  bitsPerSample: 16,
+  resampleQuality: 'fast',
+  chunkSamples: 80000,  // 5 s per file
+  onChunk: (flac) => {
+    upload(flac).catch((e) => console.error('upload failed', e));
+  },
+});
+enc.push(frame);              // calls onChunk per full file
+enc.finish();                 // calls onChunk for the rest
+enc.free();
+```
+
+More in
 [Cut a live recording into FLAC files](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/record-in-chunks.md).
 
 ### Off the main thread, with transcoding, progress and cancel
@@ -209,7 +230,7 @@ const info = await probe(wav);
 | `encodeSync(input, options?)` | → `Uint8Array`. Blocks the thread; needs `init()`/`initSync()` first. |
 | `createWorkerEncoder(opts?)` | → `{ encode, encodeStream, probe, wasmMemoryBytes, terminate }` running in a worker. `opts`: `{ url?, wasm? }`, the worker script and the wasm source. |
 | `probe(input)` | → `Promise<WavInfo>`. Reads the WAV header only. |
-| `createChunkEncoder(opts)` | → `Promise<{ push, encode, finish, free }>`. Cuts a recording into FLAC files that join without seams. `opts`: the options below (without `pcm`, `signal`, `onProgress`, `copy`, `maxInputBytes`) plus `inputRate`, `channels?` and `chunkSamples?`; `bitsPerSample` is required. `encode(input?)` returns one file or `null`, or with `chunkSamples` an array of files of exactly that length. |
+| `createChunkEncoder(opts)` | → `Promise<{ push, encode, finish, free }>`. Cuts a recording into FLAC files that join without seams. `opts`: the options below (without `pcm`, `signal`, `onProgress`, `copy`, `maxInputBytes`) plus `inputRate`, `channels?`, `chunkSamples?` and `onChunk?`; `bitsPerSample` is required. `encode(input?)` returns one file or `null`, or with `chunkSamples` an array of files of exactly that length. With `onChunk: (file) => void` (needs `chunkSamples`) → `Promise<{ push, finish, free }>`: `push()` hands each full file to `onChunk`, `finish()` the rest, and both return nothing. |
 | `createResampler(opts)` | → `Promise<{ push, flush, free }>`. Resamples audio that arrives in pieces; the output doesn't depend on how it is split. `opts`: `{ inputRate, outputRate, channels?, quality?, output? }`; `output` is `'s16'` (`Int16Array`, default) or `'f32'`. |
 | `init(source?, { signal? })` / `initSync(source?)` | Loads the wasm. `encode`, `encodeStream`, `probe`, `createChunkEncoder`, `createResampler` and the worker encoder do this for you; `createChunkEncoderSync` and `createResamplerSync` need it done. A `signal` (e.g. `AbortSignal.timeout(10_000)`) gives up on a stalled download. Once every caller waiting on the load has given up, or the load failed, the next call retries: from its own source, or else from the last one; a caller without a signal, such as `probe()`, keeps the load going. |
 | `version()` | The encoder's version string. |

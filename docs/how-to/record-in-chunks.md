@@ -98,6 +98,50 @@ export function stop() {
 }
 ```
 
+## Get each file through a callback
+
+Instead of reading the return values, you can pass `onChunk` together
+with `chunkSamples`. Then the encoder has no `encode()`: `push()` hands each
+file that is now full to `onChunk`, and `finish()` hands over the rest, in
+order, before they return.
+
+```js
+import { createChunkEncoder } from 'wav2flac';
+
+const enc = await createChunkEncoder({
+  inputRate: audioContext.sampleRate,
+  sampleRate: 16000,
+  bitsPerSample: 16,
+  resampleQuality: 'fast',
+  chunkSamples: 5 * 16000, // 5 s per file
+  onChunk: (flac) => {
+    upload(flac).catch((e) => console.error('upload failed', e));
+  },
+});
+
+worklet.port.onmessage = (e) => enc.push(e.data);
+
+export function stop() {
+  worklet.port.onmessage = null; // stop feeding the encoder
+  enc.finish(); // calls onChunk for the rest
+  enc.free();
+}
+```
+
+`onChunk` runs synchronously, so keep it short and start slow work (an
+upload) without waiting for it, catching its rejection as above. Don't
+make it `async`: the encoder doesn't wait for it, and a rejection goes
+unhandled instead of being logged (in TypeScript it is a type error). If
+`onChunk` throws, the error is logged with `console.error` and the encoder
+carries on with the next file. To upload in order, keep a promise `q` (start
+with `Promise.resolve()`) and chain each upload in braces:
+`onChunk: (flac) => { q = q.then(() => upload(flac)).catch(log); }`.
+
+After `finish()`, even a failed one, `push()` drops the samples and logs a
+warning with `console.warn`, so stop pushing first, as `stop()` does above.
+Calling `push()`, `finish()` or `free()` from inside `onChunk` throws
+`ENCODER_STATE`, and the encoder carries on.
+
 ## Only resample
 
 To send 16 kHz samples somewhere yourself, for example to a speech API over
@@ -131,7 +175,8 @@ export function stop() {
 - Call `free()` on every path, also after an error. It releases the wasm
   memory, and calling it twice does nothing.
 - After `finish()`, `flush()` or a failed call, every other call fails
-  with `ENCODER_STATE`. Create a new object for the next recording.
+  with `ENCODER_STATE`, except as described above for `onChunk`. Create a
+  new object for the next recording.
 - Both run on the calling thread and take about 0.3 % of one core for
   48 → 16 kHz with `'fast'` and about 1.5 % with `'best'`
   (`npm run bench:stream`), so the main thread is fine.
