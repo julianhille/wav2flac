@@ -28,6 +28,10 @@ const flac = await encode(wavBytes); // Uint8Array in, Uint8Array (a .flac file)
 - **Convert while encoding.**
   - Resample to another sample rate (e.g. 48 kHz → 16 kHz for speech).
   - Reduce the bit depth (e.g. float or 24-bit → 16-bit), with dither.
+- **Live recordings, cut into files.** `createChunkEncoder()` turns
+  microphone frames into separate 16 kHz FLAC files that join without seams,
+  exactly as one encode of the whole recording. `createResampler()` gives
+  you just the resampled samples.
 - **Any input size, bounded memory.** Input can be a buffer or a
   `ReadableStream` (a `fetch` body, a file stream). The output can be one
   buffer or a stream. Streaming never holds the whole file in memory.
@@ -137,6 +141,29 @@ const flac2 = await encode(channels, {
 
 More in the [PCM guide](https://github.com/julianhille/wav2flac/blob/main/docs/pcm.md).
 
+### Live recording, cut into separate files
+
+```js
+import { createChunkEncoder } from 'wav2flac';
+
+const enc = await createChunkEncoder({
+  inputRate: 48000,  // the AudioContext's rate
+  sampleRate: 16000,
+  bitsPerSample: 16,
+  resampleQuality: 'fast',
+});
+enc.push(frame);              // Float32Array frames from an AudioWorklet
+const flac = enc.encode();    // one FLAC file of everything since the last cut
+const last = enc.finish();    // the rest
+enc.free();
+```
+
+The resampler keeps its state from file to file, so the files join to
+exactly the samples of one `encode()` of the whole recording. With
+`chunkSamples: 80000`, `encode()` and `finish()` return arrays of files of
+exactly 5 s at 16 kHz instead. More in
+[Cut a live recording into FLAC files](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/record-in-chunks.md).
+
 ### Off the main thread, with transcoding, progress and cancel
 
 ```js
@@ -182,7 +209,9 @@ const info = await probe(wav);
 | `encodeSync(input, options?)` | → `Uint8Array`. Blocks the thread; needs `init()`/`initSync()` first. |
 | `createWorkerEncoder(opts?)` | → `{ encode, encodeStream, probe, wasmMemoryBytes, terminate }` running in a worker. `opts`: `{ url?, wasm? }`, the worker script and the wasm source. |
 | `probe(input)` | → `Promise<WavInfo>`. Reads the WAV header only. |
-| `init(source?, { signal? })` / `initSync(source?)` | Loads the wasm. `encode`, `encodeStream`, `probe` and the worker encoder do this for you. A `signal` (e.g. `AbortSignal.timeout(10_000)`) gives up on a stalled download. Once every caller waiting on the load has given up, or the load failed, the next call retries: from its own source, or else from the last one; a caller without a signal, such as `probe()`, keeps the load going. |
+| `createChunkEncoder(opts)` | → `Promise<{ push, encode, finish, free }>`. Cuts a recording into FLAC files that join without seams. `opts`: the options below (without `pcm`, `signal`, `onProgress`, `copy`, `maxInputBytes`) plus `inputRate`, `channels?` and `chunkSamples?`; `bitsPerSample` is required. `encode(input?)` returns one file or `null`, or with `chunkSamples` an array of files of exactly that length. |
+| `createResampler(opts)` | → `Promise<{ push, flush, free }>`. Resamples audio that arrives in pieces; the output doesn't depend on how it is split. `opts`: `{ inputRate, outputRate, channels?, quality?, output? }`; `output` is `'s16'` (`Int16Array`, default) or `'f32'`. |
+| `init(source?, { signal? })` / `initSync(source?)` | Loads the wasm. `encode`, `encodeStream`, `probe`, `createChunkEncoder`, `createResampler` and the worker encoder do this for you; `createChunkEncoderSync` and `createResamplerSync` need it done. A `signal` (e.g. `AbortSignal.timeout(10_000)`) gives up on a stalled download. Once every caller waiting on the load has given up, or the load failed, the next call retries: from its own source, or else from the last one; a caller without a signal, such as `probe()`, keeps the load going. |
 | `version()` | The encoder's version string. |
 | `thirdPartyLicenses()` | → `Promise<string>`. The license notices of the crates in the wasm, as Markdown. Needs the wasm loaded: it rejects before `init()` has finished, and never loads it itself. |
 | `wasmMemoryBytes()` | Size of the wasm linear memory in bytes (for diagnostics and leak checks). |
@@ -241,6 +270,7 @@ clear message. Nothing is ever converted lossily unless you ask for it.
   - [Encode in parallel with a worker pool](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/parallel-encoding.md)
   - [Encode one at a time with a FIFO queue](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/fifo-queue.md)
   - [Load from a CDN without a bundler](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/load-from-cdn.md)
+  - [Cut a live recording into FLAC files](https://github.com/julianhille/wav2flac/blob/main/docs/how-to/record-in-chunks.md)
 
 ## Benchmark
 

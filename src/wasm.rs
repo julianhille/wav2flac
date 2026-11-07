@@ -12,6 +12,8 @@ use crate::error::{Error, ErrorCode};
 use crate::options::{Dither, Options, OutputMode, ResampleQuality, Tags};
 use crate::pcm::{PcmFormat, PcmSpec};
 use crate::riff::SampleFormat;
+use crate::stream::{ChunkEncoder, StreamResampler};
+use crate::transcode::requantize::Requantizer;
 use std::fmt::Write;
 use wasm_bindgen::prelude::*;
 
@@ -39,8 +41,70 @@ fn int32(name: &str, v: f64) -> Result<u32, JsError> {
 /// Largest integer a JS number holds exactly.
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
+/// [`int`] up to [`MAX_SAFE_INTEGER`], with a negative value for "not set".
+fn unset_or(name: &str, v: f64) -> Result<Option<u64>, JsError> {
+    if v < 0.0 {
+        Ok(None)
+    } else {
+        int(name, v, MAX_SAFE_INTEGER).map(Some)
+    }
+}
+
 fn js_err(e: &Error) -> JsError {
     JsError::new(&format!("[{}] {}", e.code().as_str(), e.message()))
+}
+
+/// Builds [`Options`] from the numbers the JS layer passes; see
+/// [`WasmEncoder::new`] for their encoding.
+#[allow(clippy::too_many_arguments)]
+fn options(
+    compression_level: f64,
+    block_size: f64,
+    sample_rate: f64,
+    resample_quality: f64,
+    bits_per_sample: f64,
+    dither: bool,
+    dither_seed: f64,
+    tags_enabled: bool,
+    tag_keys: Vec<String>,
+    tag_values: Vec<String>,
+    seek_point_interval: f64,
+    padding: f64,
+    max_input_bytes: f64,
+    streaming: bool,
+) -> Result<Options, JsError> {
+    if tag_keys.len() != tag_values.len() {
+        return Err(invalid(format!(
+            "tag keys and values differ in length ({} vs {})",
+            tag_keys.len(),
+            tag_values.len()
+        )));
+    }
+    let block_size = int32("blockSize", block_size)?;
+    let sample_rate = int32("sampleRate", sample_rate)?;
+    let bits_per_sample = int32("bitsPerSample", bits_per_sample)?;
+    Ok(Options {
+        compression_level: int("compressionLevel", compression_level, 255)? as u8,
+        block_size: (block_size != 0).then_some(block_size as usize),
+        sample_rate: (sample_rate != 0).then_some(sample_rate),
+        resample_quality: quality("resampleQuality", resample_quality)?,
+        bits_per_sample: (bits_per_sample != 0).then_some(bits_per_sample),
+        dither: if dither { Dither::Tpdf } else { Dither::None },
+        dither_seed: int("ditherSeed", dither_seed, MAX_SAFE_INTEGER)?,
+        tags: if tags_enabled {
+            Tags::FromWav(tag_keys.into_iter().zip(tag_values).collect())
+        } else {
+            Tags::Disabled
+        },
+        seek_point_interval,
+        padding: int32("padding", padding)?,
+        max_input_bytes: unset_or("maxInputBytes", max_input_bytes)?,
+        mode: if streaming {
+            OutputMode::Streaming
+        } else {
+            OutputMode::Buffered
+        },
+    })
 }
 
 /// Streaming encoder handle. Must be released with `free()`.
@@ -80,49 +144,22 @@ impl WasmEncoder {
         pcm_rate: f64,
         pcm_total_bytes: f64,
     ) -> Result<WasmEncoder, JsError> {
-        if tag_keys.len() != tag_values.len() {
-            return Err(invalid(format!(
-                "tag keys and values differ in length ({} vs {})",
-                tag_keys.len(),
-                tag_values.len()
-            )));
-        }
-        let block_size = int32("blockSize", block_size)?;
-        let sample_rate = int32("sampleRate", sample_rate)?;
-        let bits_per_sample = int32("bitsPerSample", bits_per_sample)?;
-        let unset_or = |name, v: f64| {
-            if v < 0.0 {
-                Ok(None)
-            } else {
-                int(name, v, MAX_SAFE_INTEGER).map(Some)
-            }
-        };
-        let opts = Options {
-            compression_level: int("compressionLevel", compression_level, 255)? as u8,
-            block_size: (block_size != 0).then_some(block_size as usize),
-            sample_rate: (sample_rate != 0).then_some(sample_rate),
-            resample_quality: match int("resampleQuality", resample_quality, 2)? {
-                0 => ResampleQuality::Fast,
-                1 => ResampleQuality::Balanced,
-                _ => ResampleQuality::Best,
-            },
-            bits_per_sample: (bits_per_sample != 0).then_some(bits_per_sample),
-            dither: if dither { Dither::Tpdf } else { Dither::None },
-            dither_seed: int("ditherSeed", dither_seed, MAX_SAFE_INTEGER)?,
-            tags: if tags_enabled {
-                Tags::FromWav(tag_keys.into_iter().zip(tag_values).collect())
-            } else {
-                Tags::Disabled
-            },
+        let opts = options(
+            compression_level,
+            block_size,
+            sample_rate,
+            resample_quality,
+            bits_per_sample,
+            dither,
+            dither_seed,
+            tags_enabled,
+            tag_keys,
+            tag_values,
             seek_point_interval,
-            padding: int32("padding", padding)?,
-            max_input_bytes: unset_or("maxInputBytes", max_input_bytes)?,
-            mode: if streaming {
-                OutputMode::Streaming
-            } else {
-                OutputMode::Buffered
-            },
-        };
+            padding,
+            max_input_bytes,
+            streaming,
+        )?;
         let format = match int("pcm format code", pcm_format, 5)? {
             0 => None,
             1 => Some(PcmFormat::U8),
@@ -134,14 +171,7 @@ impl WasmEncoder {
         let inner = match format {
             None => Encoder::new(opts),
             Some(format) => {
-                let channels = int("pcm.channels", pcm_channels, MAX_SAFE_INTEGER)?;
-                // Past u16 the count is simply too many, as it is from 9 up.
-                let channels = u16::try_from(channels).map_err(|_| {
-                    js_err(&Error::new(
-                        ErrorCode::TooManyChannels,
-                        format!("{channels} channels (FLAC supports at most 8)"),
-                    ))
-                })?;
+                let channels = channel_count("pcm.channels", pcm_channels)?;
                 let spec = PcmSpec {
                     format,
                     channels,
@@ -201,6 +231,207 @@ impl WasmEncoder {
         self.inner
             .info()
             .map_or_else(String::new, |i| info_to_json(&i))
+    }
+}
+
+/// Converts a JS channel count; past 8 (and past `u16`) it is too many.
+fn channel_count(name: &str, v: f64) -> Result<u16, JsError> {
+    let n = int(name, v, MAX_SAFE_INTEGER)?;
+    u16::try_from(n).map_err(|_| {
+        js_err(&Error::new(
+            ErrorCode::TooManyChannels,
+            format!("{n} channels (FLAC supports at most 8)"),
+        ))
+    })
+}
+
+/// Converts a quality number: 0 fast, 1 balanced, 2 best.
+fn quality(name: &str, v: f64) -> Result<ResampleQuality, JsError> {
+    Ok(match int(name, v, 2)? {
+        0 => ResampleQuality::Fast,
+        1 => ResampleQuality::Balanced,
+        _ => ResampleQuality::Best,
+    })
+}
+
+/// Resampler output, converted a slice at a time so that no `f64` copy of
+/// all of it builds up.
+enum Output {
+    F32(Vec<f32>),
+    /// As `encode()` quantizes to 16 bits with `dither: none`.
+    S16(Vec<i16>, Requantizer),
+}
+
+impl Output {
+    /// Room for `len` samples up front: growing a huge vector by doubling
+    /// would need about three times its size.
+    fn new(f32: bool, len: usize) -> Self {
+        if f32 {
+            Self::F32(Vec::with_capacity(len))
+        } else {
+            let q = Requantizer::new(16, Dither::None, 0);
+            Self::S16(Vec::with_capacity(len), q)
+        }
+    }
+
+    fn add(&mut self, s: &[f64]) {
+        match self {
+            Self::F32(v) => v.extend(s.iter().map(|&x| x as f32)),
+            // A 16-bit quantizer only returns values in i16 range.
+            Self::S16(v, q) => v.extend(s.iter().map(|&x| q.quantize(x) as i16)),
+        }
+    }
+
+    fn into_js(self) -> JsValue {
+        match self {
+            Self::F32(v) => v.into(),
+            Self::S16(v, _) => v.into(),
+        }
+    }
+}
+
+/// Stateful resampler handle. Must be released with `free()`.
+#[wasm_bindgen]
+pub struct WasmResampler {
+    inner: StreamResampler,
+    f32: bool,
+    /// Output rate / input rate.
+    ratio: f64,
+}
+
+#[wasm_bindgen]
+impl WasmResampler {
+    /// Creates a resampler; `quality` is 0 fast, 1 balanced, 2 best. The
+    /// output is a `Float32Array` with `f32`, else an `Int16Array`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        input_rate: f64,
+        output_rate: f64,
+        channels: f64,
+        quality: f64,
+        f32: bool,
+    ) -> Result<WasmResampler, JsError> {
+        let (from, to) = (
+            int32("inputRate", input_rate)?,
+            int32("outputRate", output_rate)?,
+        );
+        let inner = StreamResampler::new(
+            from,
+            to,
+            channel_count("channels", channels)?,
+            self::quality("quality", quality)?,
+        )
+        .map_err(|e| js_err(&e))?;
+        Ok(Self {
+            inner,
+            f32,
+            ratio: f64::from(to) / f64::from(from),
+        })
+    }
+
+    /// Feeds samples; returns the output that is ready.
+    pub fn push(&mut self, input: &[f32]) -> Result<JsValue, JsError> {
+        // The expected output, plus an eighth for what the filter held back.
+        let len = input.len() as f64 * self.ratio * 1.125;
+        let mut out = Output::new(self.f32, len as usize);
+        self.inner
+            .push(input, |s| out.add(s))
+            .map_err(|e| js_err(&e))?;
+        Ok(out.into_js())
+    }
+
+    /// Ends the input; returns the remaining output.
+    pub fn flush(&mut self) -> Result<JsValue, JsError> {
+        let mut out = Output::new(self.f32, 0);
+        self.inner.flush(|s| out.add(s)).map_err(|e| js_err(&e))?;
+        Ok(out.into_js())
+    }
+}
+
+/// Files as a JS array of `Uint8Array`.
+fn files(r: crate::error::Result<Vec<Vec<u8>>>) -> Result<Vec<JsValue>, JsError> {
+    let files = r.map_err(|e| js_err(&e))?;
+    Ok(files.into_iter().map(JsValue::from).collect())
+}
+
+/// Chunk encoder handle. Must be released with `free()`.
+#[wasm_bindgen]
+pub struct WasmChunkEncoder {
+    inner: ChunkEncoder,
+}
+
+#[wasm_bindgen]
+impl WasmChunkEncoder {
+    /// Creates a chunk encoder. The options are those of
+    /// [`WasmEncoder::new`] (without the PCM description and output mode);
+    /// `chunk_frames` < 0 means "cut where the caller asks".
+    #[wasm_bindgen(constructor)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        compression_level: f64,
+        block_size: f64,
+        sample_rate: f64,
+        resample_quality: f64,
+        bits_per_sample: f64,
+        dither: bool,
+        dither_seed: f64,
+        tags_enabled: bool,
+        tag_keys: Vec<String>,
+        tag_values: Vec<String>,
+        seek_point_interval: f64,
+        padding: f64,
+        input_rate: f64,
+        channels: f64,
+        chunk_frames: f64,
+    ) -> Result<WasmChunkEncoder, JsError> {
+        let opts = options(
+            compression_level,
+            block_size,
+            sample_rate,
+            resample_quality,
+            bits_per_sample,
+            dither,
+            dither_seed,
+            tags_enabled,
+            tag_keys,
+            tag_values,
+            seek_point_interval,
+            padding,
+            -1.0,
+            false,
+        )?;
+        let chunk = match unset_or("chunkSamples", chunk_frames)? {
+            None => None,
+            Some(n) => Some(usize::try_from(n).map_err(|_| {
+                invalid(format!(
+                    "chunkSamples must be at most {}, got {n}",
+                    usize::MAX
+                ))
+            })?),
+        };
+        let inner = ChunkEncoder::new(
+            int32("inputRate", input_rate)?,
+            channel_count("channels", channels)?,
+            opts,
+            chunk,
+        )
+        .map_err(|e| js_err(&e))?;
+        Ok(Self { inner })
+    }
+
+    /// Feeds interleaved samples.
+    pub fn push(&mut self, input: &[f32]) -> Result<(), JsError> {
+        self.inner.push(input).map_err(|e| js_err(&e))
+    }
+
+    /// Cuts the files that are ready and returns them.
+    pub fn cut(&mut self) -> Result<Vec<JsValue>, JsError> {
+        files(self.inner.cut())
+    }
+
+    /// Ends the input and returns the last files.
+    pub fn finish(&mut self) -> Result<Vec<JsValue>, JsError> {
+        files(self.inner.finish())
     }
 }
 

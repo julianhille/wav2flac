@@ -5,8 +5,9 @@ import { execFileSync } from 'node:child_process';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
-import { encode } from '../../ts/index.js';
+import { createChunkEncoder, createResampler, encode, encodeSync } from '../../ts/index.js';
 import { asScript, jsBlocks, run } from '../helpers/samples.js';
+import { flacDecode, has } from '../helpers/tools.js';
 import { makeWav } from '../helpers/wav.js';
 
 const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -330,5 +331,82 @@ describe('fifo-queue.md', () => {
       encoding: 'utf8',
     });
     expect(out.trim()).toBe('1');
+  });
+});
+
+describe('record-in-chunks.md', () => {
+  const [workletCode = '', varyingCode = '', exactCode = '', resamplerCode = ''] = jsBlocks(
+    'docs/how-to/record-in-chunks.md',
+    4,
+  ).map(asScript);
+  const audioContext = { sampleRate: 48000 };
+  // 6 s of a tone in 128-sample frames, as the worklet posts them.
+  const x = Float32Array.from({ length: 6 * 48000 }, (_, i) => 0.5 * Math.sin(i / 7));
+  const frames = Array.from({ length: x.length / 128 }, (_, i) => x.slice(i * 128, (i + 1) * 128));
+  const whole = (): Int32Array =>
+    flacDecode(
+      encodeSync(x, {
+        pcm: { sampleRate: 48000, channels: 1 },
+        sampleRate: 16000,
+        bitsPerSample: 16,
+        resampleQuality: 'fast',
+      }),
+    )!;
+  const joined = (files: Uint8Array[]): number[] => files.flatMap((f) => [...flacDecode(f)!]);
+
+  it('posts a copy of the first channel from the worklet', async () => {
+    const posted: Float32Array[] = [];
+    let registered: (new () => { process(i: Float32Array[][]): boolean }) | undefined;
+    class AudioWorkletProcessor {
+      port = { postMessage: (m: Float32Array) => posted.push(m) };
+    }
+    await run(workletCode, {
+      AudioWorkletProcessor,
+      registerProcessor: (_: string, c: typeof registered) => (registered = c),
+    });
+    const p = new registered!();
+    const input = new Float32Array([0.1, 0.2]);
+    expect(p.process([[input]])).toBe(true);
+    expect(p.process([[]])).toBe(true);
+    expect(posted).toEqual([input]);
+    expect(posted[0]).not.toBe(input);
+  });
+
+  it.skipIf(!has('flac'))('cuts files that join to the whole recording', async () => {
+    for (const code of [varyingCode, exactCode]) {
+      const worklet: { port: { onmessage?: (e: { data: Float32Array }) => void } } = { port: {} };
+      const files: Uint8Array[] = [];
+      const api = (await run(
+        `${code}\nreturn { cut: typeof cut === 'function' ? cut : undefined, stop };`,
+        {
+          createChunkEncoder,
+          audioContext,
+          worklet,
+          upload: (f: Uint8Array) => files.push(f),
+        },
+      )) as { cut?: () => void; stop: () => void };
+      frames.forEach((data, i) => {
+        worklet.port.onmessage!({ data });
+        if (i === 300) api.cut?.();
+      });
+      api.stop();
+      expect(files.length).toBeGreaterThanOrEqual(2);
+      expect(joined(files)).toEqual([...whole()]);
+    }
+  });
+
+  it('sends resampled samples', async () => {
+    const worklet: { port: { onmessage?: (e: { data: Float32Array }) => void } } = { port: {} };
+    const sent: Int16Array[] = [];
+    const { stop } = (await run(`${resamplerCode}\nreturn { stop };`, {
+      createResampler,
+      audioContext,
+      worklet,
+      socket: { send: (s: Int16Array) => sent.push(s) },
+    })) as { stop: () => void };
+    for (const data of frames) worklet.port.onmessage!({ data });
+    stop();
+    expect(sent.every((s) => s instanceof Int16Array)).toBe(true);
+    expect(sent.reduce((n, s) => n + s.length, 0)).toBe(6 * 16000);
   });
 });

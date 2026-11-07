@@ -6,7 +6,8 @@
 //!
 //! * WAV parsing: [hound] (fmt validation) + our own RIFF chunk walker.
 //! * FLAC encoding: [`libflac_rs`] (bit-exact libFLAC 1.4.3 port), one frame at a time.
-//! * Resampling: [rubato].
+//! * Resampling: [rubato]. [`StreamResampler`] and [`ChunkEncoder`] keep its state
+//!   across calls, for recordings cut into separate files.
 //!
 //! The output depends only on the input and the options. The wasm build gives
 //! the same bytes on every host. A native build gives the same bytes too,
@@ -44,6 +45,7 @@ pub mod metadata;
 pub mod options;
 mod pcm;
 mod riff;
+pub mod stream;
 mod transcode;
 
 #[cfg(target_arch = "wasm32")]
@@ -54,4 +56,5 @@ pub use error::{Error, ErrorCode, Result};
 pub use options::{Dither, Options, OutputMode, ResampleQuality, Tags};
 pub use pcm::{PcmFormat, PcmSpec};
 pub use riff::SampleFormat;
+pub use stream::{ChunkEncoder, StreamResampler};
 pub use transcode::OutputSpec;
