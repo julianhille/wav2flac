@@ -7,7 +7,7 @@
  * @module
  */
 import { trackLive, type Bytes } from './engine.js';
-import { fromWasmError, invalidOption } from './errors.js';
+import { fromWasmError, invalidOption, Wav2FlacError } from './errors.js';
 import { isDetached, SLICE_BYTES, typeTag } from './input.js';
 import {
   isPlainObject,
@@ -109,9 +109,38 @@ export interface ChunkEncoderOptions extends Omit<
   /**
    * Samples per channel in each file (at the output rate). Set, the encoder
    * cuts exactly there ({@link ExactChunkEncoder}); unset, it cuts wherever
-   * you call `encode()` ({@link ChunkEncoder}).
+   * you call `encode()` ({@link ChunkEncoder}). Required with `onChunk`.
    */
   chunkSamples?: number | undefined;
+  /**
+   * Leave unset. With an `onChunk` callback, the options are
+   * {@link CallbackChunkEncoderOptions}.
+   */
+  onChunk?: undefined;
+}
+
+/**
+ * Options of {@link createChunkEncoder} with an `onChunk` callback: the
+ * encoder hands each file to it instead of returning the files
+ * ({@link CallbackChunkEncoder}).
+ */
+export interface CallbackChunkEncoderOptions extends Omit<
+  ChunkEncoderOptions,
+  'chunkSamples' | 'onChunk'
+> {
+  /** Samples per channel in each file (at the output rate). */
+  chunkSamples: number;
+  /**
+   * Receives each file, in order, synchronously inside `push()` and
+   * `finish()`; the file's `buffer` holds just the file, so it can be sent
+   * as is. The types reject an async function or one that returns a
+   * promise: start slow work (an upload) inside it and catch its rejection
+   * there. If it throws, the error is logged with `console.error` and the
+   * encoder carries on with the next file. Calling the encoder from inside
+   * it throws `ENCODER_STATE`.
+   * @param file A standalone FLAC file.
+   */
+  onChunk: (file: Bytes) => void | undefined;
 }
 
 /**
@@ -172,13 +201,50 @@ export interface ExactChunkEncoder {
   encode(input?: Float32Array): Bytes[];
   /**
    * Ends the input. Afterwards every call but `free()` fails.
-   * @returns The remaining full files, then the shorter last one.
+   * @returns The remaining full files, then the shorter last one, if any.
    * @throws {Wav2FlacError} `INVALID_OPTIONS` if the input ends inside a
    * frame, as in `encode()`.
    * @throws {Wav2FlacError} `ENCODER_STATE` after `finish()` or a failed call.
    */
   finish(): Bytes[];
   /** Releases the wasm memory; idempotent. Call it on every path. */
+  free(): void;
+  /** Same as `free()`, for `using`. */
+  [Symbol.dispose](): void;
+}
+
+/**
+ * A chunk encoder that hands each file to the `onChunk` callback instead of
+ * returning it. The files have exactly `chunkSamples` samples per channel and
+ * only the last is shorter. Joined in order, they hold exactly the samples of
+ * one `encode()` of the whole recording with the same options.
+ */
+export interface CallbackChunkEncoder {
+  /**
+   * Feeds interleaved samples, then calls `onChunk` for each file that is now
+   * full. A push may split a frame, but all pushes together must hold whole
+   * frames. After `finish()`, even a failed one, it drops the samples and
+   * logs a warning with `console.warn`.
+   * @param input The samples.
+   * @throws {TypeError} If `input` is not a `Float32Array`.
+   * @throws {Wav2FlacError} `ENCODER_STATE` after a failed `push()`, or
+   * from inside `onChunk`.
+   */
+  push(input: Float32Array): void;
+  /**
+   * Ends the input and calls `onChunk` for the remaining files: the full
+   * ones, then the shorter last one, if any. All calls are made before it
+   * returns. Afterwards `push()` drops its samples and `finish()` fails.
+   * @throws {Wav2FlacError} `INVALID_OPTIONS` if the input ends inside a
+   * frame.
+   * @throws {Wav2FlacError} `ENCODER_STATE` after `finish()` or a failed
+   * `push()`, or from inside `onChunk`.
+   */
+  finish(): void;
+  /**
+   * Releases the wasm memory; idempotent. Call it on every path.
+   * @throws {Wav2FlacError} `ENCODER_STATE` from inside `onChunk`.
+   */
   free(): void;
   /** Same as `free()`, for `using`. */
   [Symbol.dispose](): void;
@@ -196,7 +262,12 @@ const RESAMPLER_KEYS: ReadonlySet<string> = new Set([
   'quality',
   'output',
 ]);
-const CHUNK_KEYS: ReadonlySet<string> = new Set(['inputRate', 'channels', 'chunkSamples']);
+const CHUNK_KEYS: ReadonlySet<string> = new Set([
+  'inputRate',
+  'channels',
+  'chunkSamples',
+  'onChunk',
+]);
 const NOT_FOR_CHUNKS: ReadonlySet<string> = new Set([
   'pcm',
   'signal',
@@ -409,7 +480,7 @@ export async function createResampler<O extends ResamplerOutput = 's16'>(
 }
 
 /** A validated chunk encoder: its constructor, ready to call. */
-type ChunkFactory = () => ChunkEncoder | ExactChunkEncoder;
+type ChunkFactory = () => ChunkEncoder | ExactChunkEncoder | CallbackChunkEncoder;
 
 /**
  * Validates chunk encoder options.
@@ -428,6 +499,11 @@ function chunkFactory(options: unknown): ChunkFactory {
   const channels = positive(o, 'channels', 1, Number.MAX_SAFE_INTEGER);
   const exact = o['chunkSamples'] !== undefined;
   const chunk = exact ? positive(o, 'chunkSamples', undefined, Number.MAX_SAFE_INTEGER) : -1;
+  const onChunk = o['onChunk'];
+  if (onChunk !== undefined && typeof onChunk !== 'function') {
+    throw invalidOption('onChunk must be a function');
+  }
+  if (onChunk !== undefined && !exact) throw invalidOption('onChunk needs chunkSamples');
   return () => {
     let enc: WasmChunkEncoder;
     try {
@@ -451,11 +527,12 @@ function chunkFactory(options: unknown): ChunkFactory {
     } catch (e) {
       throw fromWasmError(e);
     }
+    if (onChunk !== undefined) return new Callback(enc, onChunk as (file: Bytes) => void);
     return exact ? new Exact(enc) : new Varying(enc);
   };
 }
 
-/** What both chunk encoders share. */
+/** What the chunk encoders share. */
 abstract class ChunkBase {
   #enc: WasmChunkEncoder | undefined;
 
@@ -477,6 +554,14 @@ abstract class ChunkBase {
   }
 
   push(input: Float32Array): void {
+    this.feed(input);
+  }
+
+  /**
+   * Feeds `input` to the wasm encoder.
+   * @param input The samples.
+   */
+  protected feed(input: Float32Array): void {
     checkSamples(input);
     const e = this.#live();
     try {
@@ -498,7 +583,7 @@ abstract class ChunkBase {
    * @returns The files.
    */
   protected cut(input: Float32Array | undefined, last: boolean): Bytes[] {
-    if (input !== undefined) this.push(input);
+    if (input !== undefined) this.feed(input);
     const e = this.#live();
     try {
       return (last ? e.finish() : e.cut()) as Bytes[];
@@ -546,6 +631,82 @@ class Exact extends ChunkBase implements ExactChunkEncoder {
   }
 }
 
+/** {@link CallbackChunkEncoder}. */
+class Callback extends ChunkBase implements CallbackChunkEncoder {
+  readonly #onChunk: (file: Bytes) => void;
+  /** Whether `onChunk` is running. */
+  #busy = false;
+  /** Whether `finish()` was called. */
+  #finished = false;
+
+  /**
+   * @param enc The wasm encoder, now owned by this object.
+   * @param onChunk Receives each file.
+   */
+  constructor(enc: WasmChunkEncoder, onChunk: (file: Bytes) => void) {
+    super(enc);
+    this.#onChunk = onChunk;
+  }
+
+  /** Throws `ENCODER_STATE` inside `onChunk`. */
+  #check(): void {
+    if (this.#busy) {
+      throw new Wav2FlacError('ENCODER_STATE', 'chunk encoder called from inside onChunk');
+    }
+  }
+
+  /**
+   * Hands the files to `onChunk`, in order, logging what it throws.
+   * @param files The files.
+   */
+  #deliver(files: Bytes[]): void {
+    const onChunk = this.#onChunk;
+    this.#busy = true;
+    try {
+      for (const f of files) {
+        try {
+          onChunk(f);
+        } catch (e) {
+          try {
+            console.error('wav2flac: onChunk threw', e);
+          } catch {
+            // A throwing console must not lose the next files.
+          }
+        }
+      }
+    } finally {
+      this.#busy = false;
+    }
+  }
+
+  override push(input: Float32Array): void {
+    this.#check();
+    checkSamples(input);
+    if (this.#finished) {
+      console.warn('wav2flac: push() after finish(); samples dropped');
+      return;
+    }
+    // Cut per slice: files go out early and wasm memory stays small. An empty
+    // push still reaches the wasm encoder, so its state errors still show.
+    const n = input.length; // read once: onChunk may detach the input
+    let i = 0;
+    do this.#deliver(this.cut(input.subarray(i, i + PUSH_FLOATS), false));
+    while ((i += PUSH_FLOATS) < n);
+  }
+
+  finish(): void {
+    this.#check();
+    // Set first: even a failed finish() ends the input.
+    this.#finished = true;
+    this.#deliver(this.cut(undefined, true));
+  }
+
+  override free(): void {
+    this.#check();
+    super.free();
+  }
+}
+
 /**
  * Synchronous {@link createChunkEncoder}, for when the wasm is already initialized.
  * @param options Encoder options and the input description.
@@ -559,12 +720,13 @@ export function createChunkEncoderSync(
 export function createChunkEncoderSync(
   options: ChunkEncoderOptions & { chunkSamples?: undefined },
 ): ChunkEncoder;
+export function createChunkEncoderSync(options: CallbackChunkEncoderOptions): CallbackChunkEncoder;
 export function createChunkEncoderSync(
   options: ChunkEncoderOptions,
 ): ChunkEncoder | ExactChunkEncoder;
 export function createChunkEncoderSync(
-  options: ChunkEncoderOptions,
-): ChunkEncoder | ExactChunkEncoder {
+  options: ChunkEncoderOptions | CallbackChunkEncoderOptions,
+): ChunkEncoder | ExactChunkEncoder | CallbackChunkEncoder {
   const make = chunkFactory(options);
   if (!isReady()) throw notReady();
   return make();
@@ -578,6 +740,9 @@ export function createChunkEncoderSync(
  * ({@link ExactChunkEncoder}); without, each `encode()` call cuts one
  * ({@link ChunkEncoder}). Options typed as plain {@link ChunkEncoderOptions}
  * give either; write them inline or with `satisfies` for the exact type.
+ * With `onChunk` and `chunkSamples` ({@link CallbackChunkEncoderOptions}),
+ * `push()` and `finish()` hand each file to that callback instead
+ * ({@link CallbackChunkEncoder}).
  * Initializes the wasm on first use.
  * @param options Encoder options and the input description.
  * @returns The encoder; release it with `free()`.
@@ -598,6 +763,25 @@ export function createChunkEncoderSync(
  *   enc.free();
  * }
  * ```
+ * @example 5-second files through a callback:
+ * ```ts
+ * const enc = await createChunkEncoder({
+ *   inputRate: 48000,
+ *   sampleRate: 16000,
+ *   bitsPerSample: 16,
+ *   resampleQuality: 'fast',
+ *   chunkSamples: 80000,
+ *   onChunk: (flac) => {
+ *     upload(flac).catch((e) => console.error('upload failed', e));
+ *   },
+ * });
+ * try {
+ *   for (const frame of frames) enc.push(frame); // calls onChunk per full file
+ *   enc.finish(); // calls onChunk for the rest
+ * } finally {
+ *   enc.free();
+ * }
+ * ```
  */
 export async function createChunkEncoder(
   options: ChunkEncoderOptions & { chunkSamples: number },
@@ -606,11 +790,14 @@ export async function createChunkEncoder(
   options: ChunkEncoderOptions & { chunkSamples?: undefined },
 ): Promise<ChunkEncoder>;
 export async function createChunkEncoder(
+  options: CallbackChunkEncoderOptions,
+): Promise<CallbackChunkEncoder>;
+export async function createChunkEncoder(
   options: ChunkEncoderOptions,
 ): Promise<ChunkEncoder | ExactChunkEncoder>;
 export async function createChunkEncoder(
-  options: ChunkEncoderOptions,
-): Promise<ChunkEncoder | ExactChunkEncoder> {
+  options: ChunkEncoderOptions | CallbackChunkEncoderOptions,
+): Promise<ChunkEncoder | ExactChunkEncoder | CallbackChunkEncoder> {
   const make = chunkFactory(options);
   await init();
   return make();
