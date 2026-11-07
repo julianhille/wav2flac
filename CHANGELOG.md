@@ -10,6 +10,17 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-07
+
+### Added
+
+- The chunk encoder takes an optional `onChunk` callback, together with
+  `chunkSamples`. With it, the encoder has no `encode()`: `push()` and
+  `finish()` hand each file to `onChunk`, in order, before they return.
+  `onChunk` must be synchronous; if it throws, the error is logged and the
+  encoder carries on. With `onChunk`, samples pushed after `finish()` are
+  dropped with a warning.
+
 ## [1.1.0] - 2026-11-07
 
 ### Added
@@ -29,12 +40,6 @@ links are collected at the bottom of this file.
   is already loaded.
 - Resamplers and chunk encoders support `using`: leaving the scope frees them.
 - How-to guide: [Cut a live recording into FLAC files](docs/how-to/record-in-chunks.md).
-- The chunk encoder takes an optional `onChunk` callback, together with
-  `chunkSamples`. With it, the encoder has no `encode()`: `push()` and
-  `finish()` hand each file to `onChunk`, in order, before they return.
-  `onChunk` must be synchronous; if it throws, the error is logged and the
-  encoder carries on. With `onChunk`, samples pushed after `finish()` are
-  dropped with a warning.
 
 ## [1.0.0] - 2026-09-30
 
@@ -416,7 +421,8 @@ links are collected at the bottom of this file.
 - Documentation site on Read the Docs (MkDocs): the README plus the raw PCM
   and benchmark guides, at <https://wav2flac.readthedocs.io/>.
 
-[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/julianhille/wav2flac/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/julianhille/wav2flac/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.4...v1.0.0
 [1.0.0-rc.4]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.3...v1.0.0-rc.4
