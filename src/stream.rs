@@ -413,6 +413,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore = "seconds natively, hours under Miri")]
     fn a_huge_push_needs_no_huge_buffers() {
         let input = vec![0.25f32; 16 * PUSH_SLICE + 3];
         let q = ResampleQuality::Fast;

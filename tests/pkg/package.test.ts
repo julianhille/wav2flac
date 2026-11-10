@@ -441,6 +441,8 @@ describe('installed package', () => {
       }
     };
     const small = makeWav({ frames: 4410, seed: 2 });
+    const floats = new Float32Array(4410).map((_, i) => Math.sin(i * 0.01));
+    const chunkOpts = { inputRate: 44100, bitsPerSample: 16, sampleRate: 48000 };
     const round = async (): Promise<void> => {
       for (let i = 0; i < 50; i++) {
         await esm.encode(small);
@@ -450,6 +452,17 @@ describe('installed package', () => {
         const r = esm.encodeStream(small).getReader();
         await r.read();
         await r.cancel();
+        // Stateful objects: finished, freed early, and failed.
+        using rs = await esm.createResampler({ inputRate: 44100, outputRate: 16000 });
+        rs.push(floats);
+        rs.flush();
+        esm.createResamplerSync({ inputRate: 48000, outputRate: 8000 }).free();
+        using ce = esm.createChunkEncoderSync({ ...chunkOpts, chunkSamples: 1000 });
+        ce.encode(floats);
+        ce.finish();
+        using half = await esm.createChunkEncoder({ ...chunkOpts, channels: 2 });
+        half.push(floats.subarray(0, 3));
+        expect(() => half.finish()).toThrow(/inside a sample frame/);
       }
     };
     await round(); // warm up

@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: 0BSD
+# Coverage-guided fuzzing with cargo-fuzz (libFuzzer + AddressSanitizer).
+# Run it with scripts/fuzz.sh; needs a nightly toolchain and cargo-fuzz.
+[package]
+name = "wav2flac-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "0BSD"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own workspace: keeps the fuzz dependencies out of the main crate.
+[workspace]
+
+[dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4"
+wav2flac = { path = ".." }
+
+[[bin]]
+name = "encode"
+path = "fuzz_targets/encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "raw_pcm"
+path = "fuzz_targets/raw_pcm.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chunk_encoder"
+path = "fuzz_targets/chunk_encoder.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "resampler"
+path = "fuzz_targets/resampler.rs"
+test = false
+doc = false
+bench = false

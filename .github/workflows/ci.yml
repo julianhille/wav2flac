@@ -122,6 +122,94 @@ jobs:
       - name: Run Rust tests
         run: cargo test --locked
 
+  # Memory errors and true leaks (memory nothing points to at exit), mostly in
+  # the unsafe code of dependencies: the crate is #![forbid(unsafe_code)] and
+  # links no C. Growth that stays referenced is caught by tests/leaks.rs, which
+  # no sanitizer can see. ASan includes LeakSanitizer, so leak gets no job.
+  sanitizers:
+    name: Rust tests under ${{ matrix.sanitizer }} sanitizer (nightly)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address, memory, thread]
+    env:
+      # The sanitizers check how memory is used, not how much input is tried,
+      # and MSan is about 10x slower; the quick tier is enough.
+      WAV2FLAC_TEST_TIER: quick
+      # The differential tests against flac/ffmpeg add nothing here.
+      WAV2FLAC_REQUIRE_TOOLS: '0'
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain (nightly; sanitizers are unstable; rust-src for build-std)
+        run: rustup toolchain install nightly --profile minimal --component rust-src
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: san-${{ matrix.sanitizer }}
+      - name: Run Rust tests under the sanitizer
+        run: scripts/sanitize.sh ${{ matrix.sanitizer }}
+      - name: Show the log
+        if: failure()
+        run: tail -n 300 target/sanitize/${{ matrix.sanitizer }}.log
+
+  # Random fuzzing: libFuzzer picks a new seed each run and the corpus carries
+  # over between runs, so every run explores further. Short on pushes and PRs,
+  # long nightly.
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [encode, raw_pcm, chunk_encoder, resampler]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain (nightly; cargo-fuzz needs -Zsanitizer)
+        run: rustup toolchain install nightly --profile minimal
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: fuzz
+          workspaces: fuzz
+      - name: cargo-fuzz
+        run: cargo install --locked cargo-fuzz@0.13.2
+      # A new key every run saves the grown corpus; restore-keys loads the
+      # latest one.
+      - name: Corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Fuzz
+        run: scripts/fuzz.sh ${{ matrix.target }} "$SECONDS_PER_TARGET"
+        env:
+          SECONDS_PER_TARGET: ${{ github.event_name == 'schedule' && 2400 || 180 }}
+      - name: Show the log
+        if: failure()
+        run: tail -n 200 fuzz/logs/${{ matrix.target }}.log
+      # Replay with: cargo +nightly fuzz run <target> <file>
+      - name: Upload the crashing input
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          retention-days: 30
+
   js:
     name: JS tests (Node ${{ matrix.node }})
     runs-on: ubuntu-26.04
