@@ -63,9 +63,9 @@ look for leaks:
 - **`tests/unit/leaks.test.ts`** pushes 20,000 chunks (quick tier) through
   `encodeStream`, the resampler and the chunk encoders. The wasm memory must
   stay flat, and the open-session counter is checked after every test.
-- **LeakSanitizer** runs the Rust tests on nightly in CI (the
-  `leak-sanitizer` job). It finds memory that nothing points to at exit,
-  which the counting tests can't see.
+- **LeakSanitizer**, as part of AddressSanitizer, runs the Rust tests on
+  nightly in CI (the `sanitizers` job). It finds memory that nothing points
+  to at exit, which the counting tests can't see.
 
 ## Sanitizers, Miri, valgrind
 
@@ -85,8 +85,10 @@ few minutes the first time. Miri runs only the unit tests by default, because
 it is about a thousand times slower; `MIRI_ARGS="--test leaks"` picks other
 tests.
 
-Only LeakSanitizer runs in CI. The crate is `#![forbid(unsafe_code)]` and
-links no C, so the others mainly check the `unsafe` code inside dependencies.
+CI runs AddressSanitizer (with leak detection), MemorySanitizer and
+ThreadSanitizer on every push and PR, on the quick tier. Miri and valgrind run
+locally only. The crate is `#![forbid(unsafe_code)]` and links no C, so the
+sanitizers mainly check the `unsafe` code inside dependencies.
 
 ## Fuzzing
 
@@ -109,7 +111,13 @@ scripts/fuzz.sh encode 3600     # one target for an hour
 The corpus grows in `fuzz/corpus/<target>`. A crash is saved to
 `fuzz/artifacts/<target>/`; replay it with
 `cargo +nightly fuzz run <target> fuzz/artifacts/<target>/<file>`. Neither
-directory is committed. Fuzzing runs locally only.
+directory is committed.
+
+CI fuzzes every target for 3 minutes on each push and PR, and for 40 minutes
+nightly (the `fuzz` job). libFuzzer picks a new random seed each run, and the
+corpus is cached between runs, so each run starts where the last one stopped.
+When a run finds a crash, the job fails, prints the log, and uploads the
+crashing input as the `fuzz-crash-<target>` artifact.
 
 ## Before a commit
 

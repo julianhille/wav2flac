@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: 0BSD
 # Runs the Rust tests under every sanitizer Rust supports on x86_64 Linux,
-# under Miri, and under valgrind. Local use; CI runs only LeakSanitizer.
+# under Miri, and under valgrind. CI runs address (which includes leak
+# detection), memory and thread (the sanitizers job).
 #
 #   scripts/sanitize.sh                  # all: address leak memory thread miri valgrind
 #   scripts/sanitize.sh address thread  # some
