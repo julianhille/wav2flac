@@ -317,6 +317,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "seconds natively, hours under Miri")]
     fn output_stays_on_time_at_any_ratio() {
         let qualities = [
             ResampleQuality::Fast,

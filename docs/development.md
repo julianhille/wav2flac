@@ -81,9 +81,9 @@ scripts/sanitize.sh address thread   # some of them
 Each run writes a full log to `target/sanitize/<name>.log` and builds into its
 own `target/san-<name>`, so the runs don't rebuild each other's artifacts.
 MemorySanitizer and ThreadSanitizer build an instrumented std, which takes a
-few minutes the first time. Miri runs only the unit tests by default, because
-it is about a thousand times slower; `MIRI_ARGS="--test leaks"` picks other
-tests.
+few minutes the first time. Miri runs only the unit tests by default, and skips
+the three that take seconds natively (`#[cfg_attr(miri, ignore)]`). Even so it
+takes over an hour. `MIRI_ARGS="--test leaks"` picks other tests.
 
 CI runs AddressSanitizer (with leak detection), MemorySanitizer and
 ThreadSanitizer on every push and PR, on the quick tier. Miri and valgrind run

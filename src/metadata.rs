@@ -378,6 +378,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "seconds natively, hours under Miri")]
     fn seek_points_match_per_target_selection() {
         let mut x = 0x2545_F491_4F6C_DD1Du64;
         let mut rnd = |n: u64| {
