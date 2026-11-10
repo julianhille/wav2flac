@@ -36,4 +36,5 @@ nav:
       - Record in chunks: how-to/record-in-chunks.md
   - API reference: reference/api/index.md
   - Benchmark: benchmark.md
+  - Development: development.md
   - Third-party components: third-party.md
