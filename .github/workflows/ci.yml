@@ -122,6 +122,34 @@ jobs:
       - name: Run Rust tests
         run: cargo test --locked
 
+  # A safety net for true leaks (memory nothing points to at exit). Growth
+  # that stays referenced is caught by tests/leaks.rs, which LSan cannot see.
+  # ASan adds little while the crate is #![forbid(unsafe_code)] and links no C.
+  leak-sanitizer:
+    name: Rust tests under LeakSanitizer (nightly)
+    runs-on: ubuntu-26.04
+    timeout-minutes: ${{ (github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')) && 180 || 30 }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain (nightly; sanitizers are unstable)
+        run: rustup toolchain install nightly --profile minimal
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: lsan
+      - name: Run Rust tests with LeakSanitizer
+        # An explicit --target keeps RUSTFLAGS off build scripts and proc macros.
+        run: cargo +nightly test --locked --lib --tests --target x86_64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: -Zsanitizer=leak
+          # The differential tests against flac/ffmpeg add no leak coverage.
+          WAV2FLAC_REQUIRE_TOOLS: '0'
+
   js:
     name: JS tests (Node ${{ matrix.node }})
     runs-on: ubuntu-26.04
