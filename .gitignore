@@ -1,6 +1,13 @@
 # Rust
 /target/
 
+# cargo-fuzz (scripts/fuzz.sh)
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
+/fuzz/Cargo.lock
+
 # JS / build output
 /node_modules/
 /pkg/
