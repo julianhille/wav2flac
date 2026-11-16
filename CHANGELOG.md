@@ -10,6 +10,11 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Changed
+
+- wasm-bindgen 0.2.130 (was 0.2.129), the crate and the CLI the build
+  checks it against.
+
 ### Fixed
 
 - `probe()` and the worker encoder's `probe()` no longer hand the header
