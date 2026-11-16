@@ -22,6 +22,8 @@ links are collected at the bottom of this file.
   are reached: a crafted file with many empty tags after the 1024th could
   keep the encoder busy for minutes. Once a limit is hit, no further tags
   are read, and LIST chunks after the data are no longer scanned.
+- A WAV whose block align is not a multiple of its channel count is now
+  rejected with `InvalidWav` instead of being encoded as noise.
 
 ## [1.2.0] - 2026-11-07
 

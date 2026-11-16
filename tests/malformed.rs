@@ -77,6 +77,11 @@ fn bad_fmt_values() {
     let mut f = WavBuilder::pcm(1, 8000, 16).build(&s);
     f[32] = 3; // block_align
     assert_eq!(code(&f), ErrorCode::InvalidWav);
+    // Block align not a multiple of the channel count (#52).
+    let mut f = WavBuilder::pcm(2, 8000, 16).build(&s);
+    f[32] = 5; // block_align
+    f[28..32].copy_from_slice(&(8000u32 * 5).to_le_bytes()); // byte rate
+    assert_eq!(code(&f), ErrorCode::InvalidWav);
     // fmt chunk too short
     let f = fixup_riff(
         b"RIFF\0\0\0\0WAVEfmt \x0e\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0data\0\0\0\0"
