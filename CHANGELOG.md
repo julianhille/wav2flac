@@ -34,6 +34,8 @@ links are collected at the bottom of this file.
   fails.
 - The resampler's `'f32'` output is clamped to -1..1, as the `'s16'` output
   is. Full-scale input could make it overshoot.
+- After a wasm trap, freeing the encoder no longer throws and masks the
+  original error.
 
 ## [1.2.0] - 2026-11-07
 

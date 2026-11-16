@@ -167,12 +167,18 @@ export class Session {
     };
   }
 
-  /** Releases the wasm memory; idempotent. */
+  /** Releases the wasm memory; idempotent and never throws. */
   free(): void {
-    if (this.#enc === undefined) return;
-    this.#enc.free();
+    const enc = this.#enc;
+    if (enc === undefined) return;
     this.#enc = undefined;
     live--;
+    try {
+      enc.free();
+    } catch {
+      // After a wasm trap the encoder is still borrowed and free() throws;
+      // swallow it so a `finally` does not mask the original error.
+    }
   }
 }
 
