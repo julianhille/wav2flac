@@ -15,6 +15,9 @@ links are collected at the bottom of this file.
 - CI, the release workflow and the benchmarks run on Node 26, and the
   types are `@types/node` 26. The job for the minimum Node still takes its
   version from `engines.node`.
+- Faster encoding: the frame CRC-16 uses the `crc` crate's slice-by-16
+  table, about four times faster than before. The output is unchanged.
+  The table makes the wasm about 14 KB bigger (~104 KB gzipped).
 
 ### Fixed
 

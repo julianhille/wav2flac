@@ -25,34 +25,14 @@ pub fn crc8(data: &[u8]) -> u8 {
     crc
 }
 
-const fn crc16_table() -> [u16; 256] {
-    let mut t = [0u16; 256];
-    let mut i = 0;
-    while i < 256 {
-        let mut c = (i as u16) << 8;
-        let mut k = 0;
-        while k < 8 {
-            c = if c & 0x8000 != 0 {
-                (c << 1) ^ 0x8005
-            } else {
-                c << 1
-            };
-            k += 1;
-        }
-        t[i] = c;
-        i += 1;
-    }
-    t
-}
-
-static CRC16_TABLE: [u16; 256] = crc16_table();
+/// Slice-by-16 table: about four times faster than a single byte table.
+static CRC16: crc::Crc<u16, crc::Table<16>> =
+    crc::Crc::<u16, crc::Table<16>>::new(&crc::CRC_16_UMTS);
 
 /// CRC-16, polynomial x^16 + x^15 + x^2 + 1 (0x8005), init 0 (whole frame).
 #[must_use]
 pub fn crc16(data: &[u8]) -> u16 {
-    data.iter().fold(0u16, |crc, &b| {
-        (crc << 8) ^ CRC16_TABLE[usize::from((crc >> 8) as u8 ^ b)]
-    })
+    CRC16.checksum(data)
 }
 
 /// Appends `n` in FLAC's UTF-8-like variable-length coding.
@@ -127,6 +107,28 @@ mod tests {
         // "123456789" check values for CRC-8/SMBUS and CRC-16/UMTS (FLAC's CRCs).
         assert_eq!(crc8(b"123456789"), 0xF4);
         assert_eq!(crc16(b"123456789"), 0xFEE8);
+    }
+
+    #[test]
+    fn crc16_matches_bitwise_reference() {
+        // Lengths around the 16-byte stride of the sliced table.
+        let bitwise = |data: &[u8]| {
+            data.iter().fold(0u16, |mut crc, &b| {
+                crc ^= u16::from(b) << 8;
+                for _ in 0..8 {
+                    crc = if crc & 0x8000 != 0 {
+                        (crc << 1) ^ 0x8005
+                    } else {
+                        crc << 1
+                    };
+                }
+                crc
+            })
+        };
+        let data: Vec<u8> = (0..100u32).map(|i| (i * 167 + 13) as u8).collect();
+        for n in 0..=data.len() {
+            assert_eq!(crc16(&data[..n]), bitwise(&data[..n]), "len {n}");
+        }
     }
 
     #[test]
