@@ -36,6 +36,9 @@ links are collected at the bottom of this file.
   is. Full-scale input could make it overshoot.
 - After a wasm trap, freeing the encoder no longer throws and masks the
   original error.
+- The release workflow publishes a release to npm as `latest` only when it is
+  newer than the current `latest`. A backport, such as 1.1.1 after 1.2.0, goes
+  to its line's tag (`v1.1-latest`) instead of moving `latest` back.
 
 ## [1.2.0] - 2026-11-07
 

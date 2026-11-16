@@ -13,6 +13,12 @@
 // dated, non-empty section with a link for it. The section body is written to
 // NOTES (the GitHub release text).
 //
+// `node scripts/release.ts dist-tag vX.Y.Z [LATEST]` prints the npm dist-tag
+// the release workflow publishes the tag under, given the version that npm's
+// `latest` points at now (none for a first publish): `next` for a
+// prerelease, `latest` for a release newer than LATEST, and otherwise a line
+// tag such as `v1.1-latest`, so a backport does not move `latest` back.
+//
 // `node scripts/release.ts lint` checks the structure of CHANGELOG.md alone.
 // CI runs it on every push: CHANGELOG.md merges with `merge=union`
 // (.gitattributes), which never conflicts but can duplicate or reorder the
@@ -184,6 +190,23 @@ function check(tag: string, notes?: string): void {
 }
 
 /**
+ * The npm dist-tag to publish a release under.
+ * @param tag `vX.Y.Z[-pre]`
+ * @param latest the version npm's `latest` points at, or '' if none
+ */
+function distTag(tag: string, latest = ''): void {
+  if (!tag.startsWith('v') || !SEMVER.test(tag.slice(1))) fail(`${tag} is not vX.Y.Z[-pre]`);
+  const v = tag.slice(1);
+  if (latest !== '' && !SEMVER.test(latest)) fail(`${latest} is not X.Y.Z[-pre]`);
+  let out = 'latest';
+  if (v.includes('-')) out = 'next';
+  else if (latest !== '' && compareVersions(v, latest) <= 0) {
+    out = `v${v.split('.').slice(0, 2).join('.')}-latest`;
+  }
+  console.log(out);
+}
+
+/**
  * Bumps every version, dates the changelog and commits.
  * @param v the new version
  */
@@ -293,10 +316,12 @@ const [cmd, arg, notes] = process.argv.slice(2);
 try {
   if (cmd === 'check' && arg !== undefined) check(arg, notes);
   else if (cmd === 'prepare' && arg !== undefined) prepare(arg);
+  else if (cmd === 'dist-tag' && arg !== undefined) distTag(arg, notes);
   else if (cmd === 'lint' && arg === undefined) lint(read('CHANGELOG.md'));
   else {
     fail(
-      'usage: release.ts prepare X.Y.Z | release.ts check vX.Y.Z [NOTES] | ' + 'release.ts lint',
+      'usage: release.ts prepare X.Y.Z | release.ts check vX.Y.Z [NOTES] | ' +
+        'release.ts dist-tag vX.Y.Z [LATEST] | release.ts lint',
     );
   }
 } catch (e) {
