@@ -134,6 +134,14 @@ describe('worker protocol', () => {
     expect(toHost.some((m) => m.t === 'end')).toBe(true);
   });
 
+  it('prefetches the next input chunk while encoding the current one', async () => {
+    const { w, toClient } = pair();
+    await collect(w.encodeStream(streamOf(wav, 64 * 1024)));
+    const t = toClient.map((m) => m.t);
+    // The second chunk is requested before the first one's output is sent.
+    expect(t.indexOf('need', t.indexOf('need') + 1)).toBeLessThan(t.indexOf('out'));
+  });
+
   it('streams output with a bounded window', async () => {
     const { w, toClient } = pair();
     const long = makeWav({ frames: 44100 * 6, signal: 'noise' });

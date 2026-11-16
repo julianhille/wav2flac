@@ -3,7 +3,8 @@
  * Message protocol between the worker client and the worker host.
  *
  * Input: buffers are sent with the job; streams are pulled chunk by chunk
- * (`need` → `chunk` | `end`), so the worker never buffers more than one chunk.
+ * (`need` → `chunk` | `end`). The worker requests one chunk ahead, so it holds
+ * at most the chunk being encoded plus one prefetched chunk.
  * Output (stream mode): at most `window` unacknowledged `out` messages are in
  * flight; the client acks each chunk its consumer takes.
  * @module

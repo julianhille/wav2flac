@@ -58,7 +58,8 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
   };
 
   /**
-   * A stream that pulls input chunks from the client on demand.
+   * A stream that pulls input chunks from the client, one chunk ahead, so the
+   * next chunk is on its way while the engine encodes the current one.
    * @param id Job id.
    * @param job Job state.
    * @returns The input stream.
@@ -75,7 +76,7 @@ export function serve(port: Port<ToWorker, FromWorker>): void {
           else c.enqueue(data);
         },
       },
-      { highWaterMark: 0 },
+      { highWaterMark: 1 },
     );
 
   /**
