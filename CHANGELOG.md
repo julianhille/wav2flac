@@ -22,6 +22,8 @@ links are collected at the bottom of this file.
   current one, instead of waiting a full round trip per chunk.
 - The encoder keeps its block buffer between pushes instead of allocating a
   new one each time.
+- Encoding 16- and 24-bit output is slightly faster: the MD5 input is packed
+  without a per-sample slice copy.
 
 ### Fixed
 
