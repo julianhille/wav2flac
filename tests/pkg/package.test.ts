@@ -259,6 +259,17 @@ describe('installed package', () => {
     }
   });
 
+  it('ships source maps without embedded sources', () => {
+    for (const f of BUNDLES) {
+      const map = JSON.parse(readFileSync(join(installed, 'pkg', `${f}.map`), 'utf8')) as {
+        sources: string[];
+        sourcesContent?: unknown;
+      };
+      expect(map.sources.length, f).toBeGreaterThan(0);
+      expect(map.sourcesContent, f).toBeUndefined();
+    }
+  });
+
   it('ships smaller minified bundles that load the minified worker', () => {
     for (const f of BUNDLES.filter((b) => b.includes('.min.'))) {
       const size = (g: string): number => readFileSync(join(installed, 'pkg', g)).length;
