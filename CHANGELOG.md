@@ -10,6 +10,11 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Changed
+
+- rubato 5.1.0 (was 5.0.1). Dev dependencies: Playwright 1.65.1, Prettier
+  3.10.1.
+
 ### Fixed
 
 - `probe()` and the worker encoder's `probe()` no longer hand the header
