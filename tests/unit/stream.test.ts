@@ -919,6 +919,23 @@ describe('chunk encoder with onChunk', () => {
     expect(got).toEqual(returned(x, o, x.length));
   });
 
+  it('fails when onChunk detaches the input of a multi-slice push', () => {
+    const x = new Float32Array((1 << 18) + 1000); // 2 wasm slices
+    const onChunk = vi.fn<(f: Bytes) => void>(() => {
+      if (x.length > 0) structuredClone(x.buffer, { transfer: [x.buffer] });
+    });
+    const enc = createChunkEncoderSync({ ...o16, chunkSamples: 1000, onChunk });
+    try {
+      expect(() => enc.push(x)).toThrow(state);
+      expect(() => enc.push(new Float32Array(100))).toThrow(state);
+      expect(() => enc.finish()).toThrow(state);
+      expect(onChunk).toHaveBeenCalledTimes(262); // only the first slice's files
+    } finally {
+      enc.free();
+    }
+    expect(liveSessions()).toBe(0);
+  });
+
   it('works from the async factory', async () => {
     const onChunk = vi.fn<(f: Bytes) => void>();
     const enc = await createChunkEncoder({ ...o16, onChunk });
