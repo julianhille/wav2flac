@@ -86,8 +86,9 @@ the three that take seconds natively (`#[cfg_attr(miri, ignore)]`). Even so it
 takes over an hour. `MIRI_ARGS="--test leaks"` picks other tests.
 
 CI runs AddressSanitizer (with leak detection), MemorySanitizer and
-ThreadSanitizer on every push and PR, on the quick tier. Miri and valgrind run
-locally only. The crate is `#![forbid(unsafe_code)]` and links no C, so the
+ThreadSanitizer on every push and PR, on the quick tier, with a dated nightly
+that `RUSTUP_TOOLCHAIN` pins in `ci.yml` (the scripts use it too when set; bump
+it by hand). Miri and valgrind run locally only. The crate is `#![forbid(unsafe_code)]` and links no C, so the
 sanitizers mainly check the `unsafe` code inside dependencies.
 
 ## Fuzzing
@@ -117,7 +118,8 @@ CI fuzzes every target for 3 minutes on each push and PR, and for 40 minutes
 nightly (the `fuzz` job). libFuzzer picks a new random seed each run, and the
 corpus is cached between runs, so each run starts where the last one stopped.
 When a run finds a crash, the job fails, prints the log, and uploads the
-crashing input as the `fuzz-crash-<target>` artifact.
+crashing input as the `fuzz-crash-<target>` artifact. On a release tag a crash does not
+block the release: the job is allowed to fail there.
 
 ## Before a commit
 
