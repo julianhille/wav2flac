@@ -39,7 +39,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 26
       - name: Versions and changelog match the tag
         run: node scripts/release.ts check "$GITHUB_REF_NAME" notes.md
       - name: Upload the release notes
@@ -71,7 +71,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 26
       - name: Toolchain (rust-toolchain.toml)
         run: rustup toolchain install
       - name: wasm-bindgen + binaryen
@@ -119,7 +119,7 @@ jobs:
       - name: Set up Node for the npm registry
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 26
           registry-url: https://registry.npmjs.org
       # Publishing with OIDC (no token secret) needs npm ≥ 11.5.1, which not
       # every Node 24 release bundles.
