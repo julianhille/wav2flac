@@ -28,6 +28,10 @@ links are collected at the bottom of this file.
   `scripts/fuzz.sh` fails on a stale lock instead of resolving new versions,
   so a crash found in CI reproduces with the same dependencies.
   `scripts/release.ts prepare` bumps the version in it too.
+- With `onChunk`, a `push()` bigger than 1 MiB whose `onChunk` transfers
+  (detaches) the input no longer throws a raw `TypeError` and leaves the rest
+  of that push silently missing: it throws `ENCODER_STATE` and the encoder
+  fails.
 
 ## [1.2.0] - 2026-11-07
 

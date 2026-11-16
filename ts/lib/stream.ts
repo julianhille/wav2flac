@@ -228,7 +228,8 @@ export interface CallbackChunkEncoder {
    * @param input The samples.
    * @throws {TypeError} If `input` is not a `Float32Array`.
    * @throws {Wav2FlacError} `ENCODER_STATE` after a failed `push()`, or
-   * from inside `onChunk`.
+   * from inside `onChunk`, or if `onChunk` transfers (detaches) `input`
+   * while more of it is left; the encoder has then failed.
    */
   push(input: Float32Array): void;
   /**
@@ -638,6 +639,8 @@ class Callback extends ChunkBase implements CallbackChunkEncoder {
   #busy = false;
   /** Whether `finish()` was called. */
   #finished = false;
+  /** Whether a `push()` failed part way, losing samples. */
+  #failed = false;
 
   /**
    * @param enc The wasm encoder, now owned by this object.
@@ -648,10 +651,16 @@ class Callback extends ChunkBase implements CallbackChunkEncoder {
     this.#onChunk = onChunk;
   }
 
-  /** Throws `ENCODER_STATE` inside `onChunk`. */
-  #check(): void {
+  /**
+   * Throws `ENCODER_STATE` inside `onChunk` or, with `live`, after a failed `push()`.
+   * @param live Whether the call needs a working encoder.
+   */
+  #check(live: boolean): void {
     if (this.#busy) {
       throw new Wav2FlacError('ENCODER_STATE', 'chunk encoder called from inside onChunk');
+    }
+    if (live && this.#failed) {
+      throw new Wav2FlacError('ENCODER_STATE', 'chunk encoder failed earlier and cannot be reused');
     }
   }
 
@@ -680,7 +689,7 @@ class Callback extends ChunkBase implements CallbackChunkEncoder {
   }
 
   override push(input: Float32Array): void {
-    this.#check();
+    this.#check(true);
     checkSamples(input);
     if (this.#finished) {
       console.warn('wav2flac: push() after finish(); samples dropped');
@@ -690,19 +699,25 @@ class Callback extends ChunkBase implements CallbackChunkEncoder {
     // push still reaches the wasm encoder, so its state errors still show.
     const n = input.length; // read once: onChunk may detach the input
     let i = 0;
-    do this.#deliver(this.cut(input.subarray(i, i + PUSH_FLOATS), false));
-    while ((i += PUSH_FLOATS) < n);
+    do {
+      if (isDetached(input)) {
+        // The rest of this push is lost: fail rather than leave a gap.
+        this.#failed = true;
+        throw new Wav2FlacError('ENCODER_STATE', 'onChunk transferred (detached) the samples');
+      }
+      this.#deliver(this.cut(input.subarray(i, i + PUSH_FLOATS), false));
+    } while ((i += PUSH_FLOATS) < n);
   }
 
   finish(): void {
-    this.#check();
+    this.#check(true);
     // Set first: even a failed finish() ends the input.
     this.#finished = true;
     this.#deliver(this.cut(undefined, true));
   }
 
   override free(): void {
-    this.#check();
+    this.#check(false);
     super.free();
   }
 }
