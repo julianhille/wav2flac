@@ -20,6 +20,8 @@ links are collected at the bottom of this file.
   The table makes the wasm about 14 KB bigger (~104 KB gzipped).
 - The worker prefetches the next chunk of a stream input while it encodes the
   current one, instead of waiting a full round trip per chunk.
+- The encoder keeps its block buffer between pushes instead of allocating a
+  new one each time.
 
 ### Fixed
 
