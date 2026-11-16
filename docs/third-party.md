@@ -37,9 +37,9 @@ section, and in the package as `pkg/THIRD_PARTY_LICENSES.txt`
 | [wasm-bindgen](https://crates.io/crates/wasm-bindgen/0.2.129) | 0.2.129 | [MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)<br>[LICENSE-APACHE](https://docs.rs/crate/wasm-bindgen/0.2.129/source/LICENSE-APACHE)<br>[LICENSE-MIT](https://docs.rs/crate/wasm-bindgen/0.2.129/source/LICENSE-MIT) | [repository](https://github.com/wasm-bindgen/wasm-bindgen) |
 | [wasm-bindgen-shared](https://crates.io/crates/wasm-bindgen-shared/0.2.129) | 0.2.129 | [MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)<br>[LICENSE-APACHE](https://docs.rs/crate/wasm-bindgen-shared/0.2.129/source/LICENSE-APACHE)<br>[LICENSE-MIT](https://docs.rs/crate/wasm-bindgen-shared/0.2.129/source/LICENSE-MIT) | [repository](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared) |
 | [windowfunctions](https://crates.io/crates/windowfunctions/0.1.1) | 0.1.1 | [MIT](https://spdx.org/licenses/MIT.html)<br>[LICENSE.txt](https://docs.rs/crate/windowfunctions/0.1.1/source/LICENSE.txt) | [repository](https://github.com/HEnquist/windowfunctions-rs) |
-| Rust standard library: core, alloc, std | 1.99.0 | ([MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)) AND [Unicode-3.0](https://spdx.org/licenses/Unicode-3.0.html) | [repository](https://github.com/rust-lang/rust) |
-| Rust standard library: dlmalloc | 1.99.0 | [MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) | [repository](https://github.com/alexcrichton/dlmalloc-rs) |
-| Rust standard library: compiler_builtins, libm | 1.99.0 | [MIT](https://spdx.org/licenses/MIT.html) AND [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) WITH [LLVM-exception](https://spdx.org/licenses/LLVM-exception.html) AND ([MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)) | [repository](https://github.com/rust-lang/compiler-builtins) |
+| Rust standard library: core, alloc, std | 1.100.0 | ([MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)) AND [Unicode-3.0](https://spdx.org/licenses/Unicode-3.0.html) | [repository](https://github.com/rust-lang/rust) |
+| Rust standard library: dlmalloc | 1.100.0 | [MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) | [repository](https://github.com/alexcrichton/dlmalloc-rs) |
+| Rust standard library: compiler_builtins, libm | 1.100.0 | [MIT](https://spdx.org/licenses/MIT.html) AND [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) WITH [LLVM-exception](https://spdx.org/licenses/LLVM-exception.html) AND ([MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html)) | [repository](https://github.com/rust-lang/compiler-builtins) |
 
 ## npm dependencies
 
@@ -51,7 +51,7 @@ These build the package. They are not installed with it.
 
 | Tool | Version | License |
 |---|---|---|
-| [Rust](https://www.rust-lang.org/) (rustc, cargo) | 1.99.0 | [MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) |
+| [Rust](https://www.rust-lang.org/) (rustc, cargo) | 1.100.0 | [MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) |
 | [wasm-bindgen-cli](https://github.com/wasm-bindgen/wasm-bindgen) | 0.2.129 | [MIT](https://spdx.org/licenses/MIT.html) OR [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) |
 | [binaryen](https://github.com/WebAssembly/binaryen) (wasm-opt) | 126 | [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) |
 | [esbuild](https://esbuild.github.io/) | 0.28.2 | [MIT](https://spdx.org/licenses/MIT.html) |

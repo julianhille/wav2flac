@@ -10,6 +10,11 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Changed
+
+- The wasm is built with Rust 1.100.0 (was 1.99.0). The license texts of
+  the standard library parts it links are the same as in 1.99.0.
+
 ### Fixed
 
 - `probe()` and the worker encoder's `probe()` no longer hand the header
@@ -46,6 +51,8 @@ links are collected at the bottom of this file.
   without a per-sample slice copy.
 - The source maps no longer embed the TypeScript sources (`sourcesContent`),
   which makes the package about 1 MB smaller.
+- wasm-bindgen 0.2.130 (was 0.2.129), the crate and the CLI the build
+  checks it against.
 
 ### Fixed
 
