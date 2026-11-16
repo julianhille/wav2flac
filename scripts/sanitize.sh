@@ -46,15 +46,17 @@ miri() {
   CARGO_TARGET_DIR=target/san-miri cargo "+$nightly" miri test --locked ${MIRI_ARGS:---lib}
 }
 
+# Runs in an `if`, so errexit is off: collect the failures by hand.
 valgrind_run() {
-  local bins bin
+  local bins bin rc=0
   bins=$(CARGO_TARGET_DIR=target/san-valgrind cargo test --locked --lib --tests --no-run \
-    --message-format=json | sed -n 's/.*"executable":"\([^"]*\)".*/\1/p')
+    --message-format=json | sed -n 's/.*"executable":"\([^"]*\)".*/\1/p') || return
   for bin in $bins; do
     echo "» valgrind $bin"
     valgrind --quiet --error-exitcode=1 --leak-check=full --errors-for-leak-kinds=definite \
-      "$bin" --test-threads=4
+      "$bin" --test-threads=4 || rc=1
   done
+  return "$rc"
 }
 
 failed=()
