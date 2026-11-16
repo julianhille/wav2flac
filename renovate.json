@@ -16,6 +16,14 @@
       "description": "These dev-dependencies may need a newer rustc than the MSRV in Cargo.toml.",
       "matchDepNames": ["proptest", "sha2"],
       "groupName": "MSRV-sensitive dev-dependencies"
+    },
+    {
+      "description": "fuzz/ is its own workspace with its own lock, which Renovate does not refresh for a root Cargo.toml change; the fuzz job builds with --locked.",
+      "matchManagers": ["cargo"],
+      "matchFileNames": ["Cargo.toml"],
+      "prBodyNotes": [
+        "Fuzz CI fails until `fuzz/Cargo.lock` follows: run `cd fuzz && cargo update -p wav2flac` and commit it."
+      ]
     }
   ]
 }
