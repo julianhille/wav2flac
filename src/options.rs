@@ -187,6 +187,12 @@ impl Options {
             for (k, _) in overrides {
                 validate_tag_key(k)?;
             }
+            // The overrides alone are a lower bound of the `VORBIS_COMMENT`
+            // block: fail now rather than after all the input was encoded.
+            let len = crate::encoder::vorbis_len(&crate::encoder::comments(self, &[]));
+            if len > crate::metadata::MAX_BLOCK_LEN {
+                return err(ErrorCode::InvalidOptions, crate::metadata::TOO_LONG);
+            }
         }
         Ok(())
     }
@@ -265,6 +271,10 @@ mod tests {
             },
             Options {
                 tags: Tags::FromWav(vec![("A=B".into(), "x".into())]),
+                ..Options::default()
+            },
+            Options {
+                tags: Tags::FromWav(vec![("A".into(), "x".repeat(1 << 24))]),
                 ..Options::default()
             },
         ];
