@@ -8,7 +8,8 @@
 #   scripts/sanitize.sh address thread  # some
 #
 # Needs a nightly toolchain with rust-src and miri (rustup component add
-# --toolchain nightly rust-src miri) and valgrind. Logs go to
+# --toolchain nightly rust-src miri) and valgrind. RUSTUP_TOOLCHAIN picks
+# another nightly (CI pins a dated one). Logs go to
 # target/sanitize/<name>.log; the exit status is non-zero if any run failed.
 # WAV2FLAC_TEST_TIER scales the tests as usual (quick by default).
 #
@@ -26,6 +27,7 @@ logs=target/sanitize
 mkdir -p "$logs"
 # Differential tests against flac/ffmpeg add nothing here and may be missing.
 export WAV2FLAC_REQUIRE_TOOLS=0
+nightly=${RUSTUP_TOOLCHAIN:-nightly}
 
 # cargo test under a sanitizer. An explicit --target keeps RUSTFLAGS off build
 # scripts and proc macros. MSan and TSan need an instrumented std (build-std).
@@ -36,12 +38,12 @@ san() {
     thread) std=(-Zbuild-std) ;;
   esac
   RUSTFLAGS="$flags" RUSTDOCFLAGS="$flags" CARGO_TARGET_DIR="target/san-$name" \
-    cargo +nightly test "${std[@]}" --locked --lib --tests --target "$host"
+    cargo "+$nightly" test "${std[@]}" --locked --lib --tests --target "$host"
 }
 
 miri() {
   # shellcheck disable=SC2086 # MIRI_ARGS is a list of words
-  CARGO_TARGET_DIR=target/san-miri cargo +nightly miri test --locked ${MIRI_ARGS:---lib}
+  CARGO_TARGET_DIR=target/san-miri cargo "+$nightly" miri test --locked ${MIRI_ARGS:---lib}
 }
 
 valgrind_run() {

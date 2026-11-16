@@ -6,6 +6,7 @@
 #   scripts/fuzz.sh encode 3600     # one target for an hour
 #
 # Needs a nightly toolchain and cargo-fuzz (cargo install cargo-fuzz).
+# RUSTUP_TOOLCHAIN picks another nightly (CI pins a dated one).
 # The corpus grows in fuzz/corpus/<target>; a crash is saved in
 # fuzz/artifacts/<target>/ and replays with
 #   cargo +nightly fuzz run <target> fuzz/artifacts/<target>/<file>
@@ -17,6 +18,7 @@ cd "$(dirname "$0")/../fuzz"
 targets=(encode raw_pcm chunk_encoder resampler)
 [[ $# -ge 1 ]] && targets=("$1")
 seconds=${2:-300}
+nightly=${RUSTUP_TOOLCHAIN:-nightly}
 
 mkdir -p logs
 failed=()
@@ -24,7 +26,7 @@ for t in "${targets[@]}"; do
   echo "» $t for $seconds s (log: fuzz/logs/$t.log)"
   # -timeout: one input taking 10 s is a hang. -rss_limit_mb: the inputs are
   # small, so needing more than 2 GiB is a bug too.
-  if cargo +nightly fuzz run "$t" -- -max_total_time="$seconds" -dict=wav.dict \
+  if cargo "+$nightly" fuzz run "$t" -- -max_total_time="$seconds" -dict=wav.dict \
     -timeout=10 -rss_limit_mb=2048 -print_final_stats=1 >"logs/$t.log" 2>&1; then
     grep -E '^stat::(number_of_executed_units|new_units_added)' "logs/$t.log" | sed 's/^/  /'
   else
