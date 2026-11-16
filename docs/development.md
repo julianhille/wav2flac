@@ -88,7 +88,8 @@ takes over an hour. `MIRI_ARGS="--test leaks"` picks other tests.
 CI runs AddressSanitizer (with leak detection), MemorySanitizer and
 ThreadSanitizer on every push and PR, on the quick tier, with a dated nightly
 that `RUSTUP_TOOLCHAIN` pins in `ci.yml` (the scripts use it too when set; bump
-it by hand). Miri and valgrind run locally only. The crate is `#![forbid(unsafe_code)]` and links no C, so the
+it by hand). Miri runs nightly and on manual runs (the `miri` job); valgrind
+runs locally only. The crate is `#![forbid(unsafe_code)]` and links no C, so the
 sanitizers mainly check the `unsafe` code inside dependencies.
 
 ## Fuzzing
