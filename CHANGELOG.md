@@ -39,6 +39,8 @@ links are collected at the bottom of this file.
 - The release workflow publishes a release to npm as `latest` only when it is
   newer than the current `latest`. A backport, such as 1.1.1 after 1.2.0, goes
   to its line's tag (`v1.1-latest`) instead of moving `latest` back.
+- The chunk encoder rejects tag overrides too large for a FLAC metadata
+  block when it is created, not when it writes the first file.
 
 ## [1.2.0] - 2026-11-07
 

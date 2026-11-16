@@ -164,12 +164,6 @@ impl Encoder {
     /// `InvalidOptions` for invalid options.
     pub fn new(opts: Options) -> Result<Self> {
         opts.validate()?;
-        // The overrides alone are a lower bound of the `VORBIS_COMMENT` block:
-        // fail now rather than at `finish`, after all the input was encoded.
-        let overrides = vorbis_len(&comments(&opts, &[]));
-        if overrides > metadata::MAX_BLOCK_LEN {
-            return err(ErrorCode::InvalidOptions, metadata::TOO_LONG);
-        }
         Ok(Self {
             opts,
             state: State::Header,
@@ -636,7 +630,7 @@ impl Encoder {
 }
 
 /// The WAV tags with the overrides applied, without the channel-mask field.
-fn comments(opts: &Options, wav_tags: &[(String, String)]) -> Vec<(String, String)> {
+pub(crate) fn comments(opts: &Options, wav_tags: &[(String, String)]) -> Vec<(String, String)> {
     let mut comments: Vec<(String, String)> = match &opts.tags {
         Tags::Disabled => Vec::new(),
         Tags::FromWav(overrides) => {
@@ -655,7 +649,7 @@ fn comments(opts: &Options, wav_tags: &[(String, String)]) -> Vec<(String, Strin
 }
 
 /// Size of the `VORBIS_COMMENT` body for `comments`.
-fn vorbis_len(comments: &[(String, String)]) -> usize {
+pub(crate) fn vorbis_len(comments: &[(String, String)]) -> usize {
     let entries: usize = comments
         .iter()
         .map(|(k, v)| 4 + k.len() + 1 + v.len())

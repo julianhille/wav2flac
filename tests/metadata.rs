@@ -298,6 +298,15 @@ fn oversized_tags_fail_early() {
         let e = Encoder::new(o).err().expect("rejected before any input");
         assert_eq!(e.code(), ErrorCode::InvalidOptions, "{mode:?}");
     }
+    // The chunk encoder (buffered only) rejects them at construction too.
+    let o = Options {
+        bits_per_sample: Some(16),
+        ..with_value("v".repeat(MAX - fixed + 1))
+    };
+    let e = wav2flac::ChunkEncoder::new(48000, 1, o, None)
+        .err()
+        .expect("rejected before any input");
+    assert_eq!(e.code(), ErrorCode::InvalidOptions);
     // Removals and disabled tags do not count.
     Encoder::new(Options {
         tags: Tags::FromWav(vec![("COMMENT".into(), String::new())]),
