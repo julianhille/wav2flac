@@ -27,6 +27,7 @@ links are collected at the bottom of this file.
 - Fuzz builds are locked: `fuzz/Cargo.lock` is committed and
   `scripts/fuzz.sh` fails on a stale lock instead of resolving new versions,
   so a crash found in CI reproduces with the same dependencies.
+  `scripts/release.ts prepare` bumps the version in it too.
 
 ## [1.2.0] - 2026-11-07
 
