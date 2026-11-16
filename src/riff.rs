@@ -429,6 +429,12 @@ fn parse_fmt(raw: &[u8]) -> Result<FmtInfo> {
     let channels = le_u16(raw, 2);
     let block_align = le_u16(raw, 12);
     let bytes_per_sample = block_align.checked_div(channels).unwrap_or(0);
+    if block_align.checked_rem(channels).is_some_and(|r| r != 0) {
+        return err(
+            ErrorCode::InvalidWav,
+            "block align is not a multiple of the channel count",
+        );
+    }
 
     let extensible = tag == 0xFFFE;
     let justify = if extensible || odd_pcm_width {
