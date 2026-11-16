@@ -17,6 +17,7 @@ links are collected at the bottom of this file.
   version from `engines.node`.
 - Faster encoding: the frame CRC-16 uses the `crc` crate's slice-by-16
   table, about four times faster than before. The output is unchanged.
+  The table makes the wasm about 14 KB bigger (~104 KB gzipped).
 
 ### Fixed
 
