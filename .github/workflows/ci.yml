@@ -163,6 +163,36 @@ jobs:
         if: failure()
         run: tail -n 300 target/sanitize/${{ matrix.sanitizer }}.log
 
+  # Undefined behaviour in the unsafe code of dependencies, under Miri. The unit
+  # tests take over an hour there, so this runs nightly and on demand only.
+  miri:
+    name: Rust unit tests under Miri (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    env:
+      # Miri checks how memory is used, not how much input is tried.
+      WAV2FLAC_TEST_TIER: quick
+      WAV2FLAC_REQUIRE_TOOLS: '0'
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain (nightly; Miri is nightly-only and needs rust-src)
+        run: rustup toolchain install nightly --profile minimal --component rust-src,miri
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: san-miri
+      - name: Run Rust unit tests under Miri
+        run: scripts/sanitize.sh miri
+      - name: Show the log
+        if: failure()
+        run: tail -n 300 target/sanitize/miri.log
+
   # Random fuzzing: libFuzzer picks a new seed each run and the corpus carries
   # over between runs, so every run explores further. Short on pushes and PRs,
   # long nightly. A crash found on a release tag does not block the release:
