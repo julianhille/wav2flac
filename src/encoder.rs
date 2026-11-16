@@ -743,14 +743,16 @@ impl Active {
         if self.block.len() < n {
             return Ok(());
         }
-        let block = std::mem::take(&mut self.block);
-        let mut chunks = block.chunks_exact(n);
-        for c in &mut chunks {
-            self.encode_block(c, out)?;
-        }
-        self.block = chunks.remainder().to_vec();
-        self.block.reserve(n);
-        Ok(())
+        // Take the Vec out to borrow `self` mutably, then put it back with the
+        // encoded blocks drained so its capacity is reused on the next push.
+        let mut block = std::mem::take(&mut self.block);
+        let whole = block.len() / n * n;
+        let r = block[..whole]
+            .chunks_exact(n)
+            .try_for_each(|c| self.encode_block(c, out));
+        block.drain(..whole);
+        self.block = block;
+        r
     }
 
     /// Encodes one (possibly short, final) block of interleaved samples.
@@ -836,5 +838,24 @@ mod tests {
         assert!(!enc.push(&block).unwrap().is_empty(), "last valid number");
         let e = enc.push(&block).unwrap_err();
         assert_eq!(e.code(), ErrorCode::LimitExceeded);
+    }
+
+    #[test]
+    fn block_buffer_keeps_its_capacity() {
+        let spec = PcmSpec {
+            format: PcmFormat::S16,
+            channels: 1,
+            sample_rate: 8000,
+        };
+        let opts = Options {
+            block_size: Some(16),
+            ..Options::default()
+        };
+        let mut enc = Encoder::new_pcm(opts, spec, None).unwrap();
+        // 32 blocks plus one sample: the buffer grows to hold all of them.
+        enc.push(&[0u8; 32 * 32 + 2]).unwrap();
+        let a = enc.active.as_ref().unwrap();
+        assert_eq!(a.block.len(), 1);
+        assert!(a.block.capacity() >= 32 * 16, "{}", a.block.capacity());
     }
 }
