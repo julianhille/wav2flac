@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: 0BSD
 import { describe, expect, it, vi } from 'vitest';
+import { WasmEncoder } from '../../build/bindgen/wav2flac.js';
 import {
   assemble,
+  liveSessions,
   PROGRESS_INTERVAL_MS,
   Reporter,
   runBuffered,
@@ -54,6 +56,21 @@ describe('engine internals', () => {
     s.free();
     expect(() => s.push(new Uint8Array(1))).toThrow(/freed/);
     expect(() => s.finish()).toThrow(/freed/);
+  });
+
+  it('frees without throwing when the wasm free fails after a trap (#57)', () => {
+    const s = new Session(normalizeOptions({}, false));
+    const before = liveSessions();
+    const spy = vi.spyOn(WasmEncoder.prototype, 'free').mockImplementationOnce(() => {
+      throw new Error('recursive use of an object detected');
+    });
+    try {
+      expect(() => s.free()).not.toThrow();
+      expect(liveSessions()).toBe(before - 1);
+      expect(() => s.push(new Uint8Array(1))).toThrow(/freed/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it.each([
