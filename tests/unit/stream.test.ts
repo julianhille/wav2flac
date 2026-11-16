@@ -323,6 +323,15 @@ describe('createResampler', () => {
     }
   });
 
+  it('keeps f32 output within -1..1 on full-scale input', () => {
+    // A full-scale square wave makes the sinc filter overshoot.
+    const x = new Float32Array(48000).map((_, i) => (Math.floor(i / 60) % 2 ? 1 : -1));
+    for (const quality of QUALITIES) {
+      const y = resample(x, [128], { inputRate: 48000, quality, output: 'f32' });
+      expect(Math.max(...y.map(Math.abs)), quality).toBeLessThanOrEqual(1);
+    }
+  });
+
   it('accepts input rates above the FLAC limit, as encode() does', () => {
     const r = createResamplerSync({ inputRate: 2 ** 21, outputRate: 16000 });
     const e = createChunkEncoderSync({ inputRate: 2 ** 21, sampleRate: 16000, bitsPerSample: 16 });

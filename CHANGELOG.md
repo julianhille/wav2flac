@@ -32,6 +32,8 @@ links are collected at the bottom of this file.
   (detaches) the input no longer throws a raw `TypeError` and leaves the rest
   of that push silently missing: it throws `ENCODER_STATE` and the encoder
   fails.
+- The resampler's `'f32'` output is clamped to -1..1, as the `'s16'` output
+  is. Full-scale input could make it overshoot.
 
 ## [1.2.0] - 2026-11-07
 

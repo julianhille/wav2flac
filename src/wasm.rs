@@ -276,7 +276,8 @@ impl Output {
 
     fn add(&mut self, s: &[f64]) {
         match self {
-            Self::F32(v) => v.extend(s.iter().map(|&x| x as f32)),
+            // Sinc overshoot can exceed full scale; clamp as the s16 path does.
+            Self::F32(v) => v.extend(s.iter().map(|&x| x.clamp(-1.0, 1.0) as f32)),
             // A 16-bit quantizer only returns values in i16 range.
             Self::S16(v, q) => v.extend(s.iter().map(|&x| q.quantize(x) as i16)),
         }
