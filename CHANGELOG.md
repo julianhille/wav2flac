@@ -24,6 +24,8 @@ links are collected at the bottom of this file.
   new one each time.
 - Encoding 16- and 24-bit output is slightly faster: the MD5 input is packed
   without a per-sample slice copy.
+- The source maps no longer embed the TypeScript sources (`sourcesContent`),
+  which makes the package about 1 MB smaller.
 
 ### Fixed
 

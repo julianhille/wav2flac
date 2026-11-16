@@ -22,6 +22,8 @@ const common = {
   platform: 'neutral' as const,
   target: 'es2022',
   sourcemap: true,
+  // Don't embed the TypeScript sources in the maps: that was ~1 MB of the package.
+  sourcesContent: false,
   legalComments: 'none' as const,
   logLevel: 'warning' as const,
   banner: { js: banner },
