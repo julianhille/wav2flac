@@ -5,7 +5,8 @@
 #   2. the whole CI suite runs on the tag, with the full test tier;
 #   3. the package is built, its package tests run on that build, and the
 #      same tarball is published to npm with provenance
-#      (npm trusted publishing via OIDC; prereleases go to the `next` tag);
+#      (npm trusted publishing via OIDC; prereleases go to the `next` tag,
+#      backports to a line tag such as `v1.1-latest`);
 #   4. a GitHub release is created with the CHANGELOG section as its text and
 #      the tarball, the wasm and SHA256SUMS attached.
 # Releases are tagged on a release branch (e.g. `release/v1.0.0-rc.1`) whose
@@ -133,10 +134,17 @@ jobs:
       # Publish the tarball the pack job tested, byte for byte.
       - name: Verify the tarball checksums
         run: (cd dist && sha256sum -c SHA256SUMS)
+      # Only a release newer than the current `latest` takes it; a backport
+      # (e.g. v1.1.1 after 1.2.0) goes to its line tag (`v1.1-latest`).
       - name: Publish
         run: |
-          tag=latest
-          case "$GITHUB_REF_NAME" in *-*) tag=next ;; esac
+          if ! latest=$(npm view wav2flac dist-tags.latest 2> npm-view.err); then
+            # Only a package that was never published may have no `latest`.
+            grep -q E404 npm-view.err || { cat npm-view.err; exit 1; }
+            latest=
+          fi
+          tag=$(node scripts/release.ts dist-tag "$GITHUB_REF_NAME" "$latest")
+          echo "npm dist-tag: $tag (latest is ${latest:-unset})"
           # "./" matters: npm reads a bare "dist/x.tgz" as GitHub shorthand (user/repo).
           npm publish ./dist/*.tgz --provenance --access public --tag "$tag"
 

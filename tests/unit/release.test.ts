@@ -262,3 +262,25 @@ describe('release.ts lint', () => {
     expect(git(work, 'status', '--porcelain')).toBe('');
   });
 });
+
+describe('release.ts dist-tag', () => {
+  it.each([
+    ['v1.2.0', '', 'latest'],
+    ['v1.2.1', '1.2.0', 'latest'],
+    ['v2.0.0', '1.2.0', 'latest'],
+    ['v1.3.0-rc.1', '1.2.0', 'next'],
+    ['v1.1.1', '1.2.0', 'v1.1-latest'],
+    ['v1.2.0', '1.2.0', 'v1.2-latest'],
+    ['v0.9.3', '1.2.0', 'v0.9-latest'],
+  ])('publishes %s under the right tag when latest is "%s"', (tag, latest, want) => {
+    const r = run(tmpdir(), 'dist-tag', tag, latest);
+    expect(r.err).toBe('');
+    expect(r.status).toBe(0);
+    expect(r.out).toBe(`${want}\n`);
+  });
+
+  it('refuses a malformed tag or latest version', () => {
+    expect(run(tmpdir(), 'dist-tag', '1.2.0').status).toBe(1);
+    expect(run(tmpdir(), 'dist-tag', 'v1.2.0', 'garbage').status).toBe(1);
+  });
+});
