@@ -138,6 +138,8 @@ pub struct HeaderParser {
     need: usize,
     fmt: Option<FmtInfo>,
     tags: Vec<(String, String)>,
+    /// Bytes of tag text kept so far, see [`parse_list`].
+    tag_bytes: usize,
 }
 
 impl HeaderParser {
@@ -247,7 +249,7 @@ impl HeaderParser {
                     }
                     self.fmt = Some(parse_fmt(&buf[body..end])?);
                 }
-                b"LIST" => parse_list(&buf[body..end], &mut self.tags),
+                b"LIST" => parse_list(&buf[body..end], &mut self.tags, &mut self.tag_bytes),
                 _ => {}
             }
             self.pos = next;
@@ -552,10 +554,18 @@ const MAX_TAGS: usize = 1024;
 /// Most bytes of WAV INFO tag text kept; further tags are ignored.
 const MAX_TAG_BYTES: usize = 1024 * 1024;
 
+/// Whether no further tags are kept: a tag limit was hit.
+fn tags_full(tags: &[(String, String)], used: usize) -> bool {
+    tags.len() >= MAX_TAGS || used >= MAX_TAG_BYTES
+}
+
 /// Parses a `LIST` chunk body; only `INFO` lists are used. Malformed
 /// sub-chunks end parsing silently (tags are best-effort).
-pub(crate) fn parse_list(body: &[u8], tags: &mut Vec<(String, String)>) {
-    if body.len() < 4 || &body[0..4] != b"INFO" {
+///
+/// `used` is the running total of tag bytes in `tags`. Once a tag limit is
+/// hit, no further tags are kept and the body is not scanned at all.
+pub(crate) fn parse_list(body: &[u8], tags: &mut Vec<(String, String)>, used: &mut usize) {
+    if body.len() < 4 || &body[0..4] != b"INFO" || tags_full(tags, *used) {
         return;
     }
     let mut p = 4usize;
@@ -567,12 +577,14 @@ pub(crate) fn parse_list(body: &[u8], tags: &mut Vec<(String, String)>) {
             return;
         };
         if let Some(key) = info_to_vorbis(id) {
-            let used: usize = tags.iter().map(|(k, v)| k.len() + v.len()).sum();
-            if tags.len() >= MAX_TAGS || used + len > MAX_TAG_BYTES {
-                return; // tags are best-effort; don't let a file blow up memory
+            if tags.len() >= MAX_TAGS || *used + len > MAX_TAG_BYTES {
+                // Tags are best-effort; don't let a file blow up memory.
+                *used = MAX_TAG_BYTES;
+                return;
             }
             let value = decode_text(&body[start..end]);
             if !value.is_empty() {
+                *used += key.len() + value.len();
                 tags.push((key.to_owned(), value));
             }
         }
@@ -653,6 +665,8 @@ pub struct TrailingScanner {
     done: bool,
     /// Tags found so far.
     pub tags: Vec<(String, String)>,
+    /// Bytes of tag text kept so far, see [`parse_list`].
+    tag_bytes: usize,
 }
 
 impl TrailingScanner {
@@ -695,9 +709,14 @@ impl TrailingScanner {
                 continue;
             }
             if let Some(total) = self.list.take() {
-                parse_list(&self.buf[8..], &mut self.tags);
+                parse_list(&self.buf[8..], &mut self.tags, &mut self.tag_bytes);
                 self.pad = (total - 8) % 2 == 1;
                 self.buf.clear();
+                if tags_full(&self.tags, self.tag_bytes) {
+                    // No further tags are kept, so stop scanning.
+                    self.done = true;
+                    self.buf = Vec::new();
+                }
             } else if self.pad {
                 // Scan the held bytes again from the chunk start; there are
                 // too few of them to need another pad decision.
@@ -939,5 +958,29 @@ mod tests {
         let mut t = TrailingScanner::new(1);
         t.push(&chunk(*b"LIST", &info_list("Yes")));
         assert_eq!(t.tags.len(), 1);
+    }
+
+    #[test]
+    fn trailing_scanner_stops_once_tags_are_full() {
+        let mut list = b"INFO".to_vec();
+        for _ in 0..MAX_TAGS {
+            list.extend(chunk(*b"INAM", b"x"));
+        }
+        let mut t = TrailingScanner::new(2);
+        t.push(&chunk(*b"LIST", &list));
+        assert_eq!(t.tags.len(), MAX_TAGS);
+        // A further LIST chunk is neither held nor parsed.
+        t.push(&chunk(*b"LIST", &info_list("More"))[..12]);
+        assert_eq!(t.buffered_len(), 0);
+
+        // A tag over the byte limit ends tag parsing, too.
+        let mut t = TrailingScanner::new(2);
+        let mut list = b"INFO".to_vec();
+        list.extend(chunk(*b"INAM", &vec![b'x'; MAX_TAG_BYTES - 100]));
+        t.push(&chunk(*b"LIST", &list));
+        t.push(&chunk(*b"LIST", &info_list(&"y".repeat(200))));
+        t.push(&chunk(*b"LIST", &info_list("More"))[..12]);
+        assert_eq!(t.tags.len(), 1);
+        assert_eq!(t.buffered_len(), 0);
     }
 }

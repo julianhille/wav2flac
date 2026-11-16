@@ -16,6 +16,13 @@ links are collected at the bottom of this file.
   types are `@types/node` 26. The job for the minimum Node still takes its
   version from `engines.node`.
 
+### Fixed
+
+- Reading WAV INFO tags no longer takes quadratic time once the tag limits
+  are reached: a crafted file with many empty tags after the 1024th could
+  keep the encoder busy for minutes. Once a limit is hit, no further tags
+  are read, and LIST chunks after the data are no longer scanned.
+
 ## [1.2.0] - 2026-11-07
 
 ### Added
