@@ -10,6 +10,12 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Changed
+
+- CI, the release workflow and the benchmarks run on Node 26, and the
+  types are `@types/node` 26. The job for the minimum Node still takes its
+  version from `engines.node`.
+
 ## [1.2.0] - 2026-11-07
 
 ### Added
