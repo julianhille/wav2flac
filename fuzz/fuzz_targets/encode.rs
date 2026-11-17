@@ -41,7 +41,7 @@ fuzz_target!(|input: Input<'_>| {
     let _ = probe(input.wav);
     let split = chunked(&input);
     let opts = input.opts.options();
-    if opts.mode == OutputMode::Buffered && opts.max_input_bytes.is_none() {
+    if opts.mode == OutputMode::Buffered {
         let whole = encode_all(input.wav, opts);
         match (&split, &whole) {
             (Ok(a), Ok(b)) => assert!(a == b, "the output depends on how the input is split"),

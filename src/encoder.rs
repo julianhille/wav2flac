@@ -358,15 +358,16 @@ impl Encoder {
 
     fn push_inner(&mut self, input: &[u8]) -> Result<Vec<u8>> {
         self.check_usable()?;
+        // Only the bytes still allowed are processed before the limit fails
+        // the push, so an error in them wins however the input is split.
+        let max = self.opts.max_input_bytes.unwrap_or(u64::MAX);
+        let allowed = max.saturating_sub(self.bytes_in);
         self.bytes_in += input.len() as u64;
-        if let Some(max) = self.opts.max_input_bytes {
-            if self.bytes_in > max {
-                return err(
-                    ErrorCode::LimitExceeded,
-                    format!("input exceeds maxInputBytes ({max})"),
-                );
-            }
-        }
+        let keep = input
+            .len()
+            .min(usize::try_from(allowed).unwrap_or(usize::MAX));
+        let over = keep < input.len();
+        let input = &input[..keep];
         let mut out = std::mem::take(&mut self.pending);
         match self.state {
             State::Header => {
@@ -390,6 +391,12 @@ impl Encoder {
             }
             State::Data | State::Trailing => self.consume(input, &mut out)?,
             State::Finished | State::Failed => unreachable!("checked above"),
+        }
+        if over {
+            return err(
+                ErrorCode::LimitExceeded,
+                format!("input exceeds maxInputBytes ({max})"),
+            );
         }
         Ok(out)
     }
