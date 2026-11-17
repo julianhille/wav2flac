@@ -29,6 +29,16 @@ links are collected at the bottom of this file.
   the 4 GiB limit). `chunkSamples` must now be at least 16, FLAC's smallest
   block. In the Rust crate, call `ChunkEncoder::cut()` and `finish()` until
   they return no file.
+- Downsampling by more than 4× (for example 96 or 192 kHz → 16 kHz, or
+  48 kHz → 8 kHz) now has the documented passband and stop band. The filter
+  grew with the ratio only up to 4×, so its transition band widened above
+  that: with `'fast'`, 192 → 16 kHz passed an 8.5 kHz tone at −14 dB (now
+  −74 dB) and was −3.6 dB at 7.5 kHz (now −0.9 dB). The filter now grows up
+  to 16× (192 → 12 kHz, 48 → 3 kHz); larger ratios still get a wider
+  transition band. The longer filter costs time and memory: 192 → 16 kHz
+  takes about 3× as long as before (as long as 192 → 48 kHz), and a
+  `'best'` resampler at 16× grows the wasm memory by 24 MiB instead of
+  6 MiB. Up to 4×, the output is unchanged.
 
 ## [1.2.1] - 2026-11-17
 
