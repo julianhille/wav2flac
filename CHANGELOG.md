@@ -23,6 +23,10 @@ links are collected at the bottom of this file.
   the 4 GiB limit). `chunkSamples` must now be at least 16, FLAC's smallest
   block. In the Rust crate, call `ChunkEncoder::cut()` and `finish()` until
   they return no file.
+- With `maxInputBytes`, the error no longer depends on how the input is split
+  into pushes: the bytes up to the limit are processed before
+  `LIMIT_EXCEEDED`, so an error in them (an unsupported format, invalid
+  samples) always wins.
 
 ## [1.2.1] - 2026-11-17
 
