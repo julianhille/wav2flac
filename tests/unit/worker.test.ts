@@ -20,7 +20,13 @@ import {
   type WorkerEncoder,
 } from '../../ts/lib/worker-client.js';
 import { serve } from '../../ts/lib/worker-host.js';
-import { collect, makeWav, streamOf } from '../helpers/wav.js';
+import {
+  collect,
+  makeWav,
+  PROBE_PREFIX_LIMIT,
+  streamOf,
+  wavAtHeaderLimit,
+} from '../helpers/wav.js';
 
 const wasm = readFileSync('build/bindgen/wav2flac_bg.wasm');
 const wav = makeWav({ frames: 44100 * 2, seed: 5 });
@@ -331,6 +337,20 @@ describe('worker protocol', () => {
     new DataView(big.buffer).setUint32(4, big.length - 8, true);
     await expect(w.probe(big)).resolves.toMatchObject({ channels: 2, frames: 44100 * 2 });
     expect(big.length).toBeGreaterThan(junk); // still attached: only prefixes were copied
+  });
+
+  it('sends no more than the header limit of a larger input', async () => {
+    const { w } = pair();
+    const fits = wavAtHeaderLimit();
+    const fitsRead = vi.spyOn(fits, 'subarray');
+    await expect(w.probe(fits)).resolves.toMatchObject({ channels: 1, frames: 1000 });
+    expect(Math.max(...fitsRead.mock.calls.map(([, end]) => end!))).toBe(PROBE_PREFIX_LIMIT);
+    // At the longest prefix the parser reports LIMIT_EXCEEDED, so probe stops
+    // instead of retrying with the whole input.
+    const over = wavAtHeaderLimit({ over: true });
+    const overRead = vi.spyOn(over, 'subarray');
+    await expect(w.probe(over)).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' });
+    expect(Math.max(...overRead.mock.calls.map(([, end]) => end!))).toBe(PROBE_PREFIX_LIMIT);
   });
 
   it('probes a Buffer by transferring copies of its prefix, not views of it', async () => {

@@ -14,6 +14,7 @@ use std::io::Cursor;
 /// Upper bound for everything that precedes the `data` chunk.
 ///
 /// Guards against unbounded buffering on hostile or broken input.
+/// `MAX_PROBE_BYTES` in `ts/lib/probe.ts` is this plus 8; keep them in sync.
 pub const MAX_HEADER_BYTES: usize = 64 * 1024 * 1024;
 
 /// Sample encoding stored in the `data` chunk.

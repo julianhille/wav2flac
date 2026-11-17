@@ -135,6 +135,37 @@ export function makeWav(spec: WavSpec): Uint8Array<ArrayBuffer> {
 }
 
 /**
+ * The parser's 64 MiB limit on the chunks before the data (`MAX_HEADER_BYTES`
+ * in src/riff.rs) plus one 8-byte chunk header: the longest prefix `probe()`
+ * needs.
+ */
+export const PROBE_PREFIX_LIMIT = 64 * 1024 * 1024 + 8;
+
+/**
+ * A mono WAV of 1000 frames whose chunks before the data fill the parser's
+ * 64 MiB header limit: a JUNK chunk ends exactly at the limit, and the data
+ * chunk header starts there, so the header just fits.
+ * @param opts `over`: put an empty JUNK chunk at the limit, before the data
+ *   chunk, which takes the header over the limit.
+ * @returns The file bytes, a little longer than `PROBE_PREFIX_LIMIT`.
+ */
+export function wavAtHeaderLimit(opts: { over?: boolean } = {}): Uint8Array<ArrayBuffer> {
+  const limit = PROBE_PREFIX_LIMIT - 8;
+  const plain = makeWav({ frames: 1000, channels: 1 }); // fmt at 12..36, data chunk after
+  const at = opts.over ? limit + 8 : limit;
+  const b = new Uint8Array(at + plain.length - 36);
+  const v = new DataView(b.buffer);
+  const enc = new TextEncoder();
+  b.set(plain.subarray(0, 36));
+  v.setUint32(4, b.length - 8, true);
+  b.set(enc.encode('JUNK'), 36);
+  v.setUint32(40, limit - 44, true);
+  if (opts.over) b.set(enc.encode('JUNK'), limit); // length 0
+  b.set(plain.subarray(36), at);
+  return b;
+}
+
+/**
  * A `ReadableStream` over `bytes` in chunks of `size`.
  * @param bytes The bytes.
  * @param size Chunk size.
