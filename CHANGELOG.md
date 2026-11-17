@@ -10,6 +10,12 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Encoding 8- and 32-bit output is faster: like 16- and 24-bit output since
+  1.2.1, the MD5 input is packed without a per-sample slice copy. The output
+  is unchanged.
+
 ### Fixed
 
 - `probe()` and the worker encoder's `probe()` no longer hand the header
