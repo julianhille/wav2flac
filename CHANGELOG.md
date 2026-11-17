@@ -10,6 +10,8 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-17
+
 ### Changed
 
 - CI, the release workflow and the benchmarks run on Node 26, and the
@@ -464,7 +466,8 @@ links are collected at the bottom of this file.
 - Documentation site on Read the Docs (MkDocs): the README plus the raw PCM
   and benchmark guides, at <https://wav2flac.readthedocs.io/>.
 
-[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/julianhille/wav2flac/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/julianhille/wav2flac/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/julianhille/wav2flac/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/julianhille/wav2flac/compare/v1.0.0-rc.4...v1.0.0
