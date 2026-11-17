@@ -118,6 +118,16 @@ bundled file synchronously, so it cannot stall on a download.
 `encodeSync()` never loads anything: call `await init()` or `initSync()`
 first.
 
+## Without WebAssembly SIMD
+
+The wasm uses WebAssembly SIMD, which these engines lack: Safari and every
+iOS browser before iOS 16.4, any browser or runtime on an x86 CPU without
+SSE4.1, JavaScriptCore (Bun, WebKitGTK browsers) on an x86-64 CPU without AVX,
+and Firefox on 32-bit ARM, such as Firefox for Android on 32-bit devices.
+There, loading the wasm fails with a `WebAssembly.CompileError`: `init()`
+and the calls that load the wasm reject with it, `initSync()` throws it, and
+every job of a worker encoder fails with it. A retry fails the same way.
+
 ## Self-hosting and licenses
 
 The `.wasm` carries the license notices of the code in it, as its first
