@@ -27,6 +27,11 @@ links are collected at the bottom of this file.
   into pushes: the bytes up to the limit are processed before
   `LIMIT_EXCEEDED`, so an error in them (an unsupported format, invalid
   samples) always wins.
+- Applying tag overrides no longer takes quadratic time in their number:
+  160,000 distinct tags kept the encoder busy for about a minute and a
+  half, and the chunk encoder paid it again for every file. The resulting
+  tags are unchanged. All overrides together, removals included, must now
+  fit in the 16 MiB tag block.
 
 ## [1.2.1] - 2026-11-17
 
