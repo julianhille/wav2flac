@@ -17,7 +17,7 @@ import {
 } from './input.js';
 import { normalizeOptions, type Options } from './options.js';
 import { builtin, ignore, isNode } from './platform.js';
-import type { WavInfo } from './probe.js';
+import { MAX_PROBE_BYTES, type WavInfo } from './probe.js';
 import {
   OUTPUT_WINDOW,
   transferOf,
@@ -529,7 +529,8 @@ export function connect(port: WorkerPort<FromWorker, ToWorker>, wasm?: WasmSourc
     async probe(input) {
       const bytes = toBytes(input, 'input', BUFFER_INPUT);
       // Only the header is read, so copy growing prefixes, not the whole file.
-      for (let n = Math.min(PROBE_FIRST_TRY, bytes.length); ; n = Math.min(n * 4, bytes.length)) {
+      const max = Math.min(bytes.length, MAX_PROBE_BYTES);
+      for (let n = Math.min(PROBE_FIRST_TRY, max); ; n = Math.min(n * 4, max)) {
         // A copy, not a Buffer view that would clone the whole backing buffer.
         // It is ours, so it is transferred rather than cloned again.
         const data = new Uint8Array(bytes.subarray(0, n));
@@ -540,7 +541,7 @@ export function connect(port: WorkerPort<FromWorker, ToWorker>, wasm?: WasmSourc
             data,
           );
         } catch (e) {
-          if (!(e instanceof Wav2FlacError && e.code === 'TRUNCATED' && n < bytes.length)) throw e;
+          if (!(e instanceof Wav2FlacError && e.code === 'TRUNCATED' && n < max)) throw e;
         }
       }
     },

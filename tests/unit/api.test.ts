@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: 0BSD
 import { createHash } from 'node:crypto';
 import { getEventListeners } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   encode,
   encodeStream,
@@ -14,7 +14,13 @@ import {
 } from '../../ts/index.js';
 import { liveSessions, PROGRESS_INTERVAL_MS } from '../../ts/lib/engine.js';
 import { SLICE_BYTES } from '../../ts/lib/input.js';
-import { collect, makeWav, streamOf } from '../helpers/wav.js';
+import {
+  collect,
+  makeWav,
+  PROBE_PREFIX_LIMIT,
+  streamOf,
+  wavAtHeaderLimit,
+} from '../helpers/wav.js';
 import { flacDecode, flacTest, nativeEncode } from '../helpers/tools.js';
 
 // nativeEncode() has already warned why; skip, so the run reports it instead of a pass.
@@ -489,6 +495,19 @@ describe('encode / encodeSync / encodeStream', () => {
       await expect(probe(b)).resolves.toMatchObject({ channels: 1, frames: 1000 });
       await expect(probe(b.subarray(0, 20 + junk))).rejects.toMatchObject({ code: 'TRUNCATED' });
     }
+  });
+
+  it('reads no more than the header limit of a larger input', async () => {
+    const fits = wavAtHeaderLimit();
+    const fitsRead = vi.spyOn(fits, 'subarray');
+    await expect(probe(fits)).resolves.toMatchObject({ channels: 1, frames: 1000 });
+    expect(Math.max(...fitsRead.mock.calls.map(([, end]) => end!))).toBe(PROBE_PREFIX_LIMIT);
+    // At the longest prefix the parser reports LIMIT_EXCEEDED, so probe stops
+    // instead of retrying with the whole input.
+    const over = wavAtHeaderLimit({ over: true });
+    const overRead = vi.spyOn(over, 'subarray');
+    await expect(probe(over)).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' });
+    expect(Math.max(...overRead.mock.calls.map(([, end]) => end!))).toBe(PROBE_PREFIX_LIMIT);
   });
 
   it('reports the version', () => {

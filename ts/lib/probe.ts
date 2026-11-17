@@ -30,6 +30,15 @@ export interface WavInfo {
 const FIRST_TRY = 64 * 1024;
 
 /**
+ * At this length the header parser never reports `TRUNCATED`: up to
+ * `MAX_HEADER_BYTES` (64 MiB, `src/riff.rs`) of chunks plus an 8-byte chunk
+ * header. The pad lookahead may look one byte further, but only where every
+ * outcome is `LIMIT_EXCEEDED`. Keep it in sync with that constant.
+ * @internal
+ */
+export const MAX_PROBE_BYTES = 64 * 1024 * 1024 + 8;
+
+/**
  * Parses the WAV header, reading only as much of `bytes` as needed.
  * @param bytes The WAV file (or at least its beginning up to the `data` chunk).
  * @returns The description.
@@ -37,13 +46,13 @@ const FIRST_TRY = 64 * 1024;
  * @internal
  */
 export function probeBytes(bytes: Uint8Array): WavInfo {
-  for (let n = Math.min(FIRST_TRY, bytes.length); ; n = Math.min(n * 4, bytes.length)) {
+  const max = Math.min(bytes.length, MAX_PROBE_BYTES);
+  for (let n = Math.min(FIRST_TRY, max); ; n = Math.min(n * 4, max)) {
     try {
       return JSON.parse(probeJson(bytes.subarray(0, n))) as WavInfo;
     } catch (e) {
       const err = fromWasmError(e);
-      if (!(err instanceof Wav2FlacError && err.code === 'TRUNCATED' && n < bytes.length))
-        throw err;
+      if (!(err instanceof Wav2FlacError && err.code === 'TRUNCATED' && n < max)) throw err;
     }
   }
 }
