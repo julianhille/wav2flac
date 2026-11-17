@@ -187,10 +187,10 @@ impl Options {
             for (k, _) in overrides {
                 validate_tag_key(k)?;
             }
-            // The overrides alone are a lower bound of the `VORBIS_COMMENT`
-            // block: fail now rather than after all the input was encoded.
-            let len = crate::encoder::vorbis_len(&crate::encoder::comments(self, &[]));
-            if len > crate::metadata::MAX_BLOCK_LEN {
+            // Every override counts as if written, removals and replaced ones
+            // too. That bounds the work of applying them, and tags that are
+            // too long fail now rather than after all the input was encoded.
+            if crate::encoder::vorbis_len(overrides) > crate::metadata::MAX_BLOCK_LEN {
                 return err(ErrorCode::InvalidOptions, crate::metadata::TOO_LONG);
             }
         }

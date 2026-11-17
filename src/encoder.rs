@@ -637,17 +637,29 @@ impl Encoder {
 }
 
 /// The WAV tags with the overrides applied, without the channel-mask field.
+///
+/// Keys match ASCII case-insensitively. WAV tags whose key no override names
+/// keep their order; then, for each key, its last override if the value is
+/// not empty, in the order of those last overrides.
 pub(crate) fn comments(opts: &Options, wav_tags: &[(String, String)]) -> Vec<(String, String)> {
     let mut comments: Vec<(String, String)> = match &opts.tags {
         Tags::Disabled => Vec::new(),
         Tags::FromWav(overrides) => {
-            let mut c = wav_tags.to_vec();
-            for (k, v) in overrides {
-                c.retain(|(ek, _)| !ek.eq_ignore_ascii_case(k));
-                if !v.is_empty() {
-                    c.push((k.clone(), v.clone()));
-                }
-            }
+            // Walking backwards, the first override seen for a key is its
+            // last. No `HashSet`: wasm has no random hash keys to resist floods.
+            let mut named = std::collections::BTreeSet::new();
+            let mut last: Vec<_> = overrides
+                .iter()
+                .rev()
+                .filter(|(k, _)| named.insert(k.to_ascii_lowercase()))
+                .collect();
+            last.reverse();
+            let mut c: Vec<_> = wav_tags
+                .iter()
+                .filter(|(k, _)| !named.contains(&k.to_ascii_lowercase()))
+                .cloned()
+                .collect();
+            c.extend(last.into_iter().filter(|(_, v)| !v.is_empty()).cloned());
             c
         }
     };
@@ -875,5 +887,100 @@ mod tests {
         let a = enc.active.as_ref().unwrap();
         assert_eq!(a.block.len(), 1);
         assert!(a.block.capacity() >= 32 * 16, "{}", a.block.capacity());
+    }
+
+    /// The quadratic `comments` before #93, as the reference for its result.
+    fn comments_before(opts: &Options, wav_tags: &[(String, String)]) -> Vec<(String, String)> {
+        let mut comments: Vec<(String, String)> = match &opts.tags {
+            Tags::Disabled => Vec::new(),
+            Tags::FromWav(overrides) => {
+                let mut c = wav_tags.to_vec();
+                for (k, v) in overrides {
+                    c.retain(|(ek, _)| !ek.eq_ignore_ascii_case(k));
+                    if !v.is_empty() {
+                        c.push((k.clone(), v.clone()));
+                    }
+                }
+                c
+            }
+        };
+        comments.retain(|(k, _)| !k.eq_ignore_ascii_case(CHANNEL_MASK_TAG));
+        comments
+    }
+
+    fn pairs(p: &[(&str, &str)]) -> Vec<(String, String)> {
+        p.iter()
+            .map(|&(k, v)| (k.to_owned(), v.to_owned()))
+            .collect()
+    }
+
+    fn with_overrides(o: Vec<(String, String)>) -> Options {
+        Options {
+            tags: Tags::FromWav(o),
+            ..Options::default()
+        }
+    }
+
+    #[test]
+    fn last_override_wins_in_its_place() {
+        let wav = pairs(&[
+            ("TITLE", "t1"),
+            ("ARTIST", "a"),
+            ("TITLE", "t2"),
+            ("DATE", "d"),
+        ]);
+        let opts = with_overrides(pairs(&[
+            ("title", "x"),
+            ("ALBUM", "al"),
+            ("Date", ""),
+            ("GENRE", "g"),
+            ("Title", "y"),
+            ("genre", ""),
+            ("Genre", "rock"),
+            ("waveformatextensible_channel_mask", "0x3"),
+        ]));
+        let want = pairs(&[
+            ("ARTIST", "a"),
+            ("ALBUM", "al"),
+            ("Title", "y"),
+            ("Genre", "rock"),
+        ]);
+        assert_eq!(comments(&opts, &wav), want);
+        assert_eq!(comments_before(&opts, &wav), want);
+    }
+
+    fn tag() -> impl proptest::strategy::Strategy<Value = (String, String)> {
+        use proptest::prelude::*;
+        let keys = vec![
+            "TITLE",
+            "title",
+            "Title",
+            "ARTIST",
+            "artist",
+            "A",
+            "a",
+            // Equal under `b | 0x20`, but not ASCII case-insensitively.
+            "A@",
+            "a`",
+            "T[",
+            "t{",
+            CHANNEL_MASK_TAG,
+            "waveformatextensible_channel_mask",
+        ];
+        let values = vec!["", "x", "y"];
+        (prop::sample::select(keys), prop::sample::select(values))
+            .prop_map(|(k, v)| (k.to_owned(), v.to_owned()))
+    }
+
+    proptest::proptest! {
+        #[test]
+        #[cfg_attr(miri, ignore = "minutes under Miri, and proptest needs the file system")]
+        fn comments_match_the_quadratic_version(
+            wav in proptest::collection::vec(tag(), 0..8),
+            overrides in proptest::collection::vec(tag(), 0..16),
+        ) {
+            let opts = with_overrides(overrides);
+            proptest::prop_assert_eq!(comments(&opts, &wav), comments_before(&opts, &wav));
+        }
     }
 }

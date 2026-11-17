@@ -307,12 +307,16 @@ fn oversized_tags_fail_early() {
         .err()
         .expect("rejected before any input");
     assert_eq!(e.code(), ErrorCode::InvalidOptions);
-    // Removals and disabled tags do not count.
-    Encoder::new(Options {
-        tags: Tags::FromWav(vec![("COMMENT".into(), String::new())]),
+    // Every override counts, even a removal or a replaced one. Each of these
+    // takes 1024 bytes as an entry (length, key, "="): 16,383 of them fit
+    // with the vendor string, 16,384 alone are over 16 MiB - 1.
+    let removals = |n| Options {
+        tags: Tags::FromWav(vec![("K".repeat(1019), String::new()); n]),
         ..Options::default()
-    })
-    .unwrap();
+    };
+    Encoder::new(removals(16_383)).unwrap();
+    let e = Encoder::new(removals(16_384)).err().expect("rejected");
+    assert_eq!(e.code(), ErrorCode::InvalidOptions);
 
     // Exactly at the limit is fine; WAV tags that push it over fail at finish.
     let s = signal(Signal::Noise, 16, 1, 100, 1);
@@ -324,4 +328,23 @@ fn oversized_tags_fail_early() {
     b.chunks_before = vec![(*b"LIST", info_list(&[(b"INAM", b"title")]))];
     let err = wav2flac::encode_all(&b.build(&s), at_limit).unwrap_err();
     assert_eq!(err.code(), ErrorCode::InvalidOptions);
+}
+
+#[test]
+fn many_tag_overrides_are_not_quadratic() {
+    // Each override used to rescan all earlier ones: 200,000 distinct keys
+    // took minutes. The bound is loose; the fix takes well under a second.
+    let n = 200_000;
+    let o = Options {
+        tags: Tags::FromWav((0..n).map(|i| (format!("K{i}"), "v".into())).collect()),
+        ..Options::default()
+    };
+    let t = std::time::Instant::now();
+    let flac = encode(&wav(1, 8000, 16, &[0; 10]), o);
+    assert!(t.elapsed().as_secs() < 10, "took {:?}", t.elapsed());
+    let (blocks, _) = metadata_blocks(&flac);
+    let (_, tags) = parse_vorbis(&blocks.iter().find(|b| b.0 == 4).unwrap().2);
+    assert_eq!(tags.len(), 200_000);
+    assert_eq!(tags[0], ("K0".to_owned(), "v".to_owned()));
+    assert_eq!(tags[199_999], ("K199999".to_owned(), "v".to_owned()));
 }
