@@ -2,7 +2,7 @@
 // Release helper.
 //
 // `node scripts/release.ts prepare X.Y.Z` bumps the version in package.json,
-// package-lock.json, Cargo.toml, Cargo.lock and fuzz/Cargo.lock, turns
+// package-lock.json, Cargo.toml and Cargo.lock, turns
 // `## [Unreleased]` in CHANGELOG.md into `## [X.Y.Z] - today` (with a fresh empty Unreleased
 // section and updated compare links) and commits. It runs on a fresh
 // `release/vX.Y.Z` branch at origin/main. It never tags or pushes; it prints
@@ -45,14 +45,7 @@ function fail(msg: string): never {
 }
 
 /** Files `prepare` edits, restored when it fails. */
-const EDITED = [
-  'CHANGELOG.md',
-  'package.json',
-  'package-lock.json',
-  'Cargo.toml',
-  'Cargo.lock',
-  'fuzz/Cargo.lock',
-];
+const EDITED = ['CHANGELOG.md', 'package.json', 'package-lock.json', 'Cargo.toml', 'Cargo.lock'];
 
 /**
  * Compares two SemVer versions (build metadata is not used here).
@@ -105,8 +98,6 @@ function versions(): Record<string, string | undefined> {
     'package-lock.json (root package)': lock.packages?.['']?.version,
     'Cargo.toml': /^version = "([^"]+)"/m.exec(read('Cargo.toml'))?.[1],
     'Cargo.lock': lockVersion('Cargo.lock'),
-    // fuzz/ is its own workspace; fuzz.sh builds it with --locked.
-    'fuzz/Cargo.lock': lockVersion('fuzz/Cargo.lock'),
   };
 }
 
@@ -291,10 +282,6 @@ function prepare(v: string): void {
       { stdio: 'inherit' },
     );
     execFileSync('cargo', ['update', '--workspace', '--quiet'], { stdio: 'inherit' });
-    execFileSync('cargo', ['update', '-p', 'wav2flac', '--quiet'], {
-      cwd: 'fuzz',
-      stdio: 'inherit',
-    });
     check(`v${v}`);
     execFileSync('git', ['commit', '--quiet', '-am', `Release ${v}`], { stdio: 'inherit' });
   } catch (e) {

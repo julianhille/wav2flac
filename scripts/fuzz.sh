@@ -12,11 +12,12 @@
 #   cargo +nightly fuzz run <target> fuzz/artifacts/<target>/<file>
 # The full libFuzzer output goes to fuzz/logs/<target>.log. Corpus, artifacts
 # and logs stay out of git. CI runs the same script (the fuzz job).
-# fuzz/ is its own workspace with its own committed Cargo.lock; the fetch
-# below fails if that lock is stale instead of resolving new versions.
+# fuzz/ is its own workspace. Its Cargo.lock is not committed but seeded from
+# the root one on every run, so the fuzzed dependencies are the ones the
+# package ships; cargo only resolves the fuzz-only crates on top.
 set -euo pipefail
 cd "$(dirname "$0")/../fuzz"
-cargo +nightly fetch --locked
+cp ../Cargo.lock Cargo.lock
 
 targets=(encode raw_pcm chunk_encoder resampler)
 [[ $# -ge 1 ]] && targets=("$1")

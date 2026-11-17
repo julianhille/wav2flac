@@ -35,10 +35,10 @@ links are collected at the bottom of this file.
   are read, and LIST chunks after the data are no longer scanned.
 - A WAV whose block align is not a multiple of its channel count is now
   rejected with `InvalidWav` instead of being encoded as noise.
-- Fuzz builds are locked: `fuzz/Cargo.lock` is committed and
-  `scripts/fuzz.sh` fails on a stale lock instead of resolving new versions,
-  so a crash found in CI reproduces with the same dependencies.
-  `scripts/release.ts prepare` bumps the version in it too.
+- Fuzz builds use the shipped dependency versions: `scripts/fuzz.sh` seeds
+  `fuzz/Cargo.lock` from the root `Cargo.lock` before each run instead of
+  resolving fresh versions, so a crash found in CI reproduces with the same
+  dependencies.
 - With `onChunk`, a `push()` bigger than 1 MiB whose `onChunk` transfers
   (detaches) the input no longer throws a raw `TypeError` and leaves the rest
   of that push silently missing: it throws `ENCODER_STATE` and the encoder

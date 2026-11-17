@@ -3,6 +3,7 @@
 
 # cargo-fuzz (scripts/fuzz.sh)
 /fuzz/target/
+/fuzz/Cargo.lock
 /fuzz/corpus/
 /fuzz/artifacts/
 /fuzz/coverage/
