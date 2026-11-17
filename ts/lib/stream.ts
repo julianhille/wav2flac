@@ -107,9 +107,10 @@ export interface ChunkEncoderOptions extends Omit<
   /** Bit depth of the files, 4–32. */
   bitsPerSample: number;
   /**
-   * Samples per channel in each file (at the output rate). Set, the encoder
-   * cuts exactly there ({@link ExactChunkEncoder}); unset, it cuts wherever
-   * you call `encode()` ({@link ChunkEncoder}). Required with `onChunk`.
+   * Samples per channel in each file (at the output rate), at least 16
+   * (FLAC's smallest block). Set, the encoder cuts exactly there
+   * ({@link ExactChunkEncoder}); unset, it cuts wherever you call `encode()`
+   * ({@link ChunkEncoder}). Required with `onChunk`.
    */
   chunkSamples?: number | undefined;
   /**
@@ -128,7 +129,7 @@ export interface CallbackChunkEncoderOptions extends Omit<
   ChunkEncoderOptions,
   'chunkSamples' | 'onChunk'
 > {
-  /** Samples per channel in each file (at the output rate). */
+  /** Samples per channel in each file (at the output rate), at least 16. */
   chunkSamples: number;
   /**
    * Receives each file, in order, synchronously inside `push()` and
@@ -295,6 +296,7 @@ function record(v: unknown): Record<string, unknown> {
  * @param key Option name.
  * @param dflt Value when unset; `undefined` makes it required.
  * @param max Largest accepted value.
+ * @param min Smallest accepted value.
  * @returns The value.
  */
 function positive(
@@ -302,11 +304,12 @@ function positive(
   key: string,
   dflt: number | undefined,
   max: number,
+  min = 1,
 ): number {
   const v = o[key];
   if (v === undefined && dflt !== undefined) return dflt;
-  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > max) {
-    throw invalidOption(`${key} must be an integer between 1 and ${max}`);
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) {
+    throw invalidOption(`${key} must be an integer between ${min} and ${max}`);
   }
   return v;
 }
@@ -499,7 +502,8 @@ function chunkFactory(options: unknown): ChunkFactory {
   const inputRate = positive(o, 'inputRate', undefined, 2 ** 32 - 1);
   const channels = positive(o, 'channels', 1, Number.MAX_SAFE_INTEGER);
   const exact = o['chunkSamples'] !== undefined;
-  const chunk = exact ? positive(o, 'chunkSamples', undefined, Number.MAX_SAFE_INTEGER) : -1;
+  // At least FLAC's smallest block, as the wasm encoder checks too.
+  const chunk = exact ? positive(o, 'chunkSamples', undefined, 2 ** 32 - 1, 16) : -1;
   const onChunk = o['onChunk'];
   if (onChunk !== undefined && typeof onChunk !== 'function') {
     throw invalidOption('onChunk must be a function');
@@ -578,19 +582,45 @@ abstract class ChunkBase {
   }
 
   /**
-   * Feeds `input`, then cuts (or finishes) and takes the files.
+   * Feeds `input`, then cuts (or finishes) and hands the files to `take`, a
+   * batch at a time: a wasm call stops after the file that brings it to
+   * 64 MiB, so short files with large padding cannot fill the wasm memory.
+   * It is called until it returns none.
+   * @param input Samples to feed first.
+   * @param last Whether this ends the input.
+   * @param take Receives each batch of files, in order.
+   */
+  protected cut(
+    input: Float32Array | undefined,
+    last: boolean,
+    take: (files: Bytes[]) => void,
+  ): void {
+    if (input !== undefined) this.feed(input);
+    const e = this.#live();
+    for (;;) {
+      let files: Bytes[];
+      try {
+        files = (last ? e.finish() : e.cut()) as Bytes[];
+      } catch (err) {
+        throw fromWasmError(err);
+      }
+      if (files.length === 0) return;
+      take(files);
+    }
+  }
+
+  /**
+   * {@link ChunkBase.cut}, collecting the files.
    * @param input Samples to feed first.
    * @param last Whether this ends the input.
    * @returns The files.
    */
-  protected cut(input: Float32Array | undefined, last: boolean): Bytes[] {
-    if (input !== undefined) this.feed(input);
-    const e = this.#live();
-    try {
-      return (last ? e.finish() : e.cut()) as Bytes[];
-    } catch (err) {
-      throw fromWasmError(err);
-    }
+  protected cutAll(input: Float32Array | undefined, last: boolean): Bytes[] {
+    const all: Bytes[] = [];
+    this.cut(input, last, (files) => {
+      for (const f of files) all.push(f);
+    });
+    return all;
   }
 
   free(): void {
@@ -613,22 +643,22 @@ abstract class ChunkBase {
 /** {@link ChunkEncoder}. */
 class Varying extends ChunkBase implements ChunkEncoder {
   encode(input?: Float32Array): Bytes | null {
-    return this.cut(input, false)[0] ?? null;
+    return this.cutAll(input, false)[0] ?? null;
   }
 
   finish(): Bytes | null {
-    return this.cut(undefined, true)[0] ?? null;
+    return this.cutAll(undefined, true)[0] ?? null;
   }
 }
 
 /** {@link ExactChunkEncoder}. */
 class Exact extends ChunkBase implements ExactChunkEncoder {
   encode(input?: Float32Array): Bytes[] {
-    return this.cut(input, false);
+    return this.cutAll(input, false);
   }
 
   finish(): Bytes[] {
-    return this.cut(undefined, true);
+    return this.cutAll(undefined, true);
   }
 }
 
@@ -705,7 +735,7 @@ class Callback extends ChunkBase implements CallbackChunkEncoder {
         this.#failed = true;
         throw new Wav2FlacError('ENCODER_STATE', 'onChunk transferred (detached) the samples');
       }
-      this.#deliver(this.cut(input.subarray(i, i + PUSH_FLOATS), false));
+      this.cut(input.subarray(i, i + PUSH_FLOATS), false, (f) => this.#deliver(f));
     } while ((i += PUSH_FLOATS) < n);
   }
 
@@ -713,7 +743,7 @@ class Callback extends ChunkBase implements CallbackChunkEncoder {
     this.#check(true);
     // Set first: even a failed finish() ends the input.
     this.#finished = true;
-    this.#deliver(this.cut(undefined, true));
+    this.cut(undefined, true, (f) => this.#deliver(f));
   }
 
   override free(): void {

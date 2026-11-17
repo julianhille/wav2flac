@@ -425,12 +425,15 @@ impl WasmChunkEncoder {
         self.inner.push(input).map_err(|e| js_err(&e))
     }
 
-    /// Cuts the files that are ready and returns them.
+    /// Cuts the files that are ready and returns them, stopping after the
+    /// file that brings the call to 64 MiB; call it until it returns none.
     pub fn cut(&mut self) -> Result<Vec<JsValue>, JsError> {
         files(self.inner.cut())
     }
 
-    /// Ends the input and returns the last files.
+    /// Returns the last files, in batches like `cut()`; only the first call
+    /// ends the input. Call it until it returns none: every call after that
+    /// throws `ENCODER_STATE`.
     pub fn finish(&mut self) -> Result<Vec<JsValue>, JsError> {
         files(self.inner.finish())
     }

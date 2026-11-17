@@ -17,6 +17,12 @@ links are collected at the bottom of this file.
   need. A chunk header in the last few bytes before the 64 MiB mark made them
   retry with 256 MiB of the input (all of it, if smaller), and wasm memory
   never shrinks: one probe of a 256 MiB file grew it to 343 MiB.
+- With a tiny `chunkSamples`, the chunk encoder no longer runs out of wasm
+  memory: each file carries its own padding and tags, and a cut built all its
+  files at once (about 120 one-sample files with `padding: 16777215` reached
+  the 4 GiB limit). `chunkSamples` must now be at least 16, FLAC's smallest
+  block. In the Rust crate, call `ChunkEncoder::cut()` and `finish()` until
+  they return no file.
 
 ## [1.2.1] - 2026-11-17
 

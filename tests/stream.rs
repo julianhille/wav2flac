@@ -427,6 +427,9 @@ fn chunk_encoder_state_and_errors() {
             .map(|e| e.code())
     };
     assert_eq!(new(opts.clone(), Some(0)), Some(ErrorCode::InvalidOptions));
+    // FLAC's smallest block.
+    assert_eq!(new(opts.clone(), Some(15)), Some(ErrorCode::InvalidOptions));
+    assert_eq!(new(opts.clone(), Some(16)), None);
     let no_bits = Options {
         bits_per_sample: None,
         ..opts.clone()
@@ -456,6 +459,8 @@ fn chunk_encoder_state_and_errors() {
         enc.push(&[0.0]).unwrap_err().code(),
         ErrorCode::EncoderState
     );
+    // finish() goes on until it has returned no file.
+    assert!(enc.finish().unwrap().is_empty());
     assert_eq!(enc.finish().unwrap_err().code(), ErrorCode::EncoderState);
     let total: usize = files
         .iter()
@@ -479,4 +484,44 @@ fn chunk_encoder_state_and_errors() {
     // Finishing with nothing pushed gives no file.
     let mut enc = ChunkEncoder::new(48000, 1, opts_16k(ResampleQuality::Fast), None).unwrap();
     assert!(enc.finish().unwrap().is_empty());
+}
+
+/// Calls `cut()`, or `finish()`, until it returns no file, checking that no
+/// call returns 64 MiB or more before its last file.
+fn drain(enc: &mut ChunkEncoder, finish: bool) -> Vec<Vec<Vec<u8>>> {
+    let mut calls = Vec::new();
+    loop {
+        let files = if finish { enc.finish() } else { enc.cut() }.unwrap();
+        let Some((_, before)) = files.split_last() else {
+            return calls;
+        };
+        let bytes: usize = before.iter().map(Vec::len).sum();
+        assert!(bytes < 64 << 20, "{bytes} bytes before the last file");
+        calls.push(files);
+    }
+}
+
+// Issue #88: tiny files with large padding no longer fill the wasm memory.
+#[test]
+fn one_call_returns_about_64_mib_of_files_at_most() {
+    // Each file has 16 MiB of padding: 4 files reach 64 MiB.
+    let opts = Options {
+        bits_per_sample: Some(16),
+        padding: wav2flac::options::MAX_PADDING,
+        ..Options::default()
+    };
+    let input = test_signal(16000, 1, 164, 13);
+    let whole = whole_encode(&input, 16000, 1, opts.clone());
+    let mut enc = ChunkEncoder::new(16000, 1, opts, Some(16)).unwrap();
+    let count = |calls: &[Vec<Vec<u8>>]| calls.iter().map(Vec::len).collect::<Vec<_>>();
+    enc.push(&input[..90]).unwrap();
+    let cut = drain(&mut enc, false);
+    assert_eq!(count(&cut), [4, 1]); // 10 frames stay pending
+    enc.push(&input[90..]).unwrap();
+    let last = drain(&mut enc, true);
+    assert_eq!(count(&last), [4, 2]); // 5 full files and 4 frames
+    assert_eq!(enc.finish().unwrap_err().code(), ErrorCode::EncoderState);
+    let files: Vec<Vec<u8>> = cut.into_iter().chain(last).flatten().collect();
+    assert!(files.iter().all(|f| f.len() > 16 << 20));
+    assert!(join(&files, 16000, 1, 16) == whole.samples);
 }

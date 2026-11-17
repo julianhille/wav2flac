@@ -74,8 +74,9 @@ A cut therefore lands up to that much before the moment you call `encode()`.
 ## Files of exactly the same length
 
 With `chunkSamples`, every file has exactly that many samples per channel,
-at the output rate. Only the last one is shorter. `encode()` and `finish()`
-return an array of the files that are ready, often none.
+at the output rate. Only the last one is shorter. `chunkSamples` must be at
+least 16, FLAC's smallest block. `encode()` and `finish()` return an array of
+the files that are ready, often none.
 
 ```js
 import { createChunkEncoder } from 'wav2flac';
