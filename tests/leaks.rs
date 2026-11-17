@@ -268,7 +268,7 @@ fn chunk_encoder_plateaus_while_cutting() {
             c.push(&input).unwrap();
             drop(c.cut().unwrap());
         });
-        drop(c.finish().unwrap());
+        while !c.finish().unwrap().is_empty() {}
     }
 }
 
@@ -371,7 +371,7 @@ fn stream_types_free_everything() {
         let mut c = ChunkEncoder::new(44_100, 1, opts.clone(), Some(500)).unwrap();
         c.push(&input).unwrap();
         drop(c.cut().unwrap());
-        drop(c.finish().unwrap());
+        while !c.finish().unwrap().is_empty() {}
     });
     assert_returns_all("chunk encoder, abandoned", || {
         let mut c = ChunkEncoder::new(44_100, 1, opts.clone(), None).unwrap();

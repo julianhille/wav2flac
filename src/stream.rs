@@ -12,7 +12,9 @@
 
 use crate::encoder::Encoder;
 use crate::error::{err, ErrorCode, Result};
-use crate::options::{Dither, Options, OutputMode, ResampleQuality, MAX_SAMPLE_RATE};
+use crate::options::{
+    Dither, Options, OutputMode, ResampleQuality, MAX_SAMPLE_RATE, MIN_BLOCK_SIZE,
+};
 use crate::pcm::{PcmFormat, PcmSpec};
 use crate::transcode::requantize::Requantizer;
 use crate::transcode::resample::Resample;
@@ -24,10 +26,18 @@ const MAX_CHANNELS: u16 = 8;
 /// Input samples processed per step, so a huge push needs no huge buffers.
 const PUSH_SLICE: usize = 1 << 16;
 
+/// One [`ChunkEncoder::cut`] or [`ChunkEncoder::finish`] call stops after
+/// the file that brings its output to this many bytes, leaving the rest
+/// pending. Every file carries its own padding and tags (up to 32 MiB), so
+/// short files could otherwise fill the 4 GiB of wasm32 memory.
+const CUT_BYTES: usize = 64 << 20;
+
 /// Lifecycle of a stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
     Open,
+    /// A chunk encoder's `finish()` has ended the input; files are left.
+    Finishing,
     Flushed,
     Failed,
 }
@@ -116,7 +126,9 @@ impl StreamResampler {
     fn check_open(&self) -> Result<()> {
         match self.state {
             State::Open => Ok(()),
-            State::Flushed => err(ErrorCode::EncoderState, "resampler already flushed"),
+            State::Flushed | State::Finishing => {
+                err(ErrorCode::EncoderState, "resampler already flushed")
+            }
             State::Failed => err(
                 ErrorCode::EncoderState,
                 "resampler failed earlier and cannot be reused",
@@ -233,7 +245,8 @@ impl ChunkEncoder {
     ///
     /// The errors of [`Options::validate`] and [`StreamResampler::new`];
     /// `UnsupportedFormat` without `bits_per_sample`; `InvalidOptions` for a
-    /// `chunk_frames` of 0 or a streaming output mode.
+    /// `chunk_frames` below 16 (FLAC's smallest block) or a streaming output
+    /// mode.
     pub fn new(
         input_rate: u32,
         channels: u16,
@@ -247,8 +260,11 @@ impl ChunkEncoder {
                 "a chunk encoder writes complete files; streaming output is not supported",
             );
         }
-        if chunk_frames == Some(0) {
-            return err(ErrorCode::InvalidOptions, "chunkSamples must be at least 1");
+        if chunk_frames.is_some_and(|n| n < MIN_BLOCK_SIZE) {
+            return err(
+                ErrorCode::InvalidOptions,
+                format!("chunkSamples must be at least {MIN_BLOCK_SIZE}"),
+            );
         }
         let output_rate = opts.sample_rate.unwrap_or(input_rate);
         let resampler =
@@ -295,7 +311,9 @@ impl ChunkEncoder {
     fn check_open(&self) -> Result<()> {
         match self.state {
             State::Open => Ok(()),
-            State::Flushed => err(ErrorCode::EncoderState, "chunk encoder already finished"),
+            State::Flushed | State::Finishing => {
+                err(ErrorCode::EncoderState, "chunk encoder already finished")
+            }
             State::Failed => err(
                 ErrorCode::EncoderState,
                 "chunk encoder failed earlier and cannot be reused",
@@ -324,8 +342,10 @@ impl ChunkEncoder {
     }
 
     /// Cuts the files that are ready. Without `chunk_frames`: one file of
-    /// every pending frame, or none if nothing is pending. With it: every
-    /// complete file; the rest stays pending.
+    /// every pending frame, or none if nothing is pending. With it: the
+    /// complete files; the rest stays pending. A call stops after the file
+    /// that brings its output to 64 MiB and leaves the rest pending too, so
+    /// call it until it returns none.
     ///
     /// # Errors
     ///
@@ -337,54 +357,52 @@ impl ChunkEncoder {
         self.track(r)
     }
 
-    /// Ends the input and returns the last files: the pending complete files
-    /// and then the remainder (shorter, or of any length without
-    /// `chunk_frames`). Returns no file when nothing is left.
+    /// Ends the input on the first call and returns the last files: the
+    /// pending complete files and then the remainder (shorter, or of any
+    /// length without `chunk_frames`). Like [`ChunkEncoder::cut`], call it
+    /// until it returns none; after that, every call fails.
     ///
     /// # Errors
     ///
-    /// `EncoderState` if already finished or after an earlier error,
-    /// `InvalidOptions` if the input ends inside a sample frame, or an
+    /// `EncoderState` once it has returned no file, or after an earlier
+    /// error, `InvalidOptions` if the input ends inside a sample frame, or an
     /// encoding error.
     pub fn finish(&mut self) -> Result<Vec<Vec<u8>>> {
-        self.check_open()?;
-        let (requant, pending) = (&mut self.requant, &mut self.pending);
-        let r = self
-            .resampler
-            .flush(|s| requant.run(s, pending))
-            .and_then(|()| self.cut_inner(true));
-        let r = self.track(r);
-        if r.is_ok() {
+        if self.state != State::Finishing {
+            self.check_open()?;
+            let (requant, pending) = (&mut self.requant, &mut self.pending);
+            let r = self.resampler.flush(|s| requant.run(s, pending));
+            self.track(r)?;
+            self.state = State::Finishing;
+        }
+        let r = self.cut_inner(true);
+        let files = self.track(r)?;
+        if files.is_empty() {
             self.state = State::Flushed;
             self.pending = Vec::new();
         }
-        r
+        Ok(files)
     }
 
+    /// Encodes the next files: the complete ones and, if `last`, a shorter
+    /// remainder. Stops after the file that brings the output to `CUT_BYTES`.
     fn cut_inner(&mut self, last: bool) -> Result<Vec<Vec<u8>>> {
         let ch = usize::from(self.spec.channels);
         let frames = self.pending.len() / ch;
-        let mut sizes = Vec::new();
-        match self.chunk_frames {
-            None => {
-                if frames > 0 {
-                    sizes.push(frames);
-                }
+        // Without `chunk_frames`, one file of everything.
+        let n = self.chunk_frames.unwrap_or(frames);
+        let (mut files, mut at, mut bytes) = (Vec::new(), 0, 0);
+        while bytes < CUT_BYTES {
+            let size = n.min(frames - at);
+            if size == 0 || (size < n && !last) {
+                break;
             }
-            Some(n) => {
-                sizes.extend(std::iter::repeat_n(n, frames / n));
-                if last && !frames.is_multiple_of(n) {
-                    sizes.push(frames % n);
-                }
-            }
+            let file = self.encode_file(&self.pending[at * ch..(at + size) * ch])?;
+            bytes += file.len();
+            files.push(file);
+            at += size;
         }
-        let mut files = Vec::with_capacity(sizes.len());
-        let mut at = 0;
-        for size in sizes {
-            files.push(self.encode_file(&self.pending[at..at + size * ch])?);
-            at += size * ch;
-        }
-        self.pending.drain(..at);
+        self.pending.drain(..at * ch);
         Ok(files)
     }
 
@@ -401,7 +419,8 @@ impl ChunkEncoder {
         let frames = enc.push(&bytes)?;
         let f = enc.finish()?;
         let mut out = f.header;
-        out.reserve(frames.len() + f.tail.len());
+        // Exact: `reserve` could double a header of up to 32 MiB of padding.
+        out.reserve_exact(frames.len() + f.tail.len());
         out.extend_from_slice(&frames);
         out.extend_from_slice(&f.tail);
         Ok(out)

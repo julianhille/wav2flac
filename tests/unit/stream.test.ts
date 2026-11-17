@@ -583,6 +583,36 @@ describe.skipIf(!has('flac'))('createChunkEncoder', () => {
     }
   });
 
+  // Issue #88: each file carries its own padding (up to 16 MiB), so a wasm
+  // call stops after the file that brings it to 64 MiB and the wrapper calls again.
+  it('drains more than 64 MiB of files over several wasm calls', () => {
+    // A wasm call stops after the 4th file: 4 × 16 MiB reach 64 MiB.
+    const o = { inputRate: 16000, bitsPerSample: 16, chunkSamples: 16, padding: 2 ** 24 - 1 };
+    const x = signal(16000, 1, 164);
+    const cut = vi.spyOn(WasmChunkEncoder.prototype, 'cut');
+    const finish = vi.spyOn(WasmChunkEncoder.prototype, 'finish');
+    const counts = (spy: typeof cut): number[] =>
+      spy.mock.results.map((r) => (r.value as unknown[]).length);
+    const enc = createChunkEncoderSync(o);
+    const files: Bytes[] = [];
+    try {
+      files.push(...enc.encode(x.subarray(0, 90)));
+      expect(counts(cut)).toEqual([4, 1, 0]); // 10 samples stay pending
+      enc.push(x.subarray(90));
+      files.push(...enc.finish());
+      expect(counts(finish)).toEqual([4, 2, 0]); // 5 full files and 4 samples
+      expect(() => enc.finish()).toThrow(expect.objectContaining({ code: 'ENCODER_STATE' }));
+    } finally {
+      enc.free();
+      cut.mockRestore();
+      finish.mockRestore();
+    }
+    for (const f of files) expect(f.byteLength).toBeGreaterThan(2 ** 24);
+    const { samples, lengths } = join(files);
+    expect(lengths).toEqual([...Array<number>(10).fill(16), 4]);
+    expect(diff(samples, wholeSamples(x, o))).toBeNull();
+  });
+
   it('works without resampling', () => {
     const o = { inputRate: 16000, bitsPerSample: 16 };
     const x = signal(16000, 1, 40000);
@@ -651,6 +681,7 @@ describe('chunk encoder state and errors', () => {
       [{ ...ok, channels: 0 }, 'INVALID_OPTIONS'],
       [{ ...ok, channels: 9 }, 'TOO_MANY_CHANNELS'],
       [{ ...ok, chunkSamples: 0 }, 'INVALID_OPTIONS'],
+      [{ ...ok, chunkSamples: 15 }, 'INVALID_OPTIONS'], // below FLAC's smallest block
       [{ ...ok, chunkSamples: 2.5 }, 'INVALID_OPTIONS'],
       [{ ...ok, pcm: { sampleRate: 48000, channels: 1 } }, 'INVALID_OPTIONS'],
       [{ ...ok, maxInputBytes: 10 }, 'INVALID_OPTIONS'],
@@ -671,6 +702,10 @@ describe('chunk encoder state and errors', () => {
       expect(() => createChunkEncoderSync(opts), JSON.stringify(o)).toThrow(code(c));
       await expect(createChunkEncoder(opts)).rejects.toThrow(code(c));
     }
+    createChunkEncoderSync({ ...ok, chunkSamples: 16 }).free();
+    expect(() => createChunkEncoderSync({ ...ok, chunkSamples: 2 ** 32 })).toThrow(
+      'chunkSamples must be an integer between 16 and 4294967295',
+    );
   });
 
   it('treats onChunk: undefined as no callback', () => {
@@ -926,6 +961,27 @@ describe('chunk encoder with onChunk', () => {
       push.mockRestore();
     }
     expect(got).toEqual(returned(x, o, x.length));
+  });
+
+  it('hands each batch of files to onChunk before the next wasm call', () => {
+    const cut = vi.spyOn(WasmChunkEncoder.prototype, 'cut');
+    const at: number[] = []; // wasm cut() calls made before each file
+    const enc = createChunkEncoderSync({
+      ...o16,
+      chunkSamples: 16,
+      padding: 2 ** 24 - 1, // a wasm call stops after 4 files
+      onChunk: () => void at.push(cut.mock.calls.length),
+    });
+    try {
+      enc.push(new Float32Array(100));
+      expect(at).toEqual([1, 1, 1, 1, 2, 2]);
+      expect(cut).toHaveBeenCalledTimes(3);
+      enc.finish();
+      expect(at).toHaveLength(7);
+    } finally {
+      enc.free();
+      cut.mockRestore();
+    }
   });
 
   it('fails when onChunk detaches the input of a multi-slice push', () => {
