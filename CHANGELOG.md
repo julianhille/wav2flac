@@ -14,9 +14,19 @@ links are collected at the bottom of this file.
 
 - rubato 5.1.0 (was 5.0.1). Dev dependencies: Playwright 1.65.1, Prettier
   3.10.1.
+- wasm-bindgen 0.2.130 (was 0.2.129), the crate and the CLI the build
+  checks it against.
 - Encoding 8- and 32-bit output is faster: like 16- and 24-bit output since
   1.2.1, the MD5 input is packed without a per-sample slice copy. The output
   is unchanged.
+- The wasm is built with WebAssembly SIMD (`simd128`). Resampling with
+  `'balanced'` and `'best'` takes about 40 % less time, with `'fast'` about
+  10 % less, and the output is byte for byte the same. The wasm grows by about
+  7 KB (~107 KB gzipped). Engines without wasm SIMD can't load it any more and
+  fail with a `WebAssembly.CompileError`: Safari and iOS before 16.4, any
+  engine on an x86 CPU without SSE4.1, JavaScriptCore (Bun, WebKitGTK) on an
+  x86-64 CPU without AVX, and Firefox on 32-bit ARM. To support them, pin
+  wav2flac to `~1.2`.
 
 ### Fixed
 

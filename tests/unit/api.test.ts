@@ -132,8 +132,8 @@ describe('encode / encodeSync / encodeStream', () => {
   });
 
   it('resamples to the same bytes on every host', () => {
-    // wasm floats are IEEE without fused ops and the libm is compiled in, so the output
-    // is fixed. A change here is a change of the resampler: note it in the CHANGELOG.
+    // wasm floats are IEEE without fused ops (SIMD included) and the libm is compiled in,
+    // so the output is fixed. A change here is a change of the resampler: note it in the CHANGELOG.
     // Downsampling by up to 4x included: the longer filters above 4x must not touch it.
     const hashes = (
       [
