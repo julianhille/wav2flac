@@ -30,6 +30,10 @@ if [[ -z "$flags" && -n "${RUSTFLAGS:-}" ]]; then
   read -ra words <<<"$RUSTFLAGS"
   flags=$(IFS=$sep; echo "${words[*]}")
 fi
+# simd128 lets LLVM vectorize rubato's sinc dot product. Wasm SIMD has no FMA and LLVM
+# keeps the order of float operations, so the output stays the same. Set here, as
+# CARGO_ENCODED_RUSTFLAGS overrides .cargo/config.toml; first, so RUSTFLAGS can undo it.
+flags="-Ctarget-feature=+simd128${flags:+$sep$flags}"
 for remap in "$PWD=." "${CARGO_HOME:-$HOME/.cargo}=~/.cargo" "$(rustc --print sysroot)=/rustc"; do
   flags+="${flags:+$sep}--remap-path-prefix=$remap"
 done
@@ -48,7 +52,7 @@ echo "» wasm-opt"
 rm -rf pkg && mkdir -p pkg
 wasm-opt -O3 --strip-debug --strip-producers \
   --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals \
-  --enable-reference-types --enable-multivalue \
+  --enable-reference-types --enable-multivalue --enable-simd \
   build/bindgen/wav2flac_bg.wasm -o pkg/wav2flac.wasm
 
 echo "» third-party licenses"

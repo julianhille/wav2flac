@@ -45,6 +45,35 @@ function noticeSections(text: string): (heading: string) => string {
 }
 
 /**
+ * The value types of the locals of every function in a wasm module.
+ * @param wasm The module.
+ * @returns The type bytes, such as 0x7f for i32 and 0x7b for v128.
+ */
+function localTypes(wasm: Uint8Array): number[] {
+  const types = new Set<number>();
+  for (let at = 8; at < wasm.length;) {
+    const section = readLeb128(wasm, at + 1);
+    const end = section.next + section.value;
+    // The code section: a count, then per function its size, runs of locals and code.
+    if (wasm[at] === 10) {
+      for (let body = readLeb128(wasm, section.next).next; body < end;) {
+        const size = readLeb128(wasm, body);
+        const runs = readLeb128(wasm, size.next);
+        let p = runs.next;
+        for (let i = 0; i < runs.value; i++) {
+          p = readLeb128(wasm, p).next; // how many locals of the type that follows
+          types.add(wasm[p]!);
+          p += 1;
+        }
+        body = size.next + size.value;
+      }
+    }
+    at = end;
+  }
+  return [...types];
+}
+
+/**
  * Runs a command and returns its stdout.
  * @param cmd Command.
  * @param args Arguments.
@@ -202,6 +231,14 @@ describe('installed package', () => {
       Math.abs(actual - stated) / actual,
       `README says ~${stated} KB, the wasm is ${actual.toFixed(1)} KB gzipped`,
     ).toBeLessThan(0.1);
+  });
+
+  it('ships the wasm built with SIMD (simd128)', () => {
+    // Engines don't tell which features a module uses, and the shipped wasm has no
+    // target_features section. SIMD code keeps its vectors in v128 locals; without
+    // simd128 there are none.
+    const wasm = readFileSync(join(installed, 'pkg/wav2flac.wasm'));
+    expect(localTypes(wasm), 'v128 (0x7b) locals; built without +simd128?').toContain(0x7b);
   });
 
   it('lists every component in a Markdown table, with its notices in code blocks', () => {
