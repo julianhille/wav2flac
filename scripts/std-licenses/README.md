@@ -7,7 +7,7 @@ license texts. `scripts/gen-licenses.ts` copies the texts into
 `THIRD_PARTY_LICENSES.txt`, which the build also puts into the wasm.
 
 The files are third-party texts and are kept as published. They come from
-Rust 1.99.0, the release in `rust-toolchain.toml`:
+Rust 1.100.0, the release in `rust-toolchain.toml`:
 
 | File | Source |
 |---|---|
