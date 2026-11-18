@@ -65,6 +65,10 @@ fn output_length_is_exact() {
         (8000, 22050),
         (192000, 44100),
         (22050, 8000),
+        // Above 4:1 the filter is longer.
+        (48000, 8000),
+        (192000, 16000),
+        (192000, 8000),
     ] {
         // 44100 frames at 44.1k -> 48k is exactly 48000; float math gave 48001.
         for frames in [0usize, 1, 999, 44100, 48000] {
@@ -321,6 +325,36 @@ fn bit_depth_increase_is_exact_shift() {
 }
 
 #[test]
+fn md5_of_one_and_four_byte_outputs() {
+    // The MD5 covers each output sample little-endian, sign-extended to
+    // ceil(bits / 8) bytes: one byte for 4..=8 bits, four for 25..=32.
+    for ch in [1u16, 2, 6] {
+        let s = signal(Signal::Noise, 16, usize::from(ch), 3000, u64::from(ch));
+        let w = wav(ch, 44100, 16, &s);
+        for bits in (4u32..=8).chain(25..=32) {
+            let expect: Vec<i32> = if bits < 16 {
+                let step = f64::from(1u32 << (16 - bits));
+                let (lo, hi) = (-(1i32 << (bits - 1)), (1i32 << (bits - 1)) - 1);
+                s.iter()
+                    .map(|v| ((f64::from(*v) / step).round() as i32).clamp(lo, hi))
+                    .collect()
+            } else {
+                s.iter().map(|v| v << (bits - 16)).collect()
+            };
+            let opts = Options {
+                bits_per_sample: Some(bits),
+                dither: Dither::None,
+                ..Options::default()
+            };
+            // Read STREAMINFO directly: decoding 4..=7 and 25..=31 bits
+            // spawns ffmpeg, too slow for this many cases.
+            let si = &metadata_blocks(&encode(&w, opts)).0[0].2;
+            assert_eq!(si[18..34], pcm_md5(&expect, bits), "{bits}-bit {ch}ch");
+        }
+    }
+}
+
+#[test]
 fn thirty_two_bit_and_float_inputs() {
     // 32-bit int is lossless by default now (FLAC supports 32-bit).
     let s = signal(Signal::Noise, 32, 1, 3000, 1);
@@ -400,25 +434,51 @@ fn extreme_upsampling_is_rejected() {
 
 #[test]
 fn large_downsampling_ratio_keeps_stop_band() {
-    // 192 kHz → 16 kHz: a 12 kHz tone would alias to 4 kHz. The filter is
-    // lengthened for large ratios, so the stop band holds like at 2:1.
-    let x = sine_f64(12_000.0, 192_000, 1, 192_000, 0.9);
-    for (q, min_db) in [
-        (ResampleQuality::Fast, 60.0),
-        (ResampleQuality::Balanced, 90.0),
-        (ResampleQuality::Best, 110.0),
+    // The filter is lengthened for large ratios, so above 4:1 it filters as at
+    // 3:1 and 4:1 (the first two pairs): flat to 90 % of the new Nyquist, and
+    // a tone just above it (at 16 kHz, 8.5 kHz would alias to 7.5 kHz) or far
+    // above it (12 kHz to 4 kHz) is down by the preset's stop band.
+    for (from, to) in [
+        (48_000u32, 16_000u32),
+        (64_000, 16_000),
+        (96_000, 16_000),
+        (192_000, 16_000),
+        (48_000, 8_000),
+        (44_100, 8_000),
     ] {
-        let o = Options {
-            sample_rate: Some(16000),
-            bits_per_sample: Some(24),
-            resample_quality: q,
-            dither: Dither::None,
-            ..Options::default()
+        let rate = f64::from(to);
+        // Level (dB) of a 0.9 tone at `freq` in the output, folded below Nyquist.
+        let level = |freq: f64, q| {
+            let x = sine_f64(freq, from, 1, from as usize, 0.9);
+            let o = Options {
+                sample_rate: Some(to),
+                bits_per_sample: Some(24),
+                resample_quality: q,
+                dither: Dither::None,
+                ..Options::default()
+            };
+            let y = channel0(&decode(&encode(&float_wav(&x, 1, from), o)));
+            let mid = &y[y.len() / 4..3 * y.len() / 4];
+            let at = if 2.0 * freq > rate { rate - freq } else { freq };
+            20.0 * (tone_amplitude(mid, at, rate) / 0.9).max(1e-12).log10()
         };
-        let y = channel0(&decode(&encode(&float_wav(&x, 1, 192_000), o)));
-        let mid = &y[y.len() / 4..3 * y.len() / 4];
-        let alias = tone_amplitude(mid, 4000.0, 16000.0);
-        let db = -20.0 * (alias / 0.9).max(1e-12).log10();
-        assert!(db >= min_db, "{q:?}: alias only {db:.1} dB down");
+        for (q, min_db) in [
+            (ResampleQuality::Fast, 60.0),
+            (ResampleQuality::Balanced, 90.0),
+            (ResampleQuality::Best, 110.0),
+        ] {
+            let pass = level(0.45 * rate, q);
+            assert!(
+                pass.abs() <= 0.5,
+                "{q:?} {from}->{to}: {pass:+.2} dB at 90 % of the new Nyquist"
+            );
+            for nyquists in [1.0625, 1.5] {
+                let db = -level(nyquists * rate / 2.0, q);
+                assert!(
+                    db >= min_db,
+                    "{q:?} {from}->{to}: {nyquists} x the new Nyquist only {db:.1} dB down"
+                );
+            }
+        }
     }
 }
