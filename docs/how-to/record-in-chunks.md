@@ -67,9 +67,10 @@ export function stop() {
 
 The resampler holds back a little audio: up to 1024 input frames plus half the
 filter, about 23 ms at 48 kHz with `'fast'` and 32 ms with `'best'` at 44.1
-kHz, and longer at lower input rates (about 130–145 ms at 8 kHz). Those samples
-go into the next file, or into the last one at `finish()`, so nothing is lost.
-A cut therefore lands up to that much before the moment you call `encode()`.
+kHz, and longer at lower input rates (about 130–145 ms at 8 kHz) and output
+rates (37 ms for 48 → 8 kHz with `'best'`). Those samples go into the next
+file, or into the last one at `finish()`, so nothing is lost. A cut therefore
+lands up to that much before the moment you call `encode()`.
 
 ## Files of exactly the same length
 

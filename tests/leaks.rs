@@ -239,7 +239,12 @@ fn stream_resampler_plateaus() {
     let input: Vec<f32> = (0..4096 * 2)
         .map(|i| (i as f32 * 0.01).sin() * 0.5)
         .collect();
-    for (from, to) in [(44_100, 48_000), (48_000, 16_000), (8_000, 8_000)] {
+    for (from, to) in [
+        (44_100, 48_000),
+        (48_000, 16_000),
+        (192_000, 16_000),
+        (8_000, 8_000),
+    ] {
         let mut r = StreamResampler::new(from, to, 2, ResampleQuality::Balanced).unwrap();
         let mut n = 0;
         assert_plateau(&format!("{from} -> {to}"), |i| {

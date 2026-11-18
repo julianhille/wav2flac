@@ -7,7 +7,7 @@ use common::*;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
-use wav2flac::{Encoder, Options, OutputMode};
+use wav2flac::{Encoder, Options, OutputMode, ResampleQuality};
 
 struct Counting;
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
@@ -87,4 +87,37 @@ fn heavy_upsampling_stays_bounded() {
         grew < 32 << 20,
         "peak grew by {grew} bytes beyond the output"
     );
+}
+
+#[test]
+fn heavy_downsampling_stays_bounded() {
+    let _turn = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // 192 kHz → 8 kHz lengthens the filter, and its sinc tables, by the
+    // largest factor: that must stay bounded like the upsampling scratch.
+    let s = signal(Signal::Silence, 16, 2, 1 << 20, 1);
+    let w = wav(2, 192_000, 16, &s);
+    drop(s);
+    for q in [
+        ResampleQuality::Fast,
+        ResampleQuality::Balanced,
+        ResampleQuality::Best,
+    ] {
+        let base = CURRENT.load(Ordering::Relaxed);
+        PEAK.store(base, Ordering::Relaxed);
+        let mut e = Encoder::new(Options {
+            mode: OutputMode::Streaming,
+            sample_rate: Some(8000),
+            bits_per_sample: Some(16),
+            resample_quality: q,
+            ..Options::default()
+        })
+        .unwrap();
+        let out = e.push(&w).unwrap();
+        e.finish().unwrap();
+        drop(out);
+        let grew = PEAK.load(Ordering::Relaxed) - base;
+        assert!(grew < 32 << 20, "{q:?}: peak grew by {grew} bytes");
+    }
 }
