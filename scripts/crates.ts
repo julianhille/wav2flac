@@ -102,7 +102,7 @@ export function noticeFiles(c: Package): string[] {
  * The Rust release whose license texts are in scripts/std-licenses/. Change it
  * only after comparing the texts with the new release (see the README.md there).
  */
-export const STD_TEXTS_RELEASE = '1.99.0';
+export const STD_TEXTS_RELEASE = '1.100.0';
 
 let toolchain: string | undefined;
 /**
