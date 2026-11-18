@@ -12,6 +12,8 @@ links are collected at the bottom of this file.
 
 ### Changed
 
+- wasm-bindgen 0.2.130 (was 0.2.129), the crate and the CLI the build
+  checks it against.
 - Encoding 8- and 32-bit output is faster: like 16- and 24-bit output since
   1.2.1, the MD5 input is packed without a per-sample slice copy. The output
   is unchanged.
