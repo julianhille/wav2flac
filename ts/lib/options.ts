@@ -36,9 +36,11 @@ export interface Progress {
 /**
  * Resampler filter quality. Stop band: `'fast'` ≥ 60 dB, `'balanced'` ≥ 90 dB,
  * `'best'` ≥ 110 dB. Downsampling is flat to about 90 % of the new Nyquist on
- * every preset. When upsampling, `'fast'` and `'balanced'` roll off above
- * about 80 % of the input's Nyquist (44.1 → 48 kHz: −4 / −10 dB at 20 kHz);
- * use `'best'` for a flat top octave.
+ * every preset, up to 16:1 (192 → 12 kHz). Beyond that, the transition band
+ * widens by ratio / 16: the top of the passband rolls off, and aliasing from
+ * just above the new Nyquist rises. When upsampling, `'fast'` and
+ * `'balanced'` roll off above about 80 % of the input's Nyquist (44.1 → 48
+ * kHz: −4 / −10 dB at 20 kHz); use `'best'` for a flat top octave.
  */
 export type ResampleQuality = 'fast' | 'balanced' | 'best';
 
