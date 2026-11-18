@@ -134,21 +134,40 @@ describe('encode / encodeSync / encodeStream', () => {
   it('resamples to the same bytes on every host', () => {
     // wasm floats are IEEE without fused ops and the libm is compiled in, so the output
     // is fixed. A change here is a change of the resampler: note it in the CHANGELOG.
-    const src = makeWav({ frames: 20_000, channels: 2, bits: 24, seed: 5 });
-    const hashes = (['fast', 'balanced', 'best'] as const).map((quality) => {
-      const flac = encodeSync(src, {
-        sampleRate: 48000,
-        resampleQuality: quality,
-        bitsPerSample: 32,
+    // Downsampling by up to 4x included: the longer filters above 4x must not touch it.
+    const hashes = (
+      [
+        [44100, 48000],
+        [48000, 16000],
+        [44100, 16000],
+        [192000, 48000],
+      ] as const
+    ).flatMap(([rate, sampleRate]) => {
+      const src = makeWav({ frames: 20_000, channels: 2, bits: 24, rate, seed: 5 });
+      return (['fast', 'balanced', 'best'] as const).map((quality) => {
+        const flac = encodeSync(src, {
+          sampleRate,
+          resampleQuality: quality,
+          bitsPerSample: 32,
+        });
+        return createHash('sha256')
+          .update(flac.subarray(metadataLength(flac)))
+          .digest('hex');
       });
-      return createHash('sha256')
-        .update(flac.subarray(metadataLength(flac)))
-        .digest('hex');
     });
     expect(hashes).toEqual([
       '0ccb172e2fe3f5c851ee7e8424272df53b4a6de49c5d52f2f38a9f6f4e475e3b',
       '7e04e0be73aa0f32413778c3da9657aef928e1665e4fe4cdd10b9b0c9cbc8f7a',
       '44c45476548bc15f66aa0cf2424ca80d594c651e44ff22ab0ca67223de9acf4a',
+      'f61c9b0d18b9680d90b647db50e73127f9c5a1d0534ba8582798b6bdfd029c0c',
+      'a470fd74416de0c9aecb197b121b991efdbab877169d08d7f7aac5c23ba91445',
+      'd5cb3bf0f896d8a4701ea2b83858ca9cdfad141e23edc4f4476bcd2c002ea6a9',
+      'a456d007e14baea5299eab2614d0fbaa83896f229ffe7ace9f0ce387345b6501',
+      '4e6256581deb40e14e5efa0b819527ac03d5c73002111abeaddd826e9ac6ce2b',
+      '892d80ad91cbdd011eaf43eb94a34802c3d6bea4fa2c57f787ff8e807df3c559',
+      '437131e0f9d0ef36bb0468f5fd5fa0b1c2ddde1ebc353176528a9fafa1b802f0',
+      'ecbc9c977f22f489e29d8d77522c6f12959f91a16057372c7ff9e6793dd710e8',
+      'a6ba58abf39392d9380611f754e8ab79b4e3f7173984c867228775c55f374fd5',
     ]);
   });
 

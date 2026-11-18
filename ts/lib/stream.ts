@@ -61,7 +61,8 @@ export interface ResamplerOptions<O extends ResamplerOutput = ResamplerOutput> {
  * length a one-shot conversion has. Output lags the input by up to 1024
  * input frames plus half the filter: about 23 ms (48 → 16 kHz, `'fast'`) to
  * 32 ms (44.1 → 16 kHz, `'best'`), longer at lower input rates (about 130–145
- * ms at 8 kHz); `flush()` returns the rest.
+ * ms at 8 kHz) and output rates (37 ms for 48 → 8 kHz, `'best'`); `flush()`
+ * returns the rest.
  */
 export interface Resampler<S extends Int16Array | Float32Array = ResampledSamples> {
   /**

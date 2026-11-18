@@ -41,9 +41,12 @@ pub enum OutputMode {
 ///
 /// The passband is measured against the lower of the two Nyquist rates
 /// (22.05 kHz for 44.1 kHz ↔ 48 kHz). Downsampling lengthens the filter, so
-/// all presets are flat to about 90 % of it. Upsampling uses the preset's
-/// base length: `Fast` and `Balanced` are flat to about 80 % and roll off
-/// above (at 20 kHz, 44.1 → 48 kHz: −4 dB and −10 dB), `Best` is flat to 90 %.
+/// all presets are flat to about 90 % of it, up to 16:1 (192 kHz → 12 kHz).
+/// Beyond that, the transition band widens by `ratio / 16`: the top of the
+/// passband rolls off, and aliasing from just above the new Nyquist rises.
+/// Upsampling uses the preset's base length: `Fast` and `Balanced` are flat
+/// to about 80 % and roll off above (at 20 kHz, 44.1 → 48 kHz: −4 dB and
+/// −10 dB), `Best` is flat to 90 %.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ResampleQuality {
     /// Short filter (64 taps); fastest; stop band at least 60 dB down.
@@ -187,10 +190,10 @@ impl Options {
             for (k, _) in overrides {
                 validate_tag_key(k)?;
             }
-            // The overrides alone are a lower bound of the `VORBIS_COMMENT`
-            // block: fail now rather than after all the input was encoded.
-            let len = crate::encoder::vorbis_len(&crate::encoder::comments(self, &[]));
-            if len > crate::metadata::MAX_BLOCK_LEN {
+            // Every override counts as if written, removals and replaced ones
+            // too. That bounds the work of applying them, and tags that are
+            // too long fail now rather than after all the input was encoded.
+            if crate::encoder::vorbis_len(overrides) > crate::metadata::MAX_BLOCK_LEN {
                 return err(ErrorCode::InvalidOptions, crate::metadata::TOO_LONG);
             }
         }

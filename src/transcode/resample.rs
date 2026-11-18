@@ -10,8 +10,8 @@ use crate::error::{Error, ErrorCode, Result};
 use crate::options::ResampleQuality;
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{
-    Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
-    WindowFunction,
+    calculate_cutoff, Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters,
+    SincInterpolationType, WindowFunction,
 };
 
 /// Input frames per internal processing chunk.
@@ -32,8 +32,10 @@ fn map_err(e: impl std::fmt::Display) -> Error {
     Error::new(ErrorCode::Internal, format!("resampler: {e}"))
 }
 
-/// Largest factor by which downsampling lengthens the sinc filter.
-const MAX_DOWNSAMPLE_STRETCH: usize = 4;
+/// Largest factor by which downsampling lengthens the sinc filter. The sinc
+/// table grows with it, to 8 MiB for `Best` at 16x (192 kHz → 12 kHz, or
+/// 48 kHz → 3 kHz); larger ratios get a wider transition band.
+const MAX_DOWNSAMPLE_STRETCH: usize = 16;
 
 /// Sinc length (taps, in input samples) of each preset at `ratio` (output
 /// rate / input rate). Downsampling lowers the cutoff by `ratio`, which
@@ -65,15 +67,23 @@ fn oversampling(q: ResampleQuality) -> usize {
 /// Filter parameters for a quality preset.
 fn parameters(q: ResampleQuality, ratio: f64) -> SincInterpolationParameters {
     let len = sinc_len(q, ratio);
-    let params = match q {
-        ResampleQuality::Fast => SincInterpolationParameters::new(len, WindowFunction::Hann2)
-            .interpolation(SincInterpolationType::Linear),
-        ResampleQuality::Balanced | ResampleQuality::Best => {
-            SincInterpolationParameters::new(len, WindowFunction::BlackmanHarris2)
-                .interpolation(SincInterpolationType::Cubic)
-        }
+    let (window, interpolation) = match q {
+        ResampleQuality::Fast => (WindowFunction::Hann2, SincInterpolationType::Linear),
+        ResampleQuality::Balanced | ResampleQuality::Best => (
+            WindowFunction::BlackmanHarris2,
+            SincInterpolationType::Cubic,
+        ),
     };
-    params.oversampling_factor(oversampling(q))
+    // rubato derives the cutoff from the filter length as if the filter were
+    // not stretched, which moves it towards the new Nyquist as it grows. Past
+    // 4x, keep the 4x filter's cutoff, so larger ratios get the response of
+    // 4x downsampling (relative to the new Nyquist). Up to 4x, this is
+    // rubato's own cutoff.
+    let cutoff = calculate_cutoff(len.min(sinc_len(q, 0.25)), window);
+    SincInterpolationParameters::new(len, window)
+        .f_cutoff(cutoff)
+        .interpolation(interpolation)
+        .oversampling_factor(oversampling(q))
 }
 
 /// The filter's group delay in output frames at `ratio` (may be negative).
@@ -335,6 +345,9 @@ mod tests {
             (192_000, 16000),
             (48000, 12000),
             (48001, 12000),
+            // Stretch 16, the largest, and just past it.
+            (192_000, 12000),
+            (192_001, 12000),
             // Largest upsampling, where the sub-sample term reaches frames.
             (8000, 192_000),
             (1000, 256_000),
