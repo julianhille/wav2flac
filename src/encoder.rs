@@ -779,8 +779,9 @@ impl Active {
         let samples = interleaved.len() / self.channels;
         // MD5 over the output samples as little-endian signed integers.
         self.md5_bytes.clear();
-        let w = self.bytes_per_out_sample;
-        match w {
+        // One arm per width (1-4 bytes), so each packs without a per-sample copy.
+        match self.bytes_per_out_sample {
+            1 => self.md5_bytes.extend(interleaved.iter().map(|&v| v as u8)),
             2 => self
                 .md5_bytes
                 .extend(interleaved.iter().flat_map(|&v| (v as i16).to_le_bytes())),
@@ -788,11 +789,9 @@ impl Active {
                 let [a, b, c, _] = v.to_le_bytes();
                 [a, b, c]
             })),
-            _ => {
-                for v in interleaved {
-                    self.md5_bytes.extend_from_slice(&v.to_le_bytes()[..w]);
-                }
-            }
+            _ => self
+                .md5_bytes
+                .extend(interleaved.iter().flat_map(|&v| v.to_le_bytes())),
         }
         self.md5.update(&self.md5_bytes);
         let raw = self.flac.encode_frames(interleaved);

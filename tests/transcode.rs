@@ -321,6 +321,36 @@ fn bit_depth_increase_is_exact_shift() {
 }
 
 #[test]
+fn md5_of_one_and_four_byte_outputs() {
+    // The MD5 covers each output sample little-endian, sign-extended to
+    // ceil(bits / 8) bytes: one byte for 4..=8 bits, four for 25..=32.
+    for ch in [1u16, 2, 6] {
+        let s = signal(Signal::Noise, 16, usize::from(ch), 3000, u64::from(ch));
+        let w = wav(ch, 44100, 16, &s);
+        for bits in (4u32..=8).chain(25..=32) {
+            let expect: Vec<i32> = if bits < 16 {
+                let step = f64::from(1u32 << (16 - bits));
+                let (lo, hi) = (-(1i32 << (bits - 1)), (1i32 << (bits - 1)) - 1);
+                s.iter()
+                    .map(|v| ((f64::from(*v) / step).round() as i32).clamp(lo, hi))
+                    .collect()
+            } else {
+                s.iter().map(|v| v << (bits - 16)).collect()
+            };
+            let opts = Options {
+                bits_per_sample: Some(bits),
+                dither: Dither::None,
+                ..Options::default()
+            };
+            // Read STREAMINFO directly: decoding 4..=7 and 25..=31 bits
+            // spawns ffmpeg, too slow for this many cases.
+            let si = &metadata_blocks(&encode(&w, opts)).0[0].2;
+            assert_eq!(si[18..34], pcm_md5(&expect, bits), "{bits}-bit {ch}ch");
+        }
+    }
+}
+
+#[test]
 fn thirty_two_bit_and_float_inputs() {
     // 32-bit int is lossless by default now (FLAC supports 32-bit).
     let s = signal(Signal::Noise, 32, 1, 3000, 1);
