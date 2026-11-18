@@ -12,6 +12,8 @@ links are collected at the bottom of this file.
 
 ### Changed
 
+- rubato 5.1.0 (was 5.0.1). Dev dependencies: Playwright 1.65.1, Prettier
+  3.10.1.
 - The wasm is built with Rust 1.100.0 (was 1.99.0). The license texts of
   the standard library parts it links are the same as in 1.99.0.
 - wasm-bindgen 0.2.130 (was 0.2.129), the crate and the CLI the build
