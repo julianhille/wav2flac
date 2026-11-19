@@ -10,6 +10,14 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Native and wasm builds now produce identical bytes for 24- and 32-bit
+  input (#98). The encoder's `cos` and `ln` math comes from the `libm` crate
+  (through a vendored, modified libflac-rs) instead of the platform. A native
+  build may now differ from libFLAC (`flac`) on some frames; the output is
+  still valid, lossless FLAC.
+
 ### Changed
 
 - rubato 5.1.0 (was 5.0.1). Dev dependencies: Playwright 1.65.1, Prettier

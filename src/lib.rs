@@ -13,7 +13,8 @@
 //! the same bytes on every host. A native build gives the same bytes too,
 //! except when resampling: rubato's SIMD dot products and the platform's libm
 //! round differently, so a resampled sample can differ by 1 LSB between
-//! native targets, CPUs and the wasm build.
+//! native targets, CPUs and the wasm build. The encoder's own cos/ln math is
+//! pinned via the `libm` crate, so it never differs.
 //!
 //! ```
 //! use wav2flac::{encode_all, Options};

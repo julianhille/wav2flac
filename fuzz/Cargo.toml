@@ -19,6 +19,9 @@ arbitrary = { version = "1", features = ["derive"] }
 libfuzzer-sys = "0.4"
 wav2flac = { path = ".." }
 
+[patch.crates-io]
+libflac-rs = { path = "../vendor/libflac-rs" }
+
 [[bin]]
 name = "encode"
 path = "fuzz_targets/encode.rs"

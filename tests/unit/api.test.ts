@@ -62,6 +62,25 @@ describe('encode / encodeSync / encodeStream', () => {
     expect(await encode(wav, { compressionLevel: 8 })).toEqual(native);
   });
 
+  // #98: the platform libm and wasm's libm port differ in cos/ln, which can flip predictor
+  // choices. At this size these cases pass with and without the libm patch, so they are only a
+  // regression guard and cannot reproduce #98 (the issue's mismatches appear ~25 MB into the
+  // file; a larger input crashes the vitest worker). The discriminating check is the move of
+  // the golden hashes in tests/golden.json.
+  for (const [bits, level] of [
+    [24, 5],
+    [24, 8],
+    [32, 5],
+    [32, 8],
+  ] as const) {
+    it(`is byte-identical to the native build at ${bits}-bit, level ${level}`, async ({ skip }) => {
+      const input = makeWav({ frames: 4096 * 120, channels: 2, bits, rate: 96000, seed: 11 });
+      const native = nativeEncode(input, ['--level', `${level}`]);
+      if (native === null) skip(NO_NATIVE);
+      expect(await encode(input, { compressionLevel: level })).toEqual(native);
+    });
+  }
+
   it('matches the native build for every CLI option, streamed or buffered', async ({ skip }) => {
     // Resampling is left out: see the next test.
     const args = [
