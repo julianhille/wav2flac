@@ -165,15 +165,19 @@ impl Encoder {
     pub fn new(opts: Options) -> Result<Self> {
         opts.validate()?;
         Ok(Self {
-            opts,
             state: State::Header,
             buf: Vec::new(),
-            header_parser: HeaderParser::new(),
+            header_parser: if opts.ignore_chunk_sizes {
+                HeaderParser::ignoring_sizes()
+            } else {
+                HeaderParser::new()
+            },
             bytes_in: 0,
             active: None,
             final_progress: None,
             pending: Vec::new(),
             raw_pcm: false,
+            opts,
         })
     }
 
@@ -434,10 +438,15 @@ impl Encoder {
                 .with_md5(false),
         );
         let header_data_len = header.data_len;
+        let unknown = header.data_unknown;
         let active = Active {
             layout: PcmLayout::from_header(&header),
-            data_remaining: u64::from(header.data_len),
-            data_total: Some(u64::from(header.data_len)),
+            data_remaining: if unknown {
+                u64::MAX
+            } else {
+                u64::from(header.data_len)
+            },
+            data_total: (!unknown).then(|| u64::from(header.data_len)),
             header,
             transcoder,
             flac,
@@ -463,7 +472,7 @@ impl Encoder {
                     let interval = (self.opts.seek_point_interval * rate).round() as u64;
                     metadata::SeekPicker::new(interval.max(1))
                 }),
-            trailing: (self.opts.mode != OutputMode::Streaming)
+            trailing: (self.opts.mode != OutputMode::Streaming && !unknown)
                 .then(|| riff::TrailingScanner::new(header_data_len)),
             lead: Vec::new(),
         };

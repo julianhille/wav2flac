@@ -104,6 +104,13 @@ export interface Options {
   padding?: number | undefined;
   /** Reject inputs larger than this many bytes with `LIMIT_EXCEEDED`. */
   maxInputBytes?: number | undefined;
+  /**
+   * Take the WAV audio to run to the end of the input, whatever the RIFF and
+   * data sizes say. For a WAV piped from ffmpeg, sox or arecord, whose sizes
+   * are placeholders and which are rejected otherwise. Anything after the audio
+   * (a trailing `LIST` chunk) is then encoded as audio. Default `false`.
+   */
+  ignoreChunkSizes?: boolean | undefined;
   /** Cancels the operation; it then rejects/errors with the signal's reason. */
   signal?: AbortSignal | undefined;
   /** Called at most ~20×/s and once at the end. */
@@ -150,6 +157,7 @@ export interface EncoderArgs {
   /** -1 = unlimited. */
   maxInputBytes: number;
   streaming: boolean;
+  ignoreChunkSizes: boolean;
   /** 0 = WAV input; else a {@link PCM_FORMATS} index + 1; -1 = PCM, format still to infer. */
   pcmFormat: number;
   pcmChannels: number;
@@ -173,6 +181,7 @@ const KNOWN: ReadonlySet<string> = new Set<keyof Options>([
   'seekPointInterval',
   'padding',
   'maxInputBytes',
+  'ignoreChunkSizes',
   'signal',
   'onProgress',
   'copy',
@@ -277,6 +286,8 @@ export function normalizeOptions(
   if (o['onProgress'] !== undefined && typeof o['onProgress'] !== 'function') {
     throw invalidOption('onProgress must be a function');
   }
+  if (o['ignoreChunkSizes'] !== undefined && typeof o['ignoreChunkSizes'] !== 'boolean')
+    throw invalidOption('ignoreChunkSizes must be a boolean');
   if (o['copy'] !== undefined && typeof o['copy'] !== 'boolean')
     throw invalidOption('copy must be a boolean');
   const pcm = normalizePcm(o['pcm']);
@@ -295,6 +306,7 @@ export function normalizeOptions(
     padding: uint(o, 'padding', 8192),
     maxInputBytes: uint(o, 'maxInputBytes', -1, Number.MAX_SAFE_INTEGER),
     streaming,
+    ignoreChunkSizes: o['ignoreChunkSizes'] === true,
     ...pcm,
   };
 }

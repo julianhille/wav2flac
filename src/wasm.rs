@@ -72,6 +72,7 @@ fn options(
     padding: f64,
     max_input_bytes: f64,
     streaming: bool,
+    ignore_chunk_sizes: bool,
 ) -> Result<Options, JsError> {
     if tag_keys.len() != tag_values.len() {
         return Err(invalid(format!(
@@ -104,6 +105,7 @@ fn options(
         } else {
             OutputMode::Buffered
         },
+        ignore_chunk_sizes,
     })
 }
 
@@ -139,6 +141,7 @@ impl WasmEncoder {
         padding: f64,
         max_input_bytes: f64,
         streaming: bool,
+        ignore_chunk_sizes: bool,
         pcm_format: f64,
         pcm_channels: f64,
         pcm_rate: f64,
@@ -159,6 +162,7 @@ impl WasmEncoder {
             padding,
             max_input_bytes,
             streaming,
+            ignore_chunk_sizes,
         )?;
         let format = match int("pcm format code", pcm_format, 5)? {
             0 => None,
@@ -399,6 +403,7 @@ impl WasmChunkEncoder {
             seek_point_interval,
             padding,
             -1.0,
+            false,
             false,
         )?;
         let chunk = match unset_or("chunkSamples", chunk_frames)? {
