@@ -296,8 +296,6 @@ impl Output {
 pub struct WasmResampler {
     inner: StreamResampler,
     f32: bool,
-    /// Output rate / input rate.
-    ratio: f64,
 }
 
 #[wasm_bindgen]
@@ -323,18 +321,12 @@ impl WasmResampler {
             self::quality("quality", quality)?,
         )
         .map_err(|e| js_err(&e))?;
-        Ok(Self {
-            inner,
-            f32,
-            ratio: f64::from(to) / f64::from(from),
-        })
+        Ok(Self { inner, f32 })
     }
 
     /// Feeds samples; returns the output that is ready.
     pub fn push(&mut self, input: &[f32]) -> Result<JsValue, JsError> {
-        // The expected output, plus an eighth for what the filter held back.
-        let len = input.len() as f64 * self.ratio * 1.125;
-        let mut out = Output::new(self.f32, len as usize);
+        let mut out = Output::new(self.f32, 0);
         self.inner
             .push(input, |s| out.add(s))
             .map_err(|e| js_err(&e))?;
