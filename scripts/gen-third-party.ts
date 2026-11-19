@@ -6,6 +6,7 @@
 // needs no Rust toolchain; CI regenerates it and fails when it is out of date.
 // Usage: node scripts/gen-third-party.ts [output file]
 import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, relative } from 'node:path';
 import { STD_PARTS, noticeFiles, rustVersion, shippedCrates } from './crates.ts';
 
 const out = process.argv[2] ?? 'docs/third-party.md';
@@ -26,12 +27,24 @@ function spdxLinks(expr: string): string {
 const rows = shippedCrates().map((c) => {
   // The files whose texts THIRD_PARTY_LICENSES.txt reproduces.
   const texts = noticeFiles(c);
+  // A path dependency is vendored in this repo: link its files there.
+  const vendored = c.source === null;
+  const dir = relative(process.cwd(), dirname(c.manifest_path));
+  const base = `https://github.com/julianhille/wav2flac/blob/main/${dir}`;
   const license = [
     c.license === null ? 'see license text' : spdxLinks(c.license),
     // docs.rs serves every published crate's sources at the exact version.
-    ...texts.map((f) => `[${f}](https://docs.rs/crate/${c.name}/${c.version}/source/${f})`),
+    ...texts.map((f) =>
+      vendored
+        ? `[${f}](${base}/${f})`
+        : `[${f}](https://docs.rs/crate/${c.name}/${c.version}/source/${f})`,
+    ),
   ].join('<br>');
-  const source = c.repository === null ? '' : `[repository](${c.repository})`;
+  const source = vendored
+    ? `[vendored copy](${base}), modified (see its NOTICE); [upstream](${c.repository ?? ''})`
+    : c.repository === null
+      ? ''
+      : `[repository](${c.repository})`;
   return `| [${c.name}](https://crates.io/crates/${c.name}/${c.version}) | ${c.version} | ${license} | ${source} |`;
 });
 for (const p of STD_PARTS) {
