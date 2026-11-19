@@ -28,6 +28,9 @@ claxon = "0.4.3"
 proptest = "1"
 sha2 = "0.11"
 
+[patch.crates-io]
+libflac-rs = { path = "vendor/libflac-rs" }
+
 [profile.release]
 opt-level = 3
 lto = true

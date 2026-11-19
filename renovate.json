@@ -1,7 +1,13 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "schedule:weekly", "group:allNonMajor"],
+  "ignorePaths": ["vendor/**"],
   "packageRules": [
+    {
+      "description": "vendored in vendor/libflac-rs; update by hand",
+      "matchDepNames": ["libflac-rs"],
+      "enabled": false
+    },
     {
       "description": "The CLI pin and its SHA256 in scripts/ci-tools.sh must move with the crate.",
       "matchDepNames": ["wasm-bindgen"],

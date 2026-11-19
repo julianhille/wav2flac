@@ -15,6 +15,8 @@ export interface Package {
   license: string | null;
   license_file: string | null;
   repository: string | null;
+  /** null for a path dependency (vendored in this repo). */
+  source: string | null;
   manifest_path: string;
   targets: { kind: string[] }[];
 }
