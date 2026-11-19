@@ -22,7 +22,10 @@ const flac = await encode(wavBytes); // Uint8Array in, Uint8Array (a .flac file)
 
 - **Lossless WAV → FLAC.** 8/16/24/32-bit integer PCM, 1–8 channels, any
   sample rate up to 1 048 575 Hz. Decoding the FLAC gives back exactly the
-  same samples.
+  same samples. A WAV piped from ffmpeg, sox or arecord carries placeholder
+  sizes and is rejected with `UNSUPPORTED_FORMAT` (this includes a real data
+  chunk of about 2 GiB, 0x7ffff000 or 0x80000000 bytes). Set
+  `ignoreChunkSizes` to encode up to the end of the input instead.
 - **Raw PCM → FLAC.** Pass a `Float32Array` from Web Audio or an
   AudioWorklet, an `Int16Array`, one array per channel, or raw bytes. You
   don't need to build a WAV header.
@@ -261,6 +264,7 @@ generated from the TSDoc in the source.
 | `seekPointInterval` | `10` | seconds between seek points, `0` for none (buffered output only) |
 | `padding` | `8192` | bytes reserved for later tag edits |
 | `maxInputBytes` | unlimited | larger input fails with `LIMIT_EXCEEDED` |
+| `ignoreChunkSizes` | `false` | take the WAV audio to run to the end of the input, whatever the sizes say; for a WAV piped from ffmpeg, sox or arecord. Anything after the audio is encoded as audio |
 | `onProgress` | – | `({ bytesIn, samplesOut, fraction })`, called at most ~20×/s |
 | `signal` | – | an `AbortSignal`; aborting cancels the job and frees its memory |
 | `copy` | `false` | worker only: copy the input instead of transferring it |

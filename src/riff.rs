@@ -56,8 +56,11 @@ pub struct WavHeader {
     pub channel_mask: Option<u32>,
     /// Byte offset of the first sample byte in the input.
     pub data_offset: usize,
-    /// Length of the `data` chunk in bytes.
+    /// Length of the `data` chunk in bytes (0 when `data_unknown`).
     pub data_len: u32,
+    /// The sizes are ignored (`ignoreChunkSizes`): the audio runs to the end of
+    /// the input.
+    pub data_unknown: bool,
     /// Offset just past the RIFF chunk (8 + the RIFF size); `u64::MAX` for
     /// raw PCM.
     pub riff_end: u64,
@@ -141,6 +144,9 @@ pub struct HeaderParser {
     tags: Vec<(String, String)>,
     /// Bytes of tag text kept so far, see [`parse_list`].
     tag_bytes: usize,
+    /// Take the audio to run to the end of the input, whatever the RIFF and
+    /// data sizes say (`ignoreChunkSizes`).
+    ignore_sizes: bool,
 }
 
 impl HeaderParser {
@@ -148,6 +154,16 @@ impl HeaderParser {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a parser that ignores the RIFF and data sizes: the audio runs
+    /// to the end of the input.
+    #[must_use]
+    pub fn ignoring_sizes() -> Self {
+        Self {
+            ignore_sizes: true,
+            ..Self::default()
+        }
     }
 
     /// Continues parsing `buf`, which holds the input prefix seen so far.
@@ -179,7 +195,7 @@ impl HeaderParser {
 
     fn parse_inner(&mut self, buf: &[u8], eof: bool) -> Result<HeaderState> {
         if !self.riff_ok {
-            if let Some(state) = check_riff(buf, eof)? {
+            if let Some(state) = check_riff(buf, eof, self.ignore_sizes)? {
                 return Ok(state);
             }
             self.riff_ok = true;
@@ -203,16 +219,20 @@ impl HeaderParser {
                 let Some(info) = self.fmt.take() else {
                     return err(ErrorCode::InvalidWav, "data chunk before fmt chunk");
                 };
-                if len == u32::MAX {
+                if !self.ignore_sizes && is_pipe_data_size(len, info.container_bytes, info.channels)
+                {
                     return err(
                         ErrorCode::UnsupportedFormat,
-                        "streaming WAV header with unknown data length (0xFFFFFFFF) is not \
-                         supported",
+                        "streaming WAV header with unknown data length (0xFFFFFFFF or a \
+                         sox/arecord placeholder) is not supported; set ignoreChunkSizes to \
+                         encode up to the end of the input",
                     );
                 }
+                let unknown = self.ignore_sizes;
                 let tags = std::mem::take(&mut self.tags);
                 let riff_end = u64::from(le_u32(buf, 4)) + 8;
-                let header = finalize(&info, body, len, riff_end, tags)?;
+                let len = if unknown { 0 } else { len };
+                let header = finalize(&info, body, len, unknown, riff_end, tags)?;
                 return Ok(HeaderState::Done(header));
             }
             let len_usize = len as usize;
@@ -261,7 +281,7 @@ impl HeaderParser {
 /// Checks the 12-byte RIFF/WAVE preamble.
 ///
 /// Returns `Some(NeedMore)` while it is incomplete and `None` once it passed.
-fn check_riff(buf: &[u8], eof: bool) -> Result<Option<HeaderState>> {
+fn check_riff(buf: &[u8], eof: bool, ignore_sizes: bool) -> Result<Option<HeaderState>> {
     if buf.len() < 12 {
         // Reject obviously wrong magic early, even before 12 bytes arrived.
         let n = buf.len().min(4);
@@ -302,13 +322,27 @@ fn check_riff(buf: &[u8], eof: bool) -> Result<Option<HeaderState>> {
         return err(ErrorCode::InvalidWav, "RIFF file is not of form type WAVE");
     }
     let riff_size = le_u32(buf, 4);
-    if riff_size == 0 || riff_size == u32::MAX {
+    let placeholder =
+        riff_size == 0 || riff_size == u32::MAX || matches!(riff_size, 0x7fff_f024 | 0x8000_0024);
+    if placeholder && !ignore_sizes {
         return err(
             ErrorCode::UnsupportedFormat,
-            "streaming WAV header with unknown length (RIFF size 0 or 0xFFFFFFFF) is not supported",
+            "streaming WAV header with unknown length (RIFF size 0, 0xFFFFFFFF or a \
+             sox/arecord placeholder) is not supported; set ignoreChunkSizes to encode \
+             up to the end of the input",
         );
     }
     Ok(None)
+}
+
+/// Data sizes written by ffmpeg (0xFFFFFFFF), sox (0x7ffff000, rounded down to
+/// the block align) and arecord (0x80000000) when piping, where the sizes
+/// cannot be patched.
+fn is_pipe_data_size(len: u32, container_bytes: u16, channels: u16) -> bool {
+    let align = u32::from(container_bytes) * u32::from(channels);
+    len == u32::MAX
+        || len == 0x8000_0000
+        || (len <= 0x7fff_f000 && len > 0x7fff_f000 - align.max(1))
 }
 
 /// Parsed `fmt ` data, validated by hound.
@@ -490,6 +524,7 @@ fn finalize(
     f: &FmtInfo,
     data_offset: usize,
     data_len: u32,
+    data_unknown: bool,
     riff_end: u64,
     tags: Vec<(String, String)>,
 ) -> Result<WavHeader> {
@@ -503,6 +538,7 @@ fn finalize(
         channel_mask: f.channel_mask,
         data_offset,
         data_len,
+        data_unknown,
         riff_end,
         tags,
     };
