@@ -10,6 +10,13 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+
+- `ignoreChunkSizes` option (`ignore_chunk_sizes` in Rust): take the WAV
+  audio to run to the end of the input, whatever the RIFF and data sizes say,
+  like `flac --ignore-chunk-sizes`. For a WAV piped from ffmpeg, sox or
+  arecord. Without it these headers are still rejected. (#87)
+
 ### Changed
 
 - rubato 5.1.0 (was 5.0.1). Dev dependencies: Playwright 1.65.1, Prettier
@@ -35,6 +42,10 @@ links are collected at the bottom of this file.
 - A resampler push at a high upsampling ratio no longer keeps hundreds of
   MB: input is sliced by the ratio, and `WasmResampler.push` no longer
   reserves its output up front (#86).
+- A WAV piped from `sox` or `arecord`, whose sizes are placeholders, is
+  rejected with `UNSUPPORTED_FORMAT`, like a streaming header from ffmpeg. It
+  used to fail with a misleading `TRUNCATED` error, or probe with a huge
+  duration. The error names the new `ignoreChunkSizes` option. (#87)
 - `probe()` and the worker encoder's `probe()` no longer hand the header
   parser more than 64 MiB + 8 bytes of the input per attempt, the most it can
   need. A chunk header in the last few bytes before the 64 MiB mark made them

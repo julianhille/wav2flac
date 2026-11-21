@@ -327,6 +327,7 @@ describe('fuzz: options', () => {
     'seekPointInterval',
     'padding',
     'maxInputBytes',
+    'ignoreChunkSizes',
     'copy',
   ];
   const value = fc.oneof(

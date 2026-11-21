@@ -29,6 +29,7 @@ describe('normalizeOptions', () => {
       padding: 8192,
       maxInputBytes: -1,
       streaming: false,
+      ignoreChunkSizes: false,
       pcmFormat: 0,
       pcmChannels: 0,
       pcmRate: 0,
@@ -51,6 +52,7 @@ describe('normalizeOptions', () => {
         seekPointInterval: 2.5,
         padding: 0,
         maxInputBytes: 1000,
+        ignoreChunkSizes: true,
         signal: new AbortController().signal,
         onProgress: () => undefined,
         copy: true,
@@ -70,6 +72,7 @@ describe('normalizeOptions', () => {
       seekPointInterval: 2.5,
       padding: 0,
       maxInputBytes: 1000,
+      ignoreChunkSizes: true,
     });
     expect(normalizeOptions({ resampleQuality: 'fast', tags: false }, false)).toMatchObject({
       quality: 0,
@@ -110,6 +113,7 @@ describe('normalizeOptions', () => {
     ['array tags', { tags: ['a'] }],
     ['null tags', { tags: null }],
     ['non-string tag', { tags: { A: 1 } }],
+    ['non-boolean ignoreChunkSizes', { ignoreChunkSizes: 1 }],
     ['negative seek interval', { seekPointInterval: -1 }],
     ['NaN seek interval', { seekPointInterval: Number.NaN }],
     ['bad signal', { signal: {} }],
