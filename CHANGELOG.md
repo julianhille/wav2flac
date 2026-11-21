@@ -32,6 +32,9 @@ links are collected at the bottom of this file.
 
 ### Fixed
 
+- A resampler push at a high upsampling ratio no longer keeps hundreds of
+  MB: input is sliced by the ratio, and `WasmResampler.push` no longer
+  reserves its output up front (#86).
 - `probe()` and the worker encoder's `probe()` no longer hand the header
   parser more than 64 MiB + 8 bytes of the input per attempt, the most it can
   need. A chunk header in the last few bytes before the 64 MiB mark made them

@@ -17,7 +17,7 @@ use crate::options::{
 };
 use crate::pcm::{PcmFormat, PcmSpec};
 use crate::transcode::requantize::Requantizer;
-use crate::transcode::resample::Resample;
+use crate::transcode::resample::{Resample, CHUNK_FRAMES};
 use crate::transcode::sanitize;
 
 /// Most channels FLAC can store.
@@ -78,6 +78,8 @@ pub struct StreamResampler {
     /// `None` when the rates are equal: samples pass through.
     inner: Option<Resample>,
     channels: usize,
+    /// Input samples per slice, so that one slice's output stays bounded.
+    slice: usize,
     /// Samples of an incomplete frame carried to the next push.
     partial: Vec<f64>,
     scratch: Vec<f64>,
@@ -116,6 +118,8 @@ impl StreamResampler {
         Ok(Self {
             inner,
             channels: usize::from(channels),
+            slice: (PUSH_SLICE / output_rate.div_ceil(input_rate) as usize)
+                .max(CHUNK_FRAMES * usize::from(channels)),
             partial: Vec::new(),
             scratch: Vec::new(),
             out: Vec::new(),
@@ -152,7 +156,7 @@ impl StreamResampler {
     /// `EncoderState` after [`StreamResampler::flush`] or an earlier error.
     pub fn push(&mut self, input: &[f32], mut out: impl FnMut(&[f64])) -> Result<()> {
         self.check_open()?;
-        for piece in input.chunks(PUSH_SLICE) {
+        for piece in input.chunks(self.slice) {
             let r = self.push_piece(piece);
             self.track(r)?;
             out(&self.out);
@@ -445,9 +449,9 @@ mod tests {
         })
         .unwrap();
         assert!(total > 256 * PUSH_SLICE, "{total}");
-        assert!(largest <= 257 * PUSH_SLICE, "{largest}");
+        assert!(largest <= 8 * PUSH_SLICE, "{largest}");
         assert!(r.scratch.capacity() <= 2 * PUSH_SLICE);
-        assert!(r.out.capacity() <= 2 * 257 * PUSH_SLICE);
+        assert!(r.out.capacity() <= 16 * PUSH_SLICE, "{}", r.out.capacity());
         let opts = Options {
             sample_rate: Some(16000),
             bits_per_sample: Some(16),
@@ -458,5 +462,22 @@ mod tests {
         c.push(&input).unwrap();
         assert!(c.resampler.out.capacity() <= PUSH_SLICE);
         assert!(c.resampler.scratch.capacity() <= 2 * PUSH_SLICE);
+    }
+
+    #[test]
+    fn a_high_ratio_push_bounds_buffer_capacity() {
+        // 1 -> 256 Hz: a PUSH_SLICE of input would be ~16.7M output samples.
+        let input = vec![0.25f32; PUSH_SLICE];
+        let mut r = StreamResampler::new(1, 256, 1, ResampleQuality::Fast).unwrap();
+        let (mut total, mut largest) = (0, 0);
+        r.push(&input, |s| {
+            total += s.len();
+            largest = largest.max(s.len());
+        })
+        .unwrap();
+        assert!(total > 200 * PUSH_SLICE, "{total}");
+        assert!(largest <= 8 * PUSH_SLICE, "{largest}");
+        assert!(r.out.capacity() <= 16 * PUSH_SLICE, "{}", r.out.capacity());
+        assert!(r.scratch.capacity() <= 2 * PUSH_SLICE);
     }
 }

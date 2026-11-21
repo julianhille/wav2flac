@@ -15,7 +15,7 @@ use rubato::{
 };
 
 /// Input frames per internal processing chunk.
-const CHUNK_FRAMES: usize = 1024;
+pub(crate) const CHUNK_FRAMES: usize = 1024;
 
 /// Largest supported upsampling factor. Larger ratios make rubato's sinc
 /// tables and per-chunk output grow without bound (a 1 Hz header resampled
