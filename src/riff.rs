@@ -933,6 +933,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "over 120 s under Miri")]
     fn trailing_scanner_skips_big_chunks_in_any_split() {
         let mut tail = vec![0]; // pad of an odd data chunk
         tail.extend(chunk(*b"JUNK", &vec![7; 3 * 1024 * 1024 + 1]));
@@ -968,6 +969,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "over 120 s under Miri")]
     fn trailing_scanner_stops_once_tags_are_full() {
         let mut list = b"INFO".to_vec();
         for _ in 0..MAX_TAGS {
