@@ -105,6 +105,7 @@ export class Session {
         a.padding,
         a.maxInputBytes,
         a.streaming,
+        a.ignoreChunkSizes,
         a.pcmFormat,
         a.pcmChannels,
         a.pcmRate,

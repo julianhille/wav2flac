@@ -54,6 +54,7 @@ impl FuzzOptions {
             seek_point_interval: f64::from(self.seek_point_interval) / 16.0,
             padding: u32::from(self.padding),
             max_input_bytes: self.max_input_bytes.map(u64::from),
+            ignore_chunk_sizes: false,
             mode: if self.streaming {
                 OutputMode::Streaming
             } else {

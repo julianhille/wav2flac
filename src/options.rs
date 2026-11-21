@@ -113,6 +113,10 @@ pub struct Options {
     pub max_input_bytes: Option<u64>,
     /// Header placement.
     pub mode: OutputMode,
+    /// Take the audio to run to the end of the input, whatever the RIFF and
+    /// data sizes say. For WAV from a pipe (ffmpeg, sox, arecord), whose sizes
+    /// are placeholders. Anything after the audio is then encoded as audio.
+    pub ignore_chunk_sizes: bool,
 }
 
 impl Default for Options {
@@ -130,6 +134,7 @@ impl Default for Options {
             padding: DEFAULT_PADDING,
             max_input_bytes: None,
             mode: OutputMode::default(),
+            ignore_chunk_sizes: false,
         }
     }
 }

@@ -182,6 +182,7 @@ impl PcmSpec {
             channel_mask: None,
             data_offset: 0,
             data_len,
+            data_unknown: false,
             riff_end: u64::MAX,
             tags: Vec::new(),
         }
