@@ -10,6 +10,8 @@ links are collected at the bottom of this file.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-21
+
 ### Added
 
 - `ignoreChunkSizes` option (`ignore_chunk_sizes` in Rust): take the WAV
@@ -535,7 +537,8 @@ links are collected at the bottom of this file.
 - Documentation site on Read the Docs (MkDocs): the README plus the raw PCM
   and benchmark guides, at <https://wav2flac.readthedocs.io/>.
 
-[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/julianhille/wav2flac/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/julianhille/wav2flac/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/julianhille/wav2flac/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/julianhille/wav2flac/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/julianhille/wav2flac/compare/v1.0.0...v1.1.0
