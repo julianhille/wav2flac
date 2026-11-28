@@ -63,7 +63,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Check licenses and advisories
-        uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
+        uses: EmbarkStudios/cargo-deny-action@bb119f768ea239e765aeaef5769558d4f21213aa # v2.1.5
         with:
           command: check
 
